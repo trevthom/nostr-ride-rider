@@ -1,7 +1,9 @@
 // ════════════════════════════════════════════════════════════
 //  ACTIVE TRIP (before pickup) — What the rider sees after requesting:
-//    Searching     "Finding your driver…" while no one has offered
-//    ChooseDriver  drivers who accepted, fastest first
+//    Searching     "Finding your driver…" while no one has replied; the rider
+//                  can raise the offer
+//    ChooseDriver  drivers who accepted the offer or countered it (preferred
+//                  gender first if the rider asked, then fastest)
 //    PayDeposit    the chosen driver's deposit (Lightning), then confirm
 //  Once a driver is confirmed the ride is in_progress → OnTrip.jsx.
 //  Which one shows is decided from the signed events, not app memory.
@@ -13,14 +15,19 @@ import { useRider } from "../state/RiderContext.jsx";
 import { getProfile } from "../../nostr/profiles.js";
 import { rideStatus } from "../../lib/rides.js";
 import { exactTrip } from "../../lib/privacy.js";
-import { offersForRide } from "../../lib/trips.js";
+import { offersForRide, offerGender, rankOffers } from "../../lib/trips.js";
+import { clampOffer, replyKind, usdToSats } from "../../lib/fare.js";
+import { FALLBACK_BTC_USD } from "../../config/settings.js";
+import { satsToUsd } from "../../ui/SatsAmount.jsx";
 import MapView from "../../ui/MapView.jsx";
-import Money from "../../ui/Money.jsx";
+import Money, { moneyText } from "../../ui/Money.jsx";
+import PriceStepper from "../../ui/PriceStepper.jsx";
 import Button from "../../ui/Button.jsx";
 import { MapPage, Sheet, FloatButton } from "../../ui/Layout.jsx";
 import { ConfirmDialog } from "../../ui/Parts.jsx";
 import PayDriver from "../../features/payments/PayDriver.jsx";
 import DriverInfo from "../components/DriverInfo.jsx";
+import GenderPref from "../components/GenderPref.jsx";
 import OnTrip from "./OnTrip.jsx";
 
 const parse = (e) => { try { return JSON.parse(e.content); } catch { return null; } };
@@ -28,7 +35,7 @@ export const whenText = (time) => (time === "ASAP" ? "Now" : new Date(time).toLo
 
 export default function ActiveTrip({ request }) {
   const { user, liveTick, isBlockedPk } = useApp();
-  const { cancelRide, focused, focusRide } = useRider();
+  const { cancelRide, focused, focusRide, genderPref } = useRider();
   const [picked, setPicked] = useState(null); // offer id being confirmed
   const [asking, setAsking] = useState(false);
   void liveTick;
@@ -39,7 +46,8 @@ export default function ActiveTrip({ request }) {
 
   if (status === "in_progress") return <OnTrip request={request} trip={trip} />;
 
-  const offers = offersForRide(request).filter((o) => !isBlockedPk(o.pubkey)); // never show a blocked driver
+  // Never show a blocked driver. The rider's gender preference only changes the order.
+  const offers = rankOffers(offersForRide(request).filter((o) => !isBlockedPk(o.pubkey)), genderPref);
   const chosen = offers.find((o) => o.id === picked);
   const back = focused ? <FloatButton icon="chevron-left" label="Back to home" onClick={() => focusRide(null)} /> : null;
   const cancelDialog = (
@@ -91,8 +99,14 @@ function TripLines({ trip }) {
 }
 
 function Searching({ request, trip, onCancel, top }) {
-  const { drivers, sendFailed } = useRider();
+  const { drivers, sendFailed, raiseOffer } = useRider();
+  const { btcUsd } = useApp();
   const content = parse(request) || {};
+  const [editing, setEditing] = useState(false);
+  const rate = btcUsd || FALLBACK_BTC_USD;
+  const offerNow = content.fareSats > 0 ? Math.max(1, Math.round(satsToUsd(content.fareSats, rate))) : 0;
+  const suggestedUsd = content.suggestedSats > 0 ? Math.max(1, Math.round(satsToUsd(content.suggestedSats, rate))) : offerNow;
+  const [draft, setDraft] = useState(offerNow);
   const [now, setNow] = useState(Date.now());
   useEffect(() => { const id = setInterval(() => setNow(Date.now()), 5000); return () => clearInterval(id); }, []);
   const waited = Math.max(0, Math.floor((now - request.created_at * 1000) / 1000));
@@ -122,11 +136,34 @@ function Searching({ request, trip, onCancel, top }) {
           <TripLines trip={trip} />
           {content.fareSats > 0 && (
             <div className="flex items-center justify-between mt-3 text-[15px]">
-              <span className="text-neutral-600">Fare</span>
+              <span className="text-neutral-600">Your offer</span>
               <Money sats={content.fareSats} className="font-bold" />
             </div>
           )}
         </div>
+        {content.fareSats > 0 && !scheduled && (
+          editing ? (
+            <div className="mt-3 rounded-2xl bg-neutral-100 px-4 py-3">
+              <PriceStepper usd={draft} suggestedUsd={suggestedUsd} onChange={setDraft} label="New offer in dollars" />
+              <div className="flex gap-2 mt-3">
+                <Button variant="outline" size="md" onClick={() => { setEditing(false); setDraft(offerNow); }}>Keep ${offerNow}</Button>
+                <Button
+                  size="md"
+                  disabled={draft === offerNow}
+                  onClick={() => { raiseOffer(request, usdToSats(clampOffer(draft, suggestedUsd), rate)); setEditing(false); }}
+                >
+                  Update offer
+                </Button>
+              </div>
+            </div>
+          ) : (
+            waited > 30 && (
+              <button type="button" onClick={() => { setDraft(Math.min(offerNow + 2, offerNow * 3)); setEditing(true); }} className="mt-3 text-sm font-semibold underline">
+                No replies yet? Change your offer
+              </button>
+            )
+          )
+        )}
         <Button variant="secondary" className="mt-4" onClick={onCancel}>Cancel request</Button>
       </Sheet>
     </MapPage>
@@ -134,17 +171,26 @@ function Searching({ request, trip, onCancel, top }) {
 }
 
 function ChooseDriver({ request, trip, offers, onPick, onCancel, top }) {
-  const { drivers } = useRider();
+  const { drivers, genderPref } = useRider();
+  const { btcUsd } = useApp();
   const content = parse(request) || {};
+  const etas = offers.map((o) => parse(o).etaMinutes || 0);
+  const prices = offers.map((o) => parse(o).priceSats);
+  const fastest = offers.length > 1 ? Math.min(...etas) : null;
+  const cheapest = offers.length > 1 && new Set(prices).size > 1 ? Math.min(...prices) : null;
   return (
     <MapPage map={<MapView pickup={trip.pickup} cars={drivers} fitKey={request.id} padBottom={420} />} top={top}>
       <Sheet label="Choose your driver">
         <h2 className="text-2xl font-bold">{offers.length === 1 ? "A driver can take you" : `${offers.length} drivers can take you`}</h2>
-        <p className="text-neutral-600 text-[15px] mt-0.5 mb-2">Pick one to continue. You pay only after you choose.</p>
+        <p className="text-neutral-600 text-[15px] mt-0.5 mb-2">
+          Your offer: <span className="font-semibold">{moneyText(content.fareSats, btcUsd)}</span>. Some drivers may ask for more. Pick one to continue. You pay only after you choose.
+        </p>
+        <GenderPref className="mb-2" />
         <ul className="divide-y divide-neutral-100">
           {offers.map((o, i) => {
             const c = parse(o);
-            const off = content.fareSats && c.priceSats !== content.fareSats;
+            const kind = replyKind(c.priceSats, content.fareSats);
+            const preferred = !!genderPref && offerGender(o) === genderPref;
             return (
               <li key={o.id} className="py-3">
                 <DriverInfo pubkey={o.pubkey} offerEvent={o} compact />
@@ -152,11 +198,19 @@ function ChooseDriver({ request, trip, offers, onPick, onCancel, top }) {
                   <div className="flex-1">
                     <p className="text-sm font-semibold">
                       {c.etaMinutes} min away
-                      {i === 0 && offers.length > 1 && <span className="ml-2 text-[11px] bg-black text-white rounded-full px-2 py-0.5 align-middle">Fastest</span>}
+                      {fastest != null && c.etaMinutes === fastest && <span className="ml-2 text-[11px] bg-black text-white rounded-full px-2 py-0.5 align-middle">Fastest</span>}
+                      {cheapest != null && c.priceSats === cheapest && <span className="ml-1.5 text-[11px] bg-[#e6f4ec] text-[#05683a] rounded-full px-2 py-0.5 align-middle">Lowest price</span>}
+                      {preferred && <span className="ml-1.5 text-[11px] bg-neutral-100 text-neutral-700 rounded-full px-2 py-0.5 align-middle">Your preference</span>}
                     </p>
-                    <p className={`text-sm ${off ? "text-amber-700" : "text-neutral-600"}`}>
+                    <p className="text-sm">
                       <Money sats={c.priceSats} className="font-semibold" />
-                      {off && content.fareSats ? " (you were quoted a different fare)" : ""}
+                    </p>
+                    <p className={`text-xs ${kind === "counter" ? "text-amber-700" : "text-[#05683a]"}`}>
+                      {kind === "counter"
+                        ? `Counter-offer: ${moneyText(c.priceSats - content.fareSats, btcUsd)} more than your offer`
+                        : kind === "lower"
+                        ? "Lower than your offer"
+                        : "Accepts your price"}
                     </p>
                   </div>
                   <Button size="sm" full={false} onClick={() => onPick(o)}>Choose</Button>

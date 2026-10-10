@@ -7,11 +7,11 @@
 import { useRef, useState, useCallback, useEffect } from "react";
 import { useApp } from "../../state/AppContext.jsx";
 import { relay } from "../../nostr/relay.js";
-import { EVENT_KINDS } from "../../nostr/eventKinds.js";
+import { EVENT_KINDS, APP_TAG } from "../../nostr/eventKinds.js";
 import { buildSignedEvent } from "../../nostr/events.js";
 import { getMetadata } from "../../nostr/profiles.js";
 import { shortNpub } from "../../nostr/keys.js";
-import { sealVehicle } from "../../lib/privacy.js";
+import { sealVehicle, sealLicense } from "../../lib/privacy.js";
 import { reputation } from "../../lib/rides.js";
 import { resizeImage } from "../../lib/image.js";
 import { useRelays, setRelays } from "../../config/relays.js";
@@ -48,6 +48,7 @@ export function useSaveProfile() {
             communication: next.comm || [],
             picture: next.picture || "",
             ...(next.lud16 !== undefined && { lud16: next.lud16 }),
+            ...(next.gender !== undefined && { gender: next.gender }),
             // Plate is sealed to ourselves; riders get it privately in offers.
             vehicle: sealVehicle(next.vehicle, next.sk, next.publicKey),
           },
@@ -58,6 +59,21 @@ export function useSaveProfile() {
       return next;
     },
     [setUser]
+  );
+}
+
+// Save (or remove, with "") the driver's license photo. It goes out as its own event,
+// encrypted to our own key, and is kept on the user object for this session.
+export function useSaveLicense() {
+  const { user, setUser } = useApp();
+  return useCallback(
+    (picture) => {
+      setUser((u) => ({ ...u, license: picture }));
+      relay.publish(
+        buildSignedEvent(EVENT_KINDS.DRIVER_LICENSE, sealLicense(picture, user.sk, user.publicKey), [["d", "license"], ["t", APP_TAG]], user.sk)
+      );
+    },
+    [user.sk, user.publicKey, setUser]
   );
 }
 

@@ -7,6 +7,7 @@
 //    activeRideFor(requests, me)   rider: my open or running request
 //    activeDriveFor(requests, me)  driver: the ride I am driving now
 //    offersForRide(request)        offers the rider can still pick (not stale)
+//    rankOffers(offers, pref)      put drivers of the rider's preferred gender first
 //    offerFrom(request, driver)    one driver's newest offer, however old
 //    pendingOfferFor(me)           driver: my offer still waiting on a rider
 //    acceptFor(request, driver)    the rider's RIDE_ACCEPT sent to this driver
@@ -16,6 +17,7 @@ import { relay } from "../nostr/relay.js";
 import { EVENT_KINDS } from "../nostr/eventKinds.js";
 import { latestVersions } from "../nostr/replaceable.js";
 import { isRideExpired, rideStatus, rideVersions } from "./rides.js";
+import { getProfile } from "../nostr/profiles.js";
 import { OFFER_TTL_SECONDS } from "../config/settings.js";
 
 const DAY = 86400000;
@@ -94,6 +96,22 @@ export function offersForRide(request) {
   return validOffers(request)
     .filter((o) => o.created_at >= oldest)
     .sort((a, b) => (parse(a).etaMinutes || 0) - (parse(b).etaMinutes || 0) || a.created_at - b.created_at);
+}
+
+// The gender a driver declared: in their offer, else in their profile. "" if none.
+// It is self-declared and optional, so it only orders the list; it never hides a driver.
+export function offerGender(offer) {
+  const g = parse(offer)?.gender;
+  if (g === "male" || g === "female") return g;
+  return getProfile(offer.pubkey)?.gender || "";
+}
+
+// Put drivers of the preferred gender ("male" | "female") first. Everyone else stays on the
+// list, in the same order. With no preference the list is returned unchanged.
+export function rankOffers(offers, pref) {
+  if (pref !== "male" && pref !== "female") return offers;
+  const rank = (o) => (offerGender(o) === pref ? 0 : 1);
+  return offers.map((o, i) => ({ o, i })).sort((a, b) => rank(a.o) - rank(b.o) || a.i - b.i).map((x) => x.o);
 }
 
 // One driver's newest offer on a ride, however old (the price and plate of

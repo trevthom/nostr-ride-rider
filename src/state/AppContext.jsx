@@ -18,9 +18,9 @@ import { buildSignedEvent } from "../nostr/events.js";
 import { latestVersions } from "../nostr/replaceable.js";
 import { emptyWalletState } from "../nostr/wallet.js";
 import { getProfile } from "../nostr/profiles.js";
-import { myVehicle } from "../lib/privacy.js";
+import { myVehicle, myLicense } from "../lib/privacy.js";
 import { forgetKey } from "../nostr/keystore.js";
-import { APP_NAME } from "../config/app.js";
+import { APP_NAME, IS_DRIVER_APP } from "../config/app.js";
 import { getSetting, setSetting, reconnectAll } from "../config/relays.js";
 import { addBlock, removeBlock, isBlocked } from "../lib/blocks.js";
 import { showSystemNotification } from "../lib/notify.js";
@@ -223,14 +223,16 @@ export function AppProvider({ initialView, children }) {
     if (!user?.publicKey) return;
     let alive = true;
     (async () => {
-      await relay.fetchProfile(user.publicKey);
+      await relay.fetchProfile(user.publicKey, { license: IS_DRIVER_APP });
       const p = getProfile(user.publicKey);
-      if (alive && p && (p.picture || p.vehicle || p.lud16)) {
+      if (alive && p && (p.picture || p.vehicle || p.lud16 || p.gender)) {
         setUser((u) => u && ({
           ...u,
           picture: u.picture || p.picture || "",
           lud16: u.lud16 || p.lud16 || "",
           vehicle: u.vehicle || myVehicle(u.publicKey, u.sk),
+          gender: u.gender ?? p.gender ?? "",
+          license: u.license || myLicense(u.publicKey, u.sk),
         }));
       }
     })();

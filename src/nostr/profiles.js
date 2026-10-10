@@ -39,6 +39,7 @@ export function getProfile(pubkey) {
       .map((c) => ({ platform: str(c.platform), handle: str(c.handle) })),
     picture: str(meta.picture),
     lud16: str(meta.lud16).trim(), // Lightning address: where riders pay this user
+    gender: meta.gender === "male" || meta.gender === "female" ? meta.gender : "", // optional, self-declared
     vehicle: v && {
       picture: str(v.picture),
       plateState: str(v.plateState),

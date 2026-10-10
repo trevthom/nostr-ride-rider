@@ -101,10 +101,13 @@ class NostrRelay {
 
   // Pull one user's profile (kind 0) from relays into the cache, so we
   // can show their display name (we don't sync the global kind-0 firehose).
-  async fetchProfile(pubkey) {
+  // { license: true } also pulls the user's own sealed license photo (only for
+  // the logged-in driver; nobody else needs it).
+  async fetchProfile(pubkey, { license = false } = {}) {
     if (!pubkey) return;
     try {
-      const events = await this.pool.querySync(getRelays(), { kinds: [EVENT_KINDS.METADATA], authors: [pubkey] });
+      const kinds = license ? [EVENT_KINDS.METADATA, EVENT_KINDS.DRIVER_LICENSE] : [EVENT_KINDS.METADATA];
+      const events = await this.pool.querySync(getRelays(), { kinds, authors: [pubkey] });
       events.forEach((e) => this._ingest(e)); // METADATA is exempt from the app-tag check
     } catch {
       /* ignore */

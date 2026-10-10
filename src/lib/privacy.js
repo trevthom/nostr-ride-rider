@@ -9,6 +9,8 @@
 //     to the chosen driver. exactTrip() reads whichever copy you may.
 //   • The driver's plate is sealed to their own key in their profile
 //     (vehicle.sealedPlate) and sent sealed to the rider in each offer.
+//   • The driver's license photo is sealed to their own key in its own event
+//     (kind 30092). It is never sent to a rider.
 // ════════════════════════════════════════════════════════════
 
 import { nip44 } from "nostr-tools";
@@ -94,4 +96,20 @@ export function offerPlate(offerEvent, user) {
   if (p?.plateNumber) return { plateState: str(p.plateState), plateNumber: str(p.plateNumber) };
   const v = offerEvent ? getProfile(offerEvent.pubkey)?.vehicle : null;
   return v?.plateNumber ? { plateState: v.plateState, plateNumber: v.plateNumber } : null;
+}
+
+// The event content for a license photo (a data URL), sealed to ourselves.
+// An empty photo makes an empty record, which replaces the old one.
+export function sealLicense(picture, sk, pubkey) {
+  return picture ? { sealed: seal(sk, pubkey, { picture }) } : {};
+}
+
+// Our own license photo (a data URL), or "" if there is none. Reads the newest record.
+export function myLicense(pubkey, sk) {
+  const newest = relay
+    .query({ kinds: [EVENT_KINDS.DRIVER_LICENSE], authors: [pubkey] })
+    .reduce((a, b) => (!a || b.created_at >= a.created_at ? b : a), null);
+  const c = newest && parse(newest);
+  const opened = c?.sealed ? unseal(sk, pubkey, c.sealed) : null;
+  return typeof opened?.picture === "string" && opened.picture.startsWith("data:image/") ? opened.picture : "";
 }

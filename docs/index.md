@@ -17,23 +17,27 @@ Payments go straight from rider to driver over **Lightning**.
 1. [Quick start](#quick-start)
 2. [The two apps](#the-two-apps)
 3. [How a ride works](#how-a-ride-works)
-4. [Architecture](#architecture)
-5. [Nostr events](#nostr-events)
-6. [Privacy](#privacy)
-7. [Payments](#payments)
-8. [Location and GPS](#location-and-gps)
-9. [Safety](#safety)
-10. [Blocking](#blocking)
-11. [Disputes and evidence](#disputes-and-evidence)
-12. [Reliability](#reliability)
-13. [Native app and background GPS](#native-app-and-background-gps)
-14. [Configuration](#configuration)
-15. [Testing](#testing)
-16. [Deploying](#deploying)
-17. [Self-hosting map services](#self-hosting-map-services)
-18. [Trying it on an iPhone](#trying-it-on-an-iphone-without-the-apple-developer-program)
-19. [Known limits and roadmap](#known-limits-and-roadmap)
-20. [Changelog](#changelog)
+4. [Price offers and counter-offers](#price-offers-and-counter-offers)
+5. [Driver gender preference (optional)](#driver-gender-preference-optional)
+6. [Driver requirements](#driver-requirements)
+7. [Architecture](#architecture)
+8. [Nostr events](#nostr-events)
+9. [Privacy](#privacy)
+10. [Payments](#payments)
+11. [Location and GPS](#location-and-gps)
+12. [Safety](#safety)
+13. [Blocking](#blocking)
+14. [Disputes and evidence](#disputes-and-evidence)
+15. [Reliability](#reliability)
+16. [Native app and background GPS](#native-app-and-background-gps)
+17. [Configuration](#configuration)
+18. [Testing](#testing)
+19. [Deploying](#deploying)
+20. [Separate repositories (generated)](#separate-repositories-generated)
+21. [Self-hosting map services](#self-hosting-map-services)
+22. [Trying it on an iPhone](#trying-it-on-an-iphone-without-the-apple-developer-program)
+23. [Known limits and roadmap](#known-limits-and-roadmap)
+24. [Changelog](#changelog)
 
 ## Quick start
 ```bash
@@ -49,10 +53,10 @@ Needs internet for Tailwind (CDN), fonts, the map, and the relays. Location need
 | | Rider app (repo nostr-ride-rider) | Driver app (repo nostr-ride-driver) |
 |---|---|---|
 | Tabs | Ride · Activity · Account | Drive · Earnings · Account |
-| Home | "Where to?" → fare → request | GO button → request cards |
+| Home | "Where to?" → your price offer → request | GO button → request cards (accept or counter) |
 | During a trip | Live car, ETA, contact, cancel | Route, arrived / start / complete |
 | After a trip | Receipt, pay the rest, rate | Summary, rate the rider |
-| Needs | Nothing (a wallet is optional) | Photo, vehicle, plate, Lightning address |
+| Needs | Nothing (a wallet is optional) | Face photo, vehicle and vehicle photo, plate, driver's license photo, Lightning address |
 
 Both apps share one code base for Nostr, maps, payments, profiles and UI (`src/nostr`, `src/lib`,
 `src/ui`, `src/features`, `src/state`). The rider app must never import from `src/driver`, and the
@@ -60,9 +64,9 @@ reverse. The Vite *mode* picks the app (`vite --mode rider|driver`).
 
 ## How a ride works
 1. The driver taps **GO** (needs a good GPS fix). The app shares an approximate location.
-2. The rider enters a destination and sees a **fare**, then taps **Request**.
-3. Nearby drivers get a **request card** with a countdown. A driver taps **Accept** (an offer at the quoted fare).
-4. The rider **chooses a driver** and pays the **deposit** (default 20%). This starts the drive.
+2. The rider enters a destination. The pickup fills in from GPS. The app **suggests a price**; the rider sets an **offer** and taps **Request**.
+3. Nearby drivers get a **request card** with a countdown. A driver **accepts the offer** or **counters** with a higher price.
+4. The rider **chooses a driver** (any reply, at that driver's price) and pays the **deposit** (default 20% of that price). This starts the drive.
 5. The driver drives to the pickup. The rider sees the car move live (end-to-end encrypted).
 6. The driver taps **I've arrived**, **Start trip**, **Complete trip**.
 7. The rider pays the **rest of the fare** and both sides rate each other.
@@ -70,6 +74,31 @@ reverse. The Vite *mode* picks the app (`vite --mode rider|driver`).
 Cancels: the rider can cancel any time; the driver can cancel an accepted ride. A reservation more
 than 30 minutes ahead waits under *Activity → Upcoming*. Everything on screen is **derived from the
 signed events**, so a reload or a second device shows the same screen.
+
+## Price offers and counter-offers
+- The app **suggests** a price from the trip: `base + per mile + per minute` (`FARE_RATES` in `src/config/settings.js`). The
+  quote screen shows the numbers it used.
+- The rider **names the price** in whole dollars with − / + (or by typing). The offer stays between `MIN_OFFER_USD` and
+  `MAX_OFFER_FACTOR` times the suggestion, so a typo cannot cost real money. A note says if the offer is below, near or above the suggestion.
+- The request carries the offer as `fareSats` and the suggestion as `suggestedSats`.
+- A driver sees **Rider's offer** and taps **Accept**, or **Ask for a different price** and counters at least $1 higher. The reply
+  is a normal offer (kind 30079); its `priceSats` is the driver's price. The deposit is computed from that price.
+- The rider sees every reply: *Accepts your price* or *Counter-offer: $N more than your offer*, with **Fastest** and **Lowest price** tags.
+- A rider with no replies can **change the offer** while waiting. The request is published again (same d-tag, new price); earlier replies stay valid.
+- Reservations work the same way.
+
+## Driver gender preference (optional)
+- A driver can set **Female**, **Male** or **Not set** in *Account → Gender*. It is stored in the driver's kind-0 profile (`gender`)
+  and copied into each offer. It is self-declared.
+- A rider can choose **No preference**, **Female first** or **Male first** on the quote screen and on the driver list.
+  Matching drivers move to the top; every other driver still appears below. The choice stays on the rider's device and is never published.
+
+## Driver requirements
+To go online a driver needs: face photo, vehicle year/make/model, **vehicle photo**, plate state and number,
+**driver's license photo** and a Lightning address (`driveGaps` in `src/lib/profile.js`).
+The Account page and the checklist name each missing item (for example *Vehicle (year, model)*, *Vehicle photo*). After
+*Save vehicle info* the app lists everything that is still needed.
+The license photo is encrypted to the driver's own key and stored as its own event (kind 30092). Relays hold only ciphertext, and riders never see it.
 
 ## Architecture
 ```
@@ -89,8 +118,8 @@ More detail for contributors is in `CLAUDE.md` (the file map and every invariant
 | Kind | Name | Sent by | Purpose |
 |---|---|---|---|
 | 0 | Metadata | anyone | Name, photo, Lightning address, vehicle (plate sealed) |
-| 30078 | Ride request | rider | Coarse pickup/dropoff, fare, sealed exact trip |
-| 30079 | Ride offer | driver | "I'll take it": price, deposit, ETA, sealed plate |
+| 30078 | Ride request | rider | Coarse pickup/dropoff, the rider's offer (`fareSats`), the suggested price, sealed exact trip |
+| 30079 | Ride offer | driver | Accept or counter: price, deposit, ETA, optional gender, sealed plate |
 | 30080 | Ride accept | rider | Confirms a driver; exact trip sealed to the driver |
 | 30081 | Ride cancel | rider or assigned driver | Ends a ride |
 | 30082 | Rating | either party | Stars and review |
@@ -98,6 +127,7 @@ More detail for contributors is in `CLAUDE.md` (the file map and every invariant
 | 30085 | Ride stage | assigned driver | `arrived` / `riding` |
 | 30086 | Payment record | rider | Payment proof (invoice, preimage, LUD-21 URL) sealed to the driver |
 | 30087 | Rider confirmation | rider | `boarded`, `ended`, or `problem` (with a note) |
+| 30092 | Driver license | driver | License photo, encrypted to the driver's own key; never shown to riders |
 | 30091 | Trip share | throwaway key | Live trip state for a "Share my trip" link, encrypted with a key in the link |
 | 30090 | Presence | driver | Online, coarse location, short expiry |
 | 21100 | Ride location | driver | Exact location, encrypted to the rider, ephemeral |
@@ -108,6 +138,8 @@ Every event carries the app tag `["t","nostrride"]` because kind numbers like 30
 - Public relays see only an **approximate area** (about 1 km) for pickup and dropoff. The exact trip is
   encrypted (NIP-44) first to the rider, then to the chosen driver.
 - The **license plate** is sealed to the rider who receives the offer.
+- The **driver's license photo** is encrypted to the driver's own key (kind 30092). Relays store ciphertext; no rider sees it.
+- A rider's **gender preference** never leaves the device.
 - A driver who is online shares a location rounded to about 100 m. The exact position goes only to the matched rider.
 - Requests, fares, offers and notes are public on the relays you use.
 - Looking up an address from GPS sends the position (rounded to about 10 m) to the Photon geocoder.
@@ -117,7 +149,7 @@ Payments are **peer to peer over Lightning, with no escrow**. The rider pays the
 address: the **deposit** when choosing a driver, the **rest** after the trip. The deposit is not
 refunded if the rider cancels after the driver is on the way. The app checks that an invoice is for
 the exact amount before paying. Riders can pay with a connected NWC wallet or scan an invoice with any wallet.
-Fares are quoted in dollars and converted to sats with the live BTC price (a fallback price is used,
+Prices are set in dollars and converted to sats with the live BTC price (a fallback price is used,
 with a warning, when the price feed is down).
 
 ## Location and GPS
@@ -168,7 +200,7 @@ A web page cannot read the location with the screen off. `native/` wraps the **d
 ## Configuration
 | What | Where |
 |---|---|
-| Fare formula, deposit %, timers, demo data | `src/config/settings.js` |
+| Suggested-price formula, offer limits, deposit %, timers, demo data | `src/config/settings.js` |
 | Relays | `src/config/relays.js` (also editable in the app) |
 | Map tiles, address search, routing | `.env` (see `env.example`); defaults in `src/config/services.js` |
 | Emergency number, arrival radius | `src/config/settings.js` |
@@ -176,7 +208,7 @@ A web page cannot read the location with the screen off. `native/` wraps the **d
 
 ## Testing
 `npm test` runs `test/*.test.mjs` with Node's built-in runner: trust rules, ride stages, fares, trips,
-earnings, privacy, history, Lightning invoices, geocoding, publishing and the outbox, event ordering, contact links, GPS, payment evidence, blocking, trip sharing, native location.
+earnings, privacy, history, Lightning invoices, geocoding, publishing and the outbox, event ordering, contact links, GPS, payment evidence, blocking, trip sharing, native location, price offers and counters, gender ordering, driver requirements, license privacy.
 The apps were also exercised end to end in a headless browser (a rider and a driver playing a full ride
 through a local relay). That harness is not in the repo.
 
@@ -240,6 +272,7 @@ To switch, copy `env.example` to `.env`, set `VITE_TILE_URL` (and `VITE_PHOTON_U
 - Free public map, geocoder and router services need replacing before launch.
 
 ## Changelog
+- **Offers, gender order, driver requirements** — the rider names the price (the app only suggests one) and drivers accept or counter; the rider can change the offer while waiting. Optional driver gender and a rider "show first" preference (order only). Pickup fills in from GPS; *Done* button after *Edit*. Driver setup names every missing item. Vehicle photo and driver's license photo are now required (license encrypted, kind 30092).
 - **Split repositories** — `scripts/export-apps.mjs` generates the rider and driver repositories from this one.
 - **Evidence, safety, blocking, reliability** — signed payment records and rider confirmations (kinds 30086, 30087); driver re-checks payments; copyable trip record. Safety sheet with car check, share-my-trip link and tracking page, SOS, report a problem, trusted contacts. Local blocking. Driver arrival suggestion. Outbox with retry, reconnect, connection banner, service worker and manifest. Native background-GPS shell (untested on device). Map services configurable through `.env`.
 - **Two apps** — rider and driver apps with an Uber/Lyft-style UI; new ride-stage event (30085); state is derived from events.

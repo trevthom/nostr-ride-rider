@@ -32,6 +32,10 @@ export const EVENT_KINDS = {
   // current set (more reliable cross-device than ephemeral events).
   PRESENCE: 30090, // public: a driver is online (approx location)
 
+  // The driver's license photo: addressable (d = "license"), encrypted to the driver's own key,
+  // so relays store only ciphertext. Never shown to anyone else.
+  DRIVER_LICENSE: 30092,
+
   // Trip sharing: addressable, signed by a throwaway key made for one trip; the payload is
   // encrypted with that key, which lives only in the share link's #fragment.
   TRIP_SHARE: 30091,

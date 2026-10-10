@@ -50,9 +50,9 @@ Each screen is wrapped in an `ErrorBoundary`.
 | Step | Rider app | Event (kind) | Driver app |
 |---|---|---|---|
 | 0 | sees cars nearby | PRESENCE 30090 (public, coarse) | **GO** online (needs GPS + `isDriveReady`) |
-| 1 | picks route, sees fare, taps **Request** | RIDE_REQUEST 30078 `status:requested`, `fareSats` | incoming card (45 s countdown) + price tags on map |
-| 2 | "Finding your driver…" | | **Accept** (or Decline) |
-| 3 | list of drivers (fastest first) | RIDE_OFFER 30079 (price = fare, deposit %, ETA, sealed plate; good 5 min) | "Waiting for rider…" |
+| 1 | picks route, sees the SUGGESTED price, sets an OFFER, taps **Request** | RIDE_REQUEST 30078 `status:requested`, `fareSats` (the offer), `suggestedSats` | incoming card (45 s countdown) + price tags on map |
+| 2 | "Finding your driver…" (can change the offer after 30 s) | RIDE_REQUEST again, same d-tag, new `fareSats` | **Accept** the offer, **counter** it (higher price), or Decline |
+| 3 | list of replies (preferred gender first if asked, then fastest) | RIDE_OFFER 30079 (`priceSats` = the offer or the counter, deposit %, ETA, `gender`, sealed plate; good 5 min) | "Waiting for rider…" |
 | 4 | **Choose** → pays the deposit (Lightning) | RIDE_ACCEPT 30080 (exact trip sealed to driver) + RIDE_REQUEST `in_progress`+`driverPubkey` | drive starts: route to pickup |
 | 5 | car moves live, "arriving in N min" | RIDE_LOCATION 21100 every 6 s (NIP-44 to rider) | **I've arrived** → RIDE_STAGE 30085 `arrived` |
 | 6 | "Your driver has arrived" | | **Start trip** → RIDE_STAGE `riding` |
@@ -88,10 +88,10 @@ src/
     demoData.js                   # dev-only fake riders/requests (driver app only)
   lib/
     rides.js      # trust rules: rideVersions/rideStatus/rideEnding/rideStage/rideDriver/rideKey/reputation
-    trips.js      # derive current state: activeRideFor, activeDriveFor, offersForRide, offerFrom, pendingOfferFor, acceptFor, upcomingRidesFor, isScheduledLater
-    fare.js       # quoteFare/fareUsd/usdToSats/depositSats/pickupEta (pure)
+    trips.js      # derive current state: activeRideFor, activeDriveFor, offersForRide, rankOffers/offerGender, offerFrom, pendingOfferFor, acceptFor, upcomingRidesFor, isScheduledLater
+    fare.js       # quoteFare/fareUsd/usdToSats/depositSats/pickupEta + offerLimits/stepOffer/clampOffer/offerLevel/replyKind (pure)
     earnings.js   # completedDrives, summarizeEarnings
-    privacy.js    # publicPlace, seal/unseal, exactTrip, sealVehicle/myVehicle/offerPlate
+    privacy.js    # publicPlace, seal/unseal, exactTrip, sealVehicle/myVehicle/offerPlate, sealLicense/myLicense
     contact.js    # contactHref (safe links from untrusted handles)
     evidence.js   # payment records (30086) + proofLevel + driver-side verifyPayment + disputeRecord; rideConfirm is in rides.js
     bolt11.js     # paymentHash / preimageMatches
@@ -100,23 +100,23 @@ src/
     nativeGeo.js  # background location via Capacitor (run-time lookup; web build has no dependency)
     notify.js     # service worker registration + system notifications
     gps.js (gpsStatus/gpsMessage: good|weak|stale) useGeolocation.js (pos, error, status) useWakeLock.js
-    geo.js geocode.js (search + reverseGeocode) routing.js (OSRM, cached) image.js lnurl.js locations.js profile.js (isDriveReady)
+    geo.js geocode.js (search + reverseGeocode) routing.js (OSRM, cached) image.js lnurl.js locations.js profile.js (driveGaps/gapsText/isDriveReady)
   state/AppContext.jsx            # shared state (above)
   ui/                             # shared UI kit
     Layout.jsx    # AppFrame, MapPage (+ measures the Sheet so the map pads for it), Sheet, FloatButton, Screen, TabBar
     MapView.jsx   # Leaflet + OpenStreetMap tiles; pins, OSRM route, cars, "me" dot, price pills, ref.fit()
     Button.jsx Icon.jsx Avatar.jsx Rating.jsx Money.jsx Parts.jsx (Row, Toggle, Field, ConfirmDialog, Modal, Spinner)
-    RatingForm.jsx ContactSheet.jsx UserModal.jsx NoticeBanner.jsx ErrorBoundary.jsx RelayEditor.jsx QRCode.jsx SatsAmount.jsx
+    PriceStepper.jsx (− $N + for offers/counters)  RatingForm.jsx ContactSheet.jsx UserModal.jsx NoticeBanner.jsx ErrorBoundary.jsx RelayEditor.jsx QRCode.jsx SatsAmount.jsx
   features/
     auth/        AuthScreen (role-aware copy) + AuthSteps (unlock, key backup)
     profile/     ProfileParts (useSaveProfile, AccountHeader, ContactMethods, RelaysSection, LogoutButton),
-                 VehicleSection, LightningAddressSection, WalletSection, KeysSection
+                 VehicleSection, LicenseSection, LightningAddressSection, WalletSection, KeysSection
     payments/    PayDriver (pay N sats to a Lightning address: NWC wallet, or invoice QR + LUD-21 watch)
   rider/
     App.jsx  state/RiderContext.jsx
     screens/ HomeScreen (dispatch) PlanTrip (idle/search/quote) ActiveTrip (searching/choose/pay deposit)
              OnTrip (enroute/arrived/riding) Receipt  ActivityScreen  AccountScreen
-    components/ PlaceSearch, DriverInfo (+ Plate, useDriverInfo)
+    components/ PlaceSearch, GenderPref, DriverInfo (+ Plate, useDriverInfo)
   driver/
     App.jsx  state/DriverContext.jsx
     screens/ HomeScreen (dispatch) Onboarding OnlineHome (offline GO / online / incoming card / waiting)
@@ -128,9 +128,9 @@ test/*.test.mjs
 ## Nostr event kinds (`src/nostr/eventKinds.js`)
 | Kind | Name | Key tags | Content (JSON) |
 |---|---|---|---|
-| 0 | METADATA | — | `{name, about, communication[], picture, lud16, vehicle}` (+ fields from other apps, kept on merge) |
-| 30078 | RIDE_REQUEST | `d`(id), `t`, `p`(driver, once confirmed) | `{pickup, dropoff, time, notes, status, fareSats, distanceMiles, durationMin, sealed}` — pickup/dropoff are COARSE; `sealed` = exact trip, NIP-44 to the rider. `fareSats` is the quoted fare (older requests lack it; the driver app estimates) |
-| 30079 | RIDE_OFFER | `e`(request), `p`(rider), `d`, `t` | `{priceSats, upfrontSats, etaMinutes, message, plate}` — the driver's "I'll take it" at the rider's fare; `plate` NIP-44 to the rider |
+| 0 | METADATA | — | `{name, about, communication[], picture, lud16, gender?, vehicle}` (+ fields from other apps, kept on merge) |
+| 30078 | RIDE_REQUEST | `d`(id), `t`, `p`(driver, once confirmed) | `{pickup, dropoff, time, notes, status, fareSats, suggestedSats, distanceMiles, durationMin, sealed}` — pickup/dropoff are COARSE; `sealed` = exact trip, NIP-44 to the rider. `fareSats` is the RIDER'S OFFER (older requests lack it; the driver app estimates); `suggestedSats` is what the app suggested |
+| 30079 | RIDE_OFFER | `e`(request), `p`(rider), `d`, `t` | `{priceSats, upfrontSats, etaMinutes, message, gender, plate}` — the driver's reply: the rider's offer (accept) or a higher price (counter); `gender` is optional and self-declared; `plate` NIP-44 to the rider |
 | 30080 | RIDE_ACCEPT | `e`(offer), `e`(request), `p`(driver), `d`, `t` | `{offerId, requestId, paidSats, verified, sealed}` — `sealed` = exact trip, NIP-44 to the driver |
 | 30081 | RIDE_CANCEL | `e`(request), `p`, `t` | `{requestId, reason}` |
 | 30082 | RATING | `p`(ratee), `e`(ride), `d`, `t` | `{rating, review, rideId}` |
@@ -139,6 +139,7 @@ test/*.test.mjs
 | 30085 | RIDE_STAGE | `e`(request), `p`(rider), `d`="stage-<rideKey>", `t` | `{stage: "arrived" \| "riding"}` — by the assigned driver |
 | 30086 | RIDE_PAYMENT | `e`(request), `p`(driver), `d`="pay-<rideKey>-<phase>", `t` | `{phase:"deposit"\|"rest", amountSats, level, sealed}` — by the rider; `sealed` = `{pr, preimage, verify}` NIP-44 to the driver |
 | 30087 | RIDE_CONFIRM | `e`(request), `p`(driver), `d`="confirm-<rideKey>-<phase>", `t` | `{phase:"boarded"\|"ended"\|"problem", ok, note}` — by the rider |
+| 30092 | DRIVER_LICENSE (addressable) | `d`="license", `t` | `{sealed}` or `{}` (removed) — the license photo (data URL) NIP-44 to the driver's OWN key; never sent to riders |
 | 30091 | TRIP_SHARE (addressable) | `d`="share", `t`, `expiration` | `{sealed}` — signed by a throwaway key; payload encrypted with that key (in the link #fragment) |
 | 30090 | PRESENCE (addressable) | `d`="presence", `t`, `expiration` | `{name, npub, vehicle, lat, lng, ts}` — public, coarsened location |
 | 21100 | RIDE_LOCATION (ephemeral) | `p`(rider), `expiration` | NIP-44 encrypted `{lat, lng, ts}` — exact, to rider only |
@@ -170,7 +171,7 @@ rider's `in_progress` version also carries `driverPubkey`. Stage is `enroute`
   trip sealed to the rider; RIDE_ACCEPT seals it to the chosen driver. Read trips with
   `exactTrip(request, user) || content`. The plate lives sealed in kind-0
   `vehicle.sealedPlate` (open with `myVehicle`) and is sealed to the rider in each offer
-  (`offerPlate`). Stage events carry no location. The public request does carry the trip's
+  (`offerPlate`). The driver's license photo is sealed to their own key in its own event (kind 30092, `myLicense`), never in kind 0 (size) and never to a rider. Stage events carry no location. The public request does carry the trip's
   distance/duration (needed for the fare). Reverse-geocoding the rider's GPS sends it (~10 m)
   to Photon. Old events with clear values still display.
 - **Untrusted text**: React escapes JSX. Never put relay text into HTML strings (Leaflet
@@ -211,11 +212,20 @@ rider's `in_progress` version also carries `driverPubkey`. Stage is `enroute`
   viewer. The share key is only ever in the URL fragment.
 - **Service worker** (`public/sw.js`, production only): caches the shell and hashed assets; never touches
   relays, tiles or APIs. It cannot receive push while the app is closed. Native shell (`native/`) skips it.
-- **Fare** (`lib/fare.js`): `FARE_RATES` in USD; sats via `btcUsd` (CoinGecko, refreshed every
-  5 min). If the price is unavailable `FALLBACK_BTC_USD` is used and the quote screen says so.
-  The driver app accepts at the quoted fare (no haggling); the driver sets only the deposit %.
-- **Drive gating**: `isDriveReady(user)` (lib/profile.js) = face photo + plate state/number +
-  year/make/model + Lightning address. Until then the Drive tab shows Onboarding and GO is unavailable.
+- **Price offers** (`lib/fare.js`): the app only SUGGESTS a price (`FARE_RATES` in USD; sats via `btcUsd`, CoinGecko every
+  5 min; `FALLBACK_BTC_USD` if unavailable, and the quote says so). The RIDER names the price in whole dollars
+  (`PriceStepper`; limits `MIN_OFFER_USD` .. `MAX_OFFER_FACTOR` × suggestion) and it is published as `fareSats`. A driver
+  accepts it or counters higher (`acceptRequest(request, priceSats)`); `replyKind(price, offer)` names the reply. The
+  deposit is a % of the driver's price; the chosen driver's offer (`offerFrom`) carries the price for the rest of the ride.
+  The rider can republish the request with a new `fareSats` (`raiseOffer`) while no driver is chosen.
+- **Gender preference**: drivers MAY set `gender` ("male" | "female") in kind 0 (copied into offers); anything else is ignored.
+  A rider's preference (`getSetting("genderPref")`, local only) only reorders the offers via `rankOffers`; never filter or hide a driver by it.
+- **Drive gating**: `isDriveReady(user)` = `driveGaps(user)` is empty (lib/profile.js): face photo + vehicle year/make/model +
+  vehicle photo + plate state/number + driver's license photo (`user.license`) + Lightning address. Gender is optional. Until then the
+  Drive tab shows Onboarding and GO is unavailable. Every message about what is missing comes from `driveGaps`/`gapsText`
+  so it names the exact items; keep it that way when adding a requirement.
+- **Pickup from GPS**: `PlaceSearch` fills the pickup from `here` on its own unless the rider typed or cleared it; it shows a
+  *Done* button when both places are set.
 - **Completion is driver-driven**; the rider can cancel. Both sides get an optional rating
   (under 5 stars needs a reason — `ui/RatingForm.jsx`). Ended rides come back as the
   receipt/summary screen for up to 6 h until dismissed (`riderDone` / `driverDone` in localStorage).

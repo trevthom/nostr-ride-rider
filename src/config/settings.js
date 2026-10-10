@@ -12,6 +12,14 @@ export const FARE_RATES = { base: 2.0, perMile: 1.1, perMinute: 0.25, minimum: 5
 // quoted in sats. The rider sees a "price estimate" note when it is in use.
 export const FALLBACK_BTC_USD = 100000;
 
+// The rider names the price. The suggested price above is only a starting point.
+// The offer moves in OFFER_STEP_USD steps, never below MIN_OFFER_USD, and never above
+// MAX_OFFER_FACTOR times the suggested price (this stops a typo from costing real money).
+// A driver can accept the offer or counter with a higher price.
+export const OFFER_STEP_USD = 1;
+export const MIN_OFFER_USD = 3;
+export const MAX_OFFER_FACTOR = 3;
+
 // Share of the fare a driver asks for up front (paid on confirm, non-refundable
 // if the rider cancels after the driver is on the way). Drivers can change it.
 export const DEFAULT_DEPOSIT_PERCENT = 20;

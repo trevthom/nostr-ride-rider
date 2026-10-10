@@ -3,11 +3,12 @@
 //  shared useApp() state:
 //    • the rider's GPS position and a name for it ("here")
 //    • online drivers nearby (public presence from the relays)
-//    • the trip being planned (pickup, dropoff, when, notes)
+//    • the trip being planned (pickup, dropoff, when, notes, the rider's price offer)
+//    • the optional driver-gender preference (sorting only, kept on this device)
 //    • the CURRENT ride, derived from signed events (so a reload or
 //      another device shows the same screen) and the receipt to show
 //      after a trip
-//    • actions: requestRide, confirmDriver, cancelRide, rateDriver
+//    • actions: requestRide, raiseOffer, confirmDriver, cancelRide, rateDriver
 //  Banners: offers arriving, driver arrived, trip done, driver cancelled.
 // ════════════════════════════════════════════════════════════
 
@@ -30,7 +31,7 @@ const RiderContext = createContext(null);
 export const useRider = () => useContext(RiderContext);
 
 const HOUR = 3600000;
-const EMPTY_PLAN = { step: "idle", pickup: null, dropoff: null, when: "ASAP", notes: "" };
+const EMPTY_PLAN = { step: "idle", pickup: null, dropoff: null, when: "ASAP", notes: "", offerUsd: null, offerKey: null };
 const parse = (e) => { try { return JSON.parse(e.content); } catch { return null; } };
 
 export function RiderProvider({ children }) {
@@ -66,6 +67,10 @@ export function RiderProvider({ children }) {
   const [plan, setPlanState] = useState(EMPTY_PLAN);
   const setPlan = useCallback((patch) => setPlanState((p) => ({ ...p, ...patch })), []);
   const resetPlan = useCallback(() => setPlanState(EMPTY_PLAN), []);
+
+  // ── Driver gender preference: orders the driver list, never hides anyone ──
+  const [genderPref, setGenderPrefState] = useState(() => getSetting("genderPref", ""));
+  const setGenderPref = useCallback((v) => { setGenderPrefState(v); setSetting("genderPref", v); }, []);
 
   // ── The current ride, from events ──
   void liveTick; // re-derive when relay events arrive
@@ -155,7 +160,7 @@ export function RiderProvider({ children }) {
   // Publish a ride request. Only an approximate area is public; the exact
   // trip is sealed to the rider (and to the driver after they are chosen).
   const requestRide = useCallback(
-    ({ pickup, dropoff, when, notes, miles, minutes, fareSats }) => {
+    ({ pickup, dropoff, when, notes, miles, minutes, fareSats, suggestedSats }) => {
       setSendFailed(false);
       const sent = publish(
         EVENT_KINDS.RIDE_REQUEST,
@@ -165,7 +170,8 @@ export function RiderProvider({ children }) {
           time: when,
           notes,
           status: "requested",
-          fareSats,
+          fareSats, // the rider's offer; drivers accept it or counter
+          suggestedSats, // what the app suggested (so a driver can see how far off the offer is)
           distanceMiles: Math.round(miles * 10) / 10,
           durationMin: minutes,
           sealed: seal(user.sk, me, { pickup, dropoff }),
@@ -182,6 +188,18 @@ export function RiderProvider({ children }) {
       }
     },
     [publish, refreshData, resetPlan, user.sk, me, pushNotice, setView]
+  );
+
+  // Change the offer on a request no driver has been chosen for. The request is
+  // published again (same d-tag) with the new price; offers already made stay valid.
+  const raiseOffer = useCallback(
+    (request, fareSats) => {
+      const latest = rideVersions(request)[0] || request;
+      if (rideStatus(latest) !== "requested") return;
+      publish(EVENT_KINDS.RIDE_REQUEST, { ...parse(latest), fareSats }, latest.tags);
+      refreshData();
+    },
+    [publish, refreshData]
   );
 
   // Keep a signed record of a payment (the proof is sealed to the driver, so only
@@ -300,7 +318,8 @@ export function RiderProvider({ children }) {
     plan, setPlan, resetPlan,
     share, startShare, stopShare, shareUpdate, shareUrl,
     activeRide, focused: !!focused, focusRide: (r) => setFocusId(r ? r.id : null), upcoming, receipt, dismissReceipt,
-    sendFailed, requestRide, confirmDriver, recordPayment, confirmRide, cancelRide, rateDriver, recentPlaces,
+    genderPref, setGenderPref,
+    sendFailed, requestRide, raiseOffer, confirmDriver, recordPayment, confirmRide, cancelRide, rateDriver, recentPlaces,
     nearestDriverEta: (to) => {
       if (!to || !drivers.length) return null;
       const miles = Math.min(...drivers.map((d) => haversineDistance(to.lat, to.lng, d.lat, d.lng)));

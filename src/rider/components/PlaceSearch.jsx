@@ -1,9 +1,12 @@
 // ════════════════════════════════════════════════════════════
 //  PLACE SEARCH — The "Plan your ride" page: pickup and dropoff fields
 //  stacked like Uber, with live address results below (Photon /
-//  OpenStreetMap, lib/geocode.js). Suggests "Current location" for the
-//  pickup and recent places for the dropoff.
+//  OpenStreetMap, lib/geocode.js). The pickup is filled in from the rider's
+//  GPS on its own (as soon as the address is known) unless the rider has
+//  already typed or cleared it. Recent places are suggested for the dropoff.
 //  onChange(field, place) is called when a result is chosen.
+//  onDone() shows a "Done" button once both places are set, so a rider who
+//  tapped Edit by mistake can go straight back to the quote.
 // ════════════════════════════════════════════════════════════
 
 import { useEffect, useRef, useState } from "react";
@@ -11,7 +14,7 @@ import { searchAddress } from "../../lib/geocode.js";
 import Icon from "../../ui/Icon.jsx";
 import { Spinner } from "../../ui/Parts.jsx";
 
-export default function PlaceSearch({ pickup, dropoff, here, near, recents, onChange, onBack }) {
+export default function PlaceSearch({ pickup, dropoff, here, near, recents, onChange, onBack, onDone }) {
   const [focus, setFocus] = useState(pickup ? "dropoff" : "pickup");
   const [text, setText] = useState({ pickup: pickup?.name || "", dropoff: dropoff?.name || "" });
   const [results, setResults] = useState([]);
@@ -22,9 +25,20 @@ export default function PlaceSearch({ pickup, dropoff, here, near, recents, onCh
   const inputs = { pickup: useRef(null), dropoff: useRef(null) };
 
   useEffect(() => { inputs[focus].current?.focus(); }, [focus]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Fill the pickup from GPS once the address is known, if the rider has not touched that field.
+  const touched = useRef(!!pickup);
+  useEffect(() => {
+    if (touched.current || pickup || !here) return;
+    touched.current = true;
+    setText((t) => ({ ...t, pickup: here.name }));
+    onChange("pickup", here);
+    setFocus((f) => (f === "pickup" ? "dropoff" : f));
+  }, [here, pickup]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => clearTimeout(timer.current), []);
 
   const type = (field, q) => {
+    if (field === "pickup") touched.current = true; // the rider is in charge of this field now
     setText((t) => ({ ...t, [field]: q }));
     onChange(field, null); // typing invalidates the earlier pick
     setError("");
@@ -94,6 +108,14 @@ export default function PlaceSearch({ pickup, dropoff, here, near, recents, onCh
           ))}
         </div>
       </div>
+
+      {pickup && dropoff && onDone && (
+        <div className="px-5 mt-4">
+          <button type="button" onClick={onDone} className="w-full py-3.5 rounded-xl bg-black text-white font-semibold active:bg-neutral-700">
+            Done
+          </button>
+        </div>
+      )}
 
       <ul className="mt-3 px-2">
         {error && <li className="px-3 py-3 text-sm text-red-600">{error}</li>}

@@ -17,7 +17,7 @@ import { relay } from "../../nostr/relay.js";
 import { EVENT_KINDS } from "../../nostr/eventKinds.js";
 import { getMetadata, getProfile } from "../../nostr/profiles.js";
 import { getSavedKey, saveKey, unlockKey, MIN_PASSWORD } from "../../nostr/keystore.js";
-import { myVehicle } from "../../lib/privacy.js";
+import { myVehicle, myLicense } from "../../lib/privacy.js";
 import { useRelays, setRelays } from "../../config/relays.js";
 import { IS_DRIVER_APP, APP_NAME } from "../../config/app.js";
 import Button from "../../ui/Button.jsx";
@@ -75,7 +75,7 @@ export default function AuthScreen({ onLogin }) {
   // typed a new name (merged into the old profile).
   const enterExisting = async (keys, { save } = {}) => {
     setBusy(true);
-    await relay.fetchProfile(keys.publicKey);
+    await relay.fetchProfile(keys.publicKey, { license: IS_DRIVER_APP });
     setBusy(false);
     const existing = getMetadata(keys.publicKey);
     const typed = name.trim();
@@ -88,7 +88,7 @@ export default function AuthScreen({ onLogin }) {
       relay.publish(buildSignedEvent(EVENT_KINDS.METADATA, { ...existing, name: typed }, [], keys.sk));
     }
     enter(
-      { ...keys, name: typed || p.name || DEFAULT_NAME, comm: p.comm, picture: p.picture, lud16: p.lud16, vehicle: myVehicle(keys.publicKey, keys.sk) },
+      { ...keys, name: typed || p.name || DEFAULT_NAME, comm: p.comm, picture: p.picture, lud16: p.lud16, gender: p.gender, vehicle: myVehicle(keys.publicKey, keys.sk), license: myLicense(keys.publicKey, keys.sk) },
       { save }
     );
   };
