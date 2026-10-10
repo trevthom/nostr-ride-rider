@@ -1,0 +1,59 @@
+/* ── Global styles ──
+   Tailwind's utility classes load from a CDN script in the app's index.html,
+   so they are NOT imported here. This file holds only our own styles: the
+   font, page basics, and a few small animations. */
+
+*, *::before, *::after {
+  font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html, body, #root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: #f3f3f3;
+  color: #000;
+  overscroll-behavior: none;
+}
+
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; }
+
+/* Visible keyboard focus everywhere. */
+:focus-visible { outline: 2px solid #276ef1; outline-offset: 2px; }
+
+/* The map: neutral background while tiles load, and no Leaflet chrome that
+   fights the app's own controls. */
+.leaflet-container { background: #ebebeb; font-family: inherit; }
+.leaflet-control-attribution { font-size: 9px !important; opacity: 0.8; margin-bottom: 0 !important; }
+.nr-pin { background: transparent; border: none; }
+
+/* Small animations (spinner, pulse, sheet slide-in, searching radar). */
+@keyframes spin { to { transform: rotate(360deg); } }
+.animate-spin { animation: spin 1s linear infinite; }
+
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+.animate-pulse { animation: pulse 2s ease-in-out infinite; }
+
+@keyframes nr-slide-up { from { transform: translateY(24px); opacity: 0; } to { transform: none; opacity: 1; } }
+.nr-slide-up { animation: nr-slide-up 0.22s ease-out; }
+
+@keyframes nr-fade { from { opacity: 0; } to { opacity: 1; } }
+.nr-fade { animation: nr-fade 0.18s ease-out; }
+
+/* Indeterminate progress bar ("Finding your driver"). */
+@keyframes nr-indeterminate { 0% { left: -40%; } 100% { left: 100%; } }
+.nr-bar { position: relative; height: 3px; background: #e5e5e5; overflow: hidden; border-radius: 2px; }
+.nr-bar::after { content: ""; position: absolute; top: 0; bottom: 0; width: 40%; background: #000; animation: nr-indeterminate 1.3s ease-in-out infinite; }
+
+/* Radar ring around the pickup while searching. */
+@keyframes nr-ring { 0% { transform: scale(0.4); opacity: 0.7; } 100% { transform: scale(2.4); opacity: 0; } }
+.nr-ring { position: absolute; inset: 0; border-radius: 9999px; background: rgba(0,0,0,0.18); animation: nr-ring 2s ease-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .nr-slide-up, .nr-fade, .nr-ring, .animate-pulse { animation: none; }
+  .nr-bar::after { animation: none; left: 0; width: 100%; opacity: 0.2; }
+}
