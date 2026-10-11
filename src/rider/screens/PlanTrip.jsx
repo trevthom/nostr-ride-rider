@@ -3,18 +3,21 @@
 //  kept in RiderContext.plan so switching tabs doesn't lose them:
 //    idle    map + "Where to?" bar + recent places
 //    search  pickup / dropoff fields with live address results
-//    quote   route on the map, the suggested price, the rider's own offer,
-//            Now/Later, notes → Request. Drivers accept the offer or counter.
+//    quote   route on the map, the typical fares of the drivers nearby (each
+//            driver sets their own rates), a suggested price, the rider's own
+//            offer (any amount, in dollars and cents or sats), Now/Later,
+//            notes → Request. Drivers accept the offer or counter.
 // ════════════════════════════════════════════════════════════
 
 import { useEffect, useRef, useState } from "react";
 import { useApp } from "../../state/AppContext.jsx";
 import { useRider } from "../state/RiderContext.jsx";
-import { clampOffer, offerLevel, quoteFare, usdToSats } from "../../lib/fare.js";
+import { median, normalizeRates, offerLevel, offerLimitsSats, quoteFare, satsFromUsd, typicalFareUsd } from "../../lib/fare.js";
 import { FALLBACK_BTC_USD, FARE_RATES } from "../../config/settings.js";
 import MapView from "../../ui/MapView.jsx";
 import Money, { moneyText } from "../../ui/Money.jsx";
-import PriceStepper from "../../ui/PriceStepper.jsx";
+import AmountInput from "../../ui/AmountInput.jsx";
+import { formatUsd } from "../../ui/SatsAmount.jsx";
 import Icon from "../../ui/Icon.jsx";
 import Button from "../../ui/Button.jsx";
 import { MapPage, Sheet, FloatButton } from "../../ui/Layout.jsx";
@@ -116,28 +119,38 @@ function Quote() {
   const key = `${pickup.lat},${pickup.lng}|${dropoff.lat},${dropoff.lng}`;
   useEffect(() => setRoute(null), [key]);
 
-  const quote = route ? quoteFare(route, btcUsd) : null;
-  // The rider names the price. The suggestion (from distance and time) is only the starting point.
-  const suggestedUsd = quote ? Math.max(1, Math.round(quote.usd)) : 0;
-  // An offer belongs to one route: a different pickup or dropoff starts from the suggestion again.
-  const offerUsd = quote ? clampOffer(plan.offerKey === key ? plan.offerUsd : suggestedUsd, suggestedUsd) : 0;
-  const offerSats = quote ? usdToSats(offerUsd, btcUsd || FALLBACK_BTC_USD) : 0;
-  const suggestedSats = quote ? usdToSats(suggestedUsd, btcUsd || FALLBACK_BTC_USD) : 0; // the suggestion in whole dollars, like the offer
-  const level = quote ? offerLevel(offerUsd, suggestedUsd) : "fair";
+  const rate = btcUsd || FALLBACK_BTC_USD;
+  // Use the trip as the request will publish it (miles to a tenth), so a driver's typical fare
+  // works out to the same cents on both screens.
+  const trip = route && { miles: Math.round(route.miles * 10) / 10, minutes: route.minutes };
+  const quote = trip ? quoteFare(trip, btcUsd) : null; // the app's own rates (the fallback)
+  // Every driver nearby sets their own typical fare. Show each, and suggest the middle one.
+  const typicals = trip
+    ? drivers
+        .map((d) => { const r = normalizeRates(d.rates); return { id: d.pubkey, name: d.name || "Driver", custom: !!r, usd: typicalFareUsd(r, trip.miles, trip.minutes) }; })
+        .sort((a, b) => a.usd - b.usd)
+    : [];
+  const suggestedUsd = quote ? Math.round((typicals.length ? median(typicals.map((t) => t.usd)) : quote.usd) * 100) / 100 : 0; // whole cents, so every screen shows the same amount
+  const suggestedSats = quote ? satsFromUsd(suggestedUsd, btcUsd) : 0;
+  // The rider names the price. An offer belongs to one route: a new pickup or dropoff starts from the suggestion again.
+  const limits = offerLimitsSats(suggestedSats, btcUsd);
+  const offerSats = quote ? (plan.offerKey === key ? plan.offerSats : suggestedSats) : 0; // null while the field is empty
+  const offerOk = Number.isFinite(offerSats) && offerSats >= limits.min && offerSats <= limits.max;
+  const level = quote && offerOk ? offerLevel(offerSats, suggestedSats) : "fair";
   const eta = nearestDriverEta(pickup);
   const timed = plan.when !== "ASAP";
   const localNow = (offsetMs = 0) =>
     new Date(Date.now() + offsetMs - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 
   const request = () => {
-    if (!quote) return;
+    if (!quote || !offerOk) return;
     if (timed) {
       const t = Date.parse(plan.when);
       if (isNaN(t)) return setError("Pick a valid date and time.");
       if (t > Date.now() + 7 * 86400000) return setError("Scheduled rides can be at most 1 week ahead.");
       if (t < Date.now() - 60000) return setError("Pick a time in the future.");
     }
-    requestRide({ pickup, dropoff, when: plan.when, notes: plan.notes.trim(), miles: route.miles, minutes: route.minutes, fareSats: offerSats, suggestedSats });
+    requestRide({ pickup, dropoff, when: plan.when, notes: plan.notes.trim(), miles: route.miles, minutes: route.minutes, fareSats: Math.round(offerSats), suggestedSats });
   };
 
   const arrive = new Date(Date.now() + ((eta || 5) + (route?.minutes || 0)) * 60000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
@@ -195,24 +208,49 @@ function Quote() {
           </div>
         </div>
 
-        {/* The rider's offer: drivers accept it or counter. */}
+        {/* The rider's offer: any amount. Drivers accept it or counter. */}
         {quote && (
           <div className="mt-3 rounded-2xl bg-neutral-100 px-4 pt-3 pb-3">
             <p className="text-center text-xs font-semibold uppercase tracking-wider text-neutral-500 mb-2">Your offer</p>
-            <PriceStepper usd={offerUsd} suggestedUsd={suggestedUsd} onChange={(v) => setPlan({ offerUsd: v, offerKey: key })} label="Your offer in dollars" />
-            <p className={`text-center text-sm mt-2 ${level === "low" ? "text-amber-700" : "text-neutral-700"}`} role="status">
-              {level === "low"
-                ? "Below the suggested price. Drivers may counter with a higher price."
-                : level === "high"
-                ? "Above the suggested price. Drivers are likely to accept fast."
-                : "Close to the suggested price. Drivers are likely to accept."}
-            </p>
+            <AmountInput
+              sats={offerSats}
+              rate={rate}
+              min={limits.min}
+              max={limits.max}
+              label="Your offer"
+              onChange={(v) => setPlan({ offerSats: v, offerKey: key })}
+            />
+            {offerOk && (
+              <p className={`text-center text-sm mt-2 ${level === "low" ? "text-amber-700" : "text-neutral-700"}`} role="status">
+                {level === "low"
+                  ? "Below the suggested price. Drivers may counter with a higher price."
+                  : level === "high"
+                  ? "Above the suggested price. Drivers are likely to accept fast."
+                  : "Close to the suggested price. Drivers are likely to accept."}
+              </p>
+            )}
             <p className="text-center text-xs text-neutral-500 mt-1">
-              Suggested ${suggestedUsd}: ${FARE_RATES.base.toFixed(2)} base + ${FARE_RATES.perMile.toFixed(2)}/mi + ${FARE_RATES.perMinute.toFixed(2)}/min, for this trip.
-              {offerUsd !== suggestedUsd && (
-                <> <button type="button" onClick={() => setPlan({ offerUsd: null, offerKey: null })} className="underline font-semibold">Use suggested</button></>
+              {typicals.length
+                ? `Suggested ${formatUsd(suggestedUsd)}: the middle of what ${typicals.length === 1 ? "the driver" : `${typicals.length} drivers`} nearby typically charge for this trip.`
+                : `Suggested ${formatUsd(suggestedUsd)}: $${FARE_RATES.base.toFixed(2)} base + $${FARE_RATES.perMile.toFixed(2)}/mi + $${FARE_RATES.perMinute.toFixed(2)}/min, for this trip.`}
+              {offerSats !== suggestedSats && (
+                <> <button type="button" onClick={() => setPlan({ offerSats: null, offerKey: null })} className="underline font-semibold">Use suggested</button></>
               )}
             </p>
+            {typicals.length > 0 && (
+              <div className="mt-3 pt-3 border-t border-neutral-200">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500 mb-1.5">Typical fares nearby</p>
+                <ul className="flex flex-wrap gap-1.5">
+                  {typicals.slice(0, 6).map((t) => (
+                    <li key={t.id} className="text-xs bg-white border border-neutral-200 rounded-full px-2.5 py-1">
+                      <span className="font-semibold">{t.name}</span> {formatUsd(t.usd)}
+                      {!t.custom && <span className="text-neutral-400"> · app rates</span>}
+                    </li>
+                  ))}
+                </ul>
+                <p className="text-[11px] text-neutral-500 mt-1.5">Each driver sets their own base, per-mile and per-minute rates.</p>
+              </div>
+            )}
           </div>
         )}
         {pickup.fromGps && gps !== "good" && (
@@ -273,8 +311,8 @@ function Quote() {
         </div>
 
         {error && <p className="text-red-600 text-sm mt-2">{error}</p>}
-        <Button className="mt-4" onClick={request} disabled={!quote}>
-          {quote ? <>Request ride · {moneyText(offerSats, btcUsd)}</> : "Finding route…"}
+        <Button className="mt-4" onClick={request} disabled={!quote || !offerOk}>
+          {!quote ? "Finding route…" : offerOk ? <>Request ride · {moneyText(offerSats, btcUsd)}</> : "Enter your offer"}
         </Button>
         <p className="text-neutral-500 text-xs text-center mt-2">
           Drivers can accept your price or counter it. You choose who to ride with, and drivers see only the approximate area until you do.

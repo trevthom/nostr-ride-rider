@@ -49,6 +49,7 @@ export function useSaveProfile() {
             picture: next.picture || "",
             ...(next.lud16 !== undefined && { lud16: next.lud16 }),
             ...(next.gender !== undefined && { gender: next.gender }),
+            ...(next.rates !== undefined && { rates: next.rates }), // null = back to the app's rates
             // Plate is sealed to ourselves; riders get it privately in offers.
             vehicle: sealVehicle(next.vehicle, next.sk, next.publicKey),
           },

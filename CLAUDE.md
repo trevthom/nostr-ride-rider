@@ -89,7 +89,7 @@ src/
   lib/
     rides.js      # trust rules: rideVersions/rideStatus/rideEnding/rideStage/rideDriver/rideKey/reputation
     trips.js      # derive current state: activeRideFor, activeDriveFor, offersForRide, rankOffers/offerGender, offerFrom, pendingOfferFor, acceptFor, upcomingRidesFor, isScheduledLater
-    fare.js       # quoteFare/fareUsd/usdToSats/depositSats/pickupEta + offerLimits/stepOffer/clampOffer/offerLevel/replyKind (pure)
+    fare.js       # quoteFare/fareUsd/usdToSats/depositSats/pickupEta + normalizeRates/typicalFareUsd/median/satsFromUsd/usdFromSats/offerLimitsSats/offerLevel/replyKind (pure)
     earnings.js   # completedDrives, summarizeEarnings
     privacy.js    # publicPlace, seal/unseal, exactTrip, sealVehicle/myVehicle/offerPlate, sealLicense/myLicense
     contact.js    # contactHref (safe links from untrusted handles)
@@ -106,11 +106,11 @@ src/
     Layout.jsx    # AppFrame, MapPage (+ measures the Sheet so the map pads for it), Sheet (collapsible with `peek`/openKey/closeKey), FloatButton, Screen, TabBar
     MapView.jsx   # Leaflet + OpenStreetMap tiles; pins, OSRM route, cars, "me" dot, price pills, ref.fit(); trip mode (`navigation` + `follow`)
     Button.jsx Icon.jsx Avatar.jsx Rating.jsx Money.jsx Parts.jsx (Row, Toggle, Field, ConfirmDialog, Modal, Spinner)
-    PriceStepper.jsx (− $N + for offers/counters)  RatingForm.jsx ContactSheet.jsx UserModal.jsx NoticeBanner.jsx ErrorBoundary.jsx RelayEditor.jsx QRCode.jsx SatsAmount.jsx
+    AmountInput.jsx ($ or sats, unit swap; offers and counters)  RatingForm.jsx ContactSheet.jsx UserModal.jsx NoticeBanner.jsx ErrorBoundary.jsx RelayEditor.jsx QRCode.jsx SatsAmount.jsx
   features/
     auth/        AuthScreen (role-aware copy) + AuthSteps (unlock, key backup)
     profile/     ProfileParts (useSaveProfile, AccountHeader, ContactMethods, RelaysSection, LogoutButton),
-                 VehicleSection, LicenseSection, LightningAddressSection, WalletSection, KeysSection
+                 VehicleSection, LicenseSection, TypicalFareSection, LightningAddressSection, WalletSection, KeysSection
     payments/    PayDriver (pay N sats to a Lightning address: NWC wallet, or invoice QR + LUD-21 watch)
   rider/
     App.jsx  state/RiderContext.jsx
@@ -128,9 +128,9 @@ test/*.test.mjs
 ## Nostr event kinds (`src/nostr/eventKinds.js`)
 | Kind | Name | Key tags | Content (JSON) |
 |---|---|---|---|
-| 0 | METADATA | — | `{name, about, communication[], picture, lud16, gender?, vehicle}` (+ fields from other apps, kept on merge) |
+| 0 | METADATA | — | `{name, about, communication[], picture, lud16, gender?, rates?, vehicle}` (+ fields from other apps, kept on merge) |
 | 30078 | RIDE_REQUEST | `d`(id), `t`, `p`(driver, once confirmed) | `{pickup, dropoff, time, notes, status, fareSats, suggestedSats, distanceMiles, durationMin, sealed}` — pickup/dropoff are COARSE; `sealed` = exact trip, NIP-44 to the rider. `fareSats` is the RIDER'S OFFER (older requests lack it; the driver app estimates); `suggestedSats` is what the app suggested |
-| 30079 | RIDE_OFFER | `e`(request), `p`(rider), `d`, `t` | `{priceSats, upfrontSats, etaMinutes, message, gender, plate}` — the driver's reply: the rider's offer (accept) or a higher price (counter); `gender` is optional and self-declared; `plate` NIP-44 to the rider |
+| 30079 | RIDE_OFFER | `e`(request), `p`(rider), `d`, `t` | `{priceSats, upfrontSats, etaMinutes, message, typicalSats, gender, plate}` — the driver's reply: the rider's offer (accept) or a higher price (counter); `gender` is optional and self-declared; `plate` NIP-44 to the rider |
 | 30080 | RIDE_ACCEPT | `e`(offer), `e`(request), `p`(driver), `d`, `t` | `{offerId, requestId, paidSats, verified, sealed}` — `sealed` = exact trip, NIP-44 to the driver |
 | 30081 | RIDE_CANCEL | `e`(request), `p`, `t` | `{requestId, reason}` |
 | 30082 | RATING | `p`(ratee), `e`(ride), `d`, `t` | `{rating, review, rideId}` |
@@ -141,7 +141,7 @@ test/*.test.mjs
 | 30087 | RIDE_CONFIRM | `e`(request), `p`(driver), `d`="confirm-<rideKey>-<phase>", `t` | `{phase:"boarded"\|"ended"\|"problem", ok, note}` — by the rider |
 | 30092 | DRIVER_LICENSE (addressable) | `d`="license", `t` | `{sealed}` or `{}` (removed) — the license photo (data URL) NIP-44 to the driver's OWN key; never sent to riders |
 | 30091 | TRIP_SHARE (addressable) | `d`="share", `t`, `expiration` | `{sealed}` — signed by a throwaway key; payload encrypted with that key (in the link #fragment) |
-| 30090 | PRESENCE (addressable) | `d`="presence", `t`, `expiration` | `{name, npub, vehicle, lat, lng, ts}` — public, coarsened location |
+| 30090 | PRESENCE (addressable) | `d`="presence", `t`, `expiration` | `{name, npub, vehicle, rates?, lat, lng, ts}` — public, coarsened location |
 | 21100 | RIDE_LOCATION (ephemeral) | `p`(rider), `expiration` | NIP-44 encrypted `{lat, lng, ts}` — exact, to rider only |
 
 `status` ∈ `requested | accepted | in_progress | completed | cancelled`. The
@@ -212,12 +212,17 @@ rider's `in_progress` version also carries `driverPubkey`. Stage is `enroute`
   viewer. The share key is only ever in the URL fragment.
 - **Service worker** (`public/sw.js`, production only): caches the shell and hashed assets; never touches
   relays, tiles or APIs. It cannot receive push while the app is closed. Native shell (`native/`) skips it.
-- **Price offers** (`lib/fare.js`): the app only SUGGESTS a price (`FARE_RATES` in USD; sats via `btcUsd`, CoinGecko every
-  5 min; `FALLBACK_BTC_USD` if unavailable, and the quote says so). The RIDER names the price in whole dollars
-  (`PriceStepper`; limits `MIN_OFFER_USD` .. `MAX_OFFER_FACTOR` × suggestion) and it is published as `fareSats`. A driver
-  accepts it or counters higher (`acceptRequest(request, priceSats)`); `replyKind(price, offer)` names the reply. The
-  deposit is a % of the driver's price; the chosen driver's offer (`offerFrom`) carries the price for the rest of the ride.
-  The rider can republish the request with a new `fareSats` (`raiseOffer`) while no driver is chosen.
+- **Price offers** (`lib/fare.js`): SATS are the source of truth. The RIDER names the price as ANY amount, typed in dollars and cents or in sats
+  (`ui/AmountInput`: unit swap button, the other unit shown below; dollars↔sats via `satsFromUsd`/`usdFromSats` at `btcUsd || FALLBACK_BTC_USD`;
+  limits from `offerLimitsSats`: `MIN_OFFER_USD` .. `MAX_OFFER_FACTOR` × suggestion; out of range → message and the action is disabled). It is
+  published as `fareSats`. A driver accepts it or counters higher (`acceptRequest(request, priceSats)`, same input); `replyKind(price, offer)` names
+  the reply. The deposit is a % of the driver's price; the chosen driver's offer (`offerFrom`) carries the price for the rest of the ride.
+  The rider can republish the request with a new `fareSats` (`raiseOffer`) while no driver is chosen. No $1 steps any more.
+- **Typical fares**: each driver may set `rates` {base, perMile, perMinute} (kind 0 and public presence; `normalizeRates` rejects junk; limits
+  `RATE_LIMITS`). `typicalFareUsd(rates, miles, minutes)` = base + per mile × miles + per minute × minutes, never below `FARE_RATES.minimum`; no rates → the
+  app's. The rider's quote lists nearby drivers' typical fares and suggests their MEDIAN (the app's formula if no driver is near); each offer carries
+  `typicalSats`. Use the trip as the request publishes it (miles to a tenth) on both sides or the cents differ. Round money to whole cents before
+  showing it (`toFixed` on half-cents disagrees with `Math.round`).
 - **Gender preference**: drivers MAY set `gender` ("male" | "female") in kind 0 (copied into offers); anything else is ignored.
   A rider's preference (`getSetting("genderPref")`, local only) only reorders the offers via `rankOffers`; never filter or hide a driver by it.
 - **Drive gating**: `isDriveReady(user)` = `driveGaps(user)` is empty (lib/profile.js): face photo + vehicle year/make/model +

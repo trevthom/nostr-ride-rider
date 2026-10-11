@@ -225,13 +225,14 @@ export function AppProvider({ initialView, children }) {
     (async () => {
       await relay.fetchProfile(user.publicKey, { license: IS_DRIVER_APP });
       const p = getProfile(user.publicKey);
-      if (alive && p && (p.picture || p.vehicle || p.lud16 || p.gender)) {
+      if (alive && p && (p.picture || p.vehicle || p.lud16 || p.gender || p.rates)) {
         setUser((u) => u && ({
           ...u,
           picture: u.picture || p.picture || "",
           lud16: u.lud16 || p.lud16 || "",
           vehicle: u.vehicle || myVehicle(u.publicKey, u.sk),
           gender: u.gender ?? p.gender ?? "",
+          rates: u.rates ?? p.rates ?? null,
           license: u.license || myLicense(u.publicKey, u.sk),
         }));
       }

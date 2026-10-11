@@ -18,27 +18,28 @@ Payments go straight from rider to driver over **Lightning**.
 2. [The two apps](#the-two-apps)
 3. [How a ride works](#how-a-ride-works)
 4. [During a trip (both apps)](#during-a-trip-both-apps)
-5. [Price offers and counter-offers](#price-offers-and-counter-offers)
-6. [Driver gender preference (optional)](#driver-gender-preference-optional)
-7. [Driver requirements](#driver-requirements)
-8. [Architecture](#architecture)
-9. [Nostr events](#nostr-events)
-10. [Privacy](#privacy)
-11. [Payments](#payments)
-12. [Location and GPS](#location-and-gps)
-13. [Safety](#safety)
-14. [Blocking](#blocking)
-15. [Disputes and evidence](#disputes-and-evidence)
-16. [Reliability](#reliability)
-17. [Native app and background GPS](#native-app-and-background-gps)
-18. [Configuration](#configuration)
-19. [Testing](#testing)
-20. [Deploying](#deploying)
-21. [Separate repositories (generated)](#separate-repositories-generated)
-22. [Self-hosting map services](#self-hosting-map-services)
-23. [Trying it on an iPhone](#trying-it-on-an-iphone-without-the-apple-developer-program)
-24. [Known limits and roadmap](#known-limits-and-roadmap)
-25. [Changelog](#changelog)
+5. [Typical fares (each driver sets their own)](#typical-fares-each-driver-sets-their-own)
+6. [Price offers and counter-offers](#price-offers-and-counter-offers)
+7. [Driver gender preference (optional)](#driver-gender-preference-optional)
+8. [Driver requirements](#driver-requirements)
+9. [Architecture](#architecture)
+10. [Nostr events](#nostr-events)
+11. [Privacy](#privacy)
+12. [Payments](#payments)
+13. [Location and GPS](#location-and-gps)
+14. [Safety](#safety)
+15. [Blocking](#blocking)
+16. [Disputes and evidence](#disputes-and-evidence)
+17. [Reliability](#reliability)
+18. [Native app and background GPS](#native-app-and-background-gps)
+19. [Configuration](#configuration)
+20. [Testing](#testing)
+21. [Deploying](#deploying)
+22. [Separate repositories (generated)](#separate-repositories-generated)
+23. [Self-hosting map services](#self-hosting-map-services)
+24. [Trying it on an iPhone](#trying-it-on-an-iphone-without-the-apple-developer-program)
+25. [Known limits and roadmap](#known-limits-and-roadmap)
+26. [Changelog](#changelog)
 
 ## Quick start
 ```bash
@@ -88,14 +89,27 @@ signed events**, so a reload or a second device shows the same screen.
 - **Compass button.** Tap it to switch between **north-up** and **heading-up** (the map turns so the car drives up the screen). The
   map turns only after the car moved about 12 m, so GPS noise does not spin it. Pins and price tags stay upright.
 
+## Typical fares (each driver sets their own)
+- In *Account → Your typical fare* a driver sets a **base fare**, a **price per mile** and a **price per minute**
+  (limits in `RATE_LIMITS`, `src/config/settings.js`). The typical fare for a trip is `base + per mile × miles + per minute × minutes`,
+  never below the app's minimum fare. A driver with no rates uses the app's rates (`FARE_RATES`).
+- The rates travel in the driver's profile (kind 0, `rates`) and in public presence while online. Junk values are ignored.
+- **The rider sees them.** On the quote screen, *Typical fares nearby* lists each nearby online driver with the fare for this trip
+  (drivers who did not set rates show "app rates"). The **suggested price** is the middle (median) of those fares; with no driver
+  nearby it comes from the app's own formula.
+- Each driver's reply (offer) carries their typical fare for the trip (`typicalSats`), and the rider sees it next to the driver's price.
+- The driver's request card shows *Your typical fare for this trip*, and warns when the rider's offer is below it.
+- Both screens use the trip as the request publishes it (miles to a tenth), so the cents match.
+
 ## Price offers and counter-offers
-- The app **suggests** a price from the trip: `base + per mile + per minute` (`FARE_RATES` in `src/config/settings.js`). The
-  quote screen shows the numbers it used.
-- The rider **names the price** in whole dollars with − / + (or by typing). The offer stays between `MIN_OFFER_USD` and
-  `MAX_OFFER_FACTOR` times the suggestion, so a typo cannot cost real money. A note says if the offer is below, near or above the suggestion.
-- The request carries the offer as `fareSats` and the suggestion as `suggestedSats`.
-- A driver sees **Rider's offer** and taps **Accept**, or **Ask for a different price** and counters at least $1 higher. The reply
-  is a normal offer (kind 30079); its `priceSats` is the driver's price. The deposit is computed from that price.
+- The rider **names the price**: any amount, in **dollars and cents or sats**. The arrows button switches the unit (it is remembered).
+  Type dollars and the sats show below in smaller text; type sats and the dollars show below.
+  The amount must be between `MIN_OFFER_USD` and `MAX_OFFER_FACTOR` times the suggestion, so a typo cannot cost real money; outside that range a
+  message shows and **Request** is off. A note says if the offer is below, near or above the suggestion.
+- Sats are the source of truth (`fareSats` in the request). Dollars come from the live BTC price (or the fallback price, with a warning).
+- A driver sees **Rider's offer** and taps **Accept**, or **Ask for a different price** and counters with any higher amount (same input).
+  The counter starts at the driver's own typical fare when that is above the offer. The reply is a normal offer (kind 30079); its `priceSats`
+  is the driver's price, and the deposit is computed from it.
 - The rider sees every reply: *Accepts your price* or *Counter-offer: $N more than your offer*, with **Fastest** and **Lowest price** tags.
 - A rider with no replies can **change the offer** while waiting. The request is published again (same d-tag, new price); earlier replies stay valid.
 - Reservations work the same way.
@@ -130,9 +144,9 @@ More detail for contributors is in `CLAUDE.md` (the file map and every invariant
 ## Nostr events
 | Kind | Name | Sent by | Purpose |
 |---|---|---|---|
-| 0 | Metadata | anyone | Name, photo, Lightning address, vehicle (plate sealed) |
+| 0 | Metadata | anyone | Name, photo, Lightning address, vehicle (plate sealed), driver gender, driver rates |
 | 30078 | Ride request | rider | Coarse pickup/dropoff, the rider's offer (`fareSats`), the suggested price, sealed exact trip |
-| 30079 | Ride offer | driver | Accept or counter: price, deposit, ETA, optional gender, sealed plate |
+| 30079 | Ride offer | driver | Accept or counter: price, deposit, ETA, typical fare for the trip, optional gender, sealed plate |
 | 30080 | Ride accept | rider | Confirms a driver; exact trip sealed to the driver |
 | 30081 | Ride cancel | rider or assigned driver | Ends a ride |
 | 30082 | Rating | either party | Stars and review |
@@ -142,7 +156,7 @@ More detail for contributors is in `CLAUDE.md` (the file map and every invariant
 | 30087 | Rider confirmation | rider | `boarded`, `ended`, or `problem` (with a note) |
 | 30092 | Driver license | driver | License photo, encrypted to the driver's own key; never shown to riders |
 | 30091 | Trip share | throwaway key | Live trip state for a "Share my trip" link, encrypted with a key in the link |
-| 30090 | Presence | driver | Online, coarse location, short expiry |
+| 30090 | Presence | driver | Online, coarse location, the driver's rates, short expiry |
 | 21100 | Ride location | driver | Exact location, encrypted to the rider, ephemeral |
 
 Every event carries the app tag `["t","nostrride"]` because kind numbers like 30078 are shared with other apps.
@@ -213,7 +227,7 @@ A web page cannot read the location with the screen off. `native/` wraps the **d
 ## Configuration
 | What | Where |
 |---|---|
-| Suggested-price formula, offer limits, deposit %, timers, demo data | `src/config/settings.js` |
+| App rates (the fallback), offer limits, driver-rate limits, deposit %, timers, demo data | `src/config/settings.js` |
 | Relays | `src/config/relays.js` (also editable in the app) |
 | Map tiles, address search, routing | `.env` (see `env.example`); defaults in `src/config/services.js` |
 | Emergency number, arrival radius | `src/config/settings.js` |
@@ -221,7 +235,7 @@ A web page cannot read the location with the screen off. `native/` wraps the **d
 
 ## Testing
 `npm test` runs `test/*.test.mjs` with Node's built-in runner: trust rules, ride stages, fares, trips,
-earnings, privacy, history, Lightning invoices, geocoding, publishing and the outbox, event ordering, contact links, GPS, payment evidence, blocking, trip sharing, native location, price offers and counters, gender ordering, driver requirements, license privacy.
+earnings, privacy, history, Lightning invoices, geocoding, publishing and the outbox, event ordering, contact links, GPS, payment evidence, blocking, trip sharing, native location, price offers and counters, driver rates, exact offer amounts, gender ordering, driver requirements, license privacy.
 The apps were also exercised end to end in a headless browser (a rider and a driver playing a full ride
 through a local relay). That harness is not in the repo.
 
@@ -285,6 +299,7 @@ To switch, copy `env.example` to `.env`, set `VITE_TILE_URL` (and `VITE_PHOTON_U
 - Free public map, geocoder and router services need replacing before launch.
 
 ## Changelog
+- **Typical fares and exact offers** — each driver sets their own base, per-mile and per-minute rates; riders see them (nearby list, the suggestion, each reply). Offers and counters are exact amounts in dollars and cents or sats, with a unit switch and the other unit shown below (no more $1 steps).
 - **Trip screen** — the trip card is nearly collapsed and draggable; the map zooms in on the vehicle and follows it (north-up) with a compass toggle for heading-up and a Re-center button.
 - **Small fixes** — a "Your location" button on the pickup field (fills the GPS address; still editable). A driver's profile photo, vehicle photo and license photo show *Change*, not *Remove*, because all three are required.
 - **Offers, gender order, driver requirements** — the rider names the price (the app only suggests one) and drivers accept or counter; the rider can change the offer while waiting. Optional driver gender and a rider "show first" preference (order only). Pickup fills in from GPS; *Done* button after *Edit*. Driver setup names every missing item. Vehicle photo and driver's license photo are now required (license encrypted, kind 30092).

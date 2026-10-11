@@ -35,11 +35,12 @@ const coarse = (n) => Math.round(n * 1000) / 1000;
 // Publish one presence beat. Call this on an interval while online.
 // Addressable (d-tag "presence") so each driver has exactly one current
 // presence on the relay, with a short expiration.
-export async function publishPresence(user, { lat, lng, vehicle }) {
+export async function publishPresence(user, { lat, lng, vehicle, rates }) {
   const content = JSON.stringify({
     name: user.name,
     npub: user.npub,
     vehicle: vehicle || "",
+    ...(rates && { rates }), // the driver's own typical-fare rates (public, like the rest of presence)
     lat: coarse(lat),
     lng: coarse(lng),
     ts: Date.now(),

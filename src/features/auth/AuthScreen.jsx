@@ -88,7 +88,7 @@ export default function AuthScreen({ onLogin }) {
       relay.publish(buildSignedEvent(EVENT_KINDS.METADATA, { ...existing, name: typed }, [], keys.sk));
     }
     enter(
-      { ...keys, name: typed || p.name || DEFAULT_NAME, comm: p.comm, picture: p.picture, lud16: p.lud16, gender: p.gender, vehicle: myVehicle(keys.publicKey, keys.sk), license: myLicense(keys.publicKey, keys.sk) },
+      { ...keys, name: typed || p.name || DEFAULT_NAME, comm: p.comm, picture: p.picture, lud16: p.lud16, gender: p.gender, rates: p.rates, vehicle: myVehicle(keys.publicKey, keys.sk), license: myLicense(keys.publicKey, keys.sk) },
       { save }
     );
   };

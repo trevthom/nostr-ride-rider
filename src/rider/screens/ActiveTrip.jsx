@@ -16,12 +16,11 @@ import { getProfile } from "../../nostr/profiles.js";
 import { rideStatus } from "../../lib/rides.js";
 import { exactTrip } from "../../lib/privacy.js";
 import { offersForRide, offerGender, rankOffers } from "../../lib/trips.js";
-import { clampOffer, replyKind, usdToSats } from "../../lib/fare.js";
+import { offerLimitsSats, replyKind } from "../../lib/fare.js";
 import { FALLBACK_BTC_USD } from "../../config/settings.js";
-import { satsToUsd } from "../../ui/SatsAmount.jsx";
 import MapView from "../../ui/MapView.jsx";
 import Money, { moneyText } from "../../ui/Money.jsx";
-import PriceStepper from "../../ui/PriceStepper.jsx";
+import AmountInput from "../../ui/AmountInput.jsx";
 import Button from "../../ui/Button.jsx";
 import { MapPage, Sheet, FloatButton } from "../../ui/Layout.jsx";
 import { ConfirmDialog } from "../../ui/Parts.jsx";
@@ -104,9 +103,11 @@ function Searching({ request, trip, onCancel, top }) {
   const content = parse(request) || {};
   const [editing, setEditing] = useState(false);
   const rate = btcUsd || FALLBACK_BTC_USD;
-  const offerNow = content.fareSats > 0 ? Math.max(1, Math.round(satsToUsd(content.fareSats, rate))) : 0;
-  const suggestedUsd = content.suggestedSats > 0 ? Math.max(1, Math.round(satsToUsd(content.suggestedSats, rate))) : offerNow;
-  const [draft, setDraft] = useState(offerNow);
+  const offerNow = content.fareSats > 0 ? content.fareSats : 0;
+  const suggestedNow = content.suggestedSats > 0 ? content.suggestedSats : offerNow;
+  const limits = offerLimitsSats(suggestedNow, btcUsd);
+  const [draft, setDraft] = useState(offerNow); // null while the field is empty
+  const draftOk = Number.isFinite(draft) && draft >= limits.min && draft <= limits.max && draft !== offerNow;
   const [now, setNow] = useState(Date.now());
   useEffect(() => { const id = setInterval(() => setNow(Date.now()), 5000); return () => clearInterval(id); }, []);
   const waited = Math.max(0, Math.floor((now - request.created_at * 1000) / 1000));
@@ -144,21 +145,17 @@ function Searching({ request, trip, onCancel, top }) {
         {content.fareSats > 0 && !scheduled && (
           editing ? (
             <div className="mt-3 rounded-2xl bg-neutral-100 px-4 py-3">
-              <PriceStepper usd={draft} suggestedUsd={suggestedUsd} onChange={setDraft} label="New offer in dollars" />
+              <AmountInput sats={draft} rate={rate} min={limits.min} max={limits.max} onChange={setDraft} label="New offer" />
               <div className="flex gap-2 mt-3">
-                <Button variant="outline" size="md" onClick={() => { setEditing(false); setDraft(offerNow); }}>Keep ${offerNow}</Button>
-                <Button
-                  size="md"
-                  disabled={draft === offerNow}
-                  onClick={() => { raiseOffer(request, usdToSats(clampOffer(draft, suggestedUsd), rate)); setEditing(false); }}
-                >
+                <Button variant="outline" size="md" onClick={() => { setEditing(false); setDraft(offerNow); }}>Keep {moneyText(offerNow, btcUsd)}</Button>
+                <Button size="md" disabled={!draftOk} onClick={() => { raiseOffer(request, Math.round(draft)); setEditing(false); }}>
                   Update offer
                 </Button>
               </div>
             </div>
           ) : (
             waited > 30 && (
-              <button type="button" onClick={() => { setDraft(Math.min(offerNow + 2, offerNow * 3)); setEditing(true); }} className="mt-3 text-sm font-semibold underline">
+              <button type="button" onClick={() => { setDraft(Math.min(limits.max, Math.round(offerNow * 1.15))); setEditing(true); }} className="mt-3 text-sm font-semibold underline">
                 No replies yet? Change your offer
               </button>
             )
@@ -205,6 +202,7 @@ function ChooseDriver({ request, trip, offers, onPick, onCancel, top }) {
                     <p className="text-sm">
                       <Money sats={c.priceSats} className="font-semibold" />
                     </p>
+                    {c.typicalSats > 0 && <p className="text-xs text-neutral-500">Their typical fare for this trip: {moneyText(c.typicalSats, btcUsd)}</p>}
                     <p className={`text-xs ${kind === "counter" ? "text-amber-700" : "text-[#05683a]"}`}>
                       {kind === "counter"
                         ? `Counter-offer: ${moneyText(c.priceSats - content.fareSats, btcUsd)} more than your offer`

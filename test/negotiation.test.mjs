@@ -20,16 +20,31 @@ const pub = (kind, content, tags, who) => {
 const now = () => Math.floor(Date.now() / 1000);
 const rider = generateKeypair(), d1 = generateKeypair(), d2 = generateKeypair(), d3 = generateKeypair();
 
-// ── Offer limits and steps ──
-assert.deepEqual(F.offerLimits(10), { min: 3, max: 30 });
-assert.deepEqual(F.offerLimits(1), { min: 3, max: 3 }, "tiny trips still have a valid range");
-assert.equal(F.stepOffer(10, 1, 10), 11);
-assert.equal(F.stepOffer(10, -1, 10), 9);
-assert.equal(F.stepOffer(3, -1, 10), 3, "never below the minimum");
-assert.equal(F.stepOffer(30, 1, 10), 30, "never above 3x the suggestion");
-assert.equal(F.clampOffer("abc", 12), 12, "not a number -> the suggestion");
-assert.equal(F.clampOffer("500", 12), 36, "a typo cannot cost real money");
-assert.equal(F.clampOffer("1", 12), 3);
+// ── Offers: any amount, in sats, with limits ──
+assert.equal(F.satsFromUsd(6.37, 100000), 6370, "$6.37 at $100k/BTC is exactly 6,370 sats");
+assert.equal(F.usdFromSats(6370, 100000), 6.37, "and shows back as $6.37");
+assert.equal(F.usdFromSats(F.satsFromUsd(12.34, 83000), 83000), 12.34, "round trip at another price");
+assert.equal(F.satsFromUsd(5, 0), F.satsFromUsd(5, 100000), "no live price -> the fallback price");
+assert.deepEqual(F.offerLimitsSats(10000, 100000), { min: 3000, max: 30000 }, "$3 .. 3x the suggestion");
+assert.deepEqual(F.offerLimitsSats(100, 100000), { min: 3000, max: 3000 }, "a tiny trip still has a valid range");
+
+// ── Each driver's own rates ──
+assert.deepEqual(F.normalizeRates({ base: 2.5, perMile: 1.25, perMinute: 0.3 }), { base: 2.5, perMile: 1.25, perMinute: 0.3 });
+assert.deepEqual(F.normalizeRates({ base: "3", perMile: "1.5", perMinute: "0.2" }), { base: 3, perMile: 1.5, perMinute: 0.2 }, "numeric strings are accepted");
+assert.deepEqual(F.normalizeRates({ base: 1.239, perMile: 1, perMinute: 0 }), { base: 1.24, perMile: 1, perMinute: 0 }, "cents at most");
+for (const bad of [null, undefined, "x", {}, { base: 1, perMile: 1 }, { base: -1, perMile: 1, perMinute: 1 }, { base: 1, perMile: 999, perMinute: 1 }, { base: NaN, perMile: 1, perMinute: 1 }, { base: "", perMile: 1, perMinute: 1 }, { base: {}, perMile: 1, perMinute: 1 }]) {
+  assert.equal(F.normalizeRates(bad), null, "rejected: " + JSON.stringify(bad));
+}
+// base + per mile * miles + per minute * minutes, never below the app's minimum fare
+assert.equal(F.typicalFareUsd({ base: 3, perMile: 2, perMinute: 0.5 }, 10, 20), 33);
+assert.equal(F.typicalFareUsd({ base: 1, perMile: 0.5, perMinute: 0.1 }, 1, 2), 5, "the minimum fare applies");
+assert.equal(F.typicalFareUsd(null, 10, 20), F.fareUsd(10, 20), "no rates -> the app's rates");
+assert.equal(F.typicalFareUsd({ base: 1, perMile: 999, perMinute: 1 }, 10, 20), F.fareUsd(10, 20), "junk rates are ignored");
+assert.equal(F.median([7, 3, 5]), 5);
+assert.equal(F.median([2, 4, 6, 10]), 5);
+assert.equal(F.median([]), null);
+assert.equal(F.median([NaN, 4]), 4);
+
 assert.equal(F.offerLevel(8, 10), "low");
 assert.equal(F.offerLevel(10, 10), "fair");
 assert.equal(F.offerLevel(12, 10), "high");
@@ -57,6 +72,13 @@ assert.deepEqual(T.rankOffers(all, "female").map((o) => o.pubkey), [d2.publicKey
 assert.equal(T.rankOffers(all, "female").length, all.length, "nobody is hidden");
 assert.equal(T.rankOffers(all, "").map((o) => o.id).join(), all.map((o) => o.id).join(), "no preference: unchanged");
 assert.equal(T.rankOffers(all, "other").map((o) => o.id).join(), all.map((o) => o.id).join(), "unknown value: unchanged");
+
+// A driver's rates travel in their profile; junk is dropped.
+pub(K.METADATA, { name: "D2", rates: { base: 4, perMile: 1.5, perMinute: 0.35 } }, [], d2);
+assert.deepEqual(getProfile(d2.publicKey).rates, { base: 4, perMile: 1.5, perMinute: 0.35 });
+pub(K.METADATA, { name: "D2", rates: { base: 4, perMile: "<b>", perMinute: 0.35 } }, [], d2);
+assert.equal(getProfile(d2.publicKey).rates, null, "junk rates ignored");
+pub(K.METADATA, { name: "D2" }, [], d2);
 
 // The gender falls back to the driver's profile; only "male" / "female" are accepted there.
 pub(K.METADATA, { name: "D3", gender: "female" }, [], d3);

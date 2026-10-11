@@ -1,14 +1,17 @@
 // ════════════════════════════════════════════════════════════
 //  FARE — Price estimates for a trip, in USD and in sats.
 //
-//  The rider app suggests a price from the trip's distance and time. The
-//  rider can change it: the price the rider offers is published in the ride
-//  request (`fareSats`). A driver accepts that price or counters with a higher
-//  one (RIDE_OFFER `priceSats`). Pure functions, no network (the BTC price is
-//  passed in).
+//  Every driver can set their own "typical fare": a base amount, a price per
+//  mile and a price per minute. Riders see these, so the suggested price for a
+//  trip comes from the drivers nearby (the app's own rates are the fallback).
+//  The rider names the price they want to pay, in any amount: that offer is
+//  published in the ride request (`fareSats`). A driver accepts it or counters
+//  with a higher one (RIDE_OFFER `priceSats`). Sats are the source of truth;
+//  dollars are shown from the live BTC price. Pure functions, no network (the
+//  BTC price is passed in).
 // ════════════════════════════════════════════════════════════
 
-import { FARE_RATES, FALLBACK_BTC_USD, OFFER_STEP_USD, MIN_OFFER_USD, MAX_OFFER_FACTOR } from "../config/settings.js";
+import { FARE_RATES, FALLBACK_BTC_USD, MIN_OFFER_USD, MAX_OFFER_FACTOR, RATE_LIMITS } from "../config/settings.js";
 
 const AVG_CITY_MPH = 24; // for time/ETA guesses when no routing result exists
 const DETOUR = 1.3; // straight line → road distance
@@ -32,8 +35,8 @@ export function usdToSats(usd, btcUsd) {
 }
 
 // A full quote. `live` is false when the fallback BTC price was used.
-export function quoteFare({ miles, minutes }, btcUsd) {
-  const usd = fareUsd(miles, minutes);
+export function quoteFare({ miles, minutes }, btcUsd, rates = FARE_RATES) {
+  const usd = fareUsd(miles, minutes, rates);
   const price = btcUsd || FALLBACK_BTC_USD;
   return { usd, sats: usdToSats(usd, price), live: !!btcUsd };
 }
@@ -49,27 +52,46 @@ export function pickupEta(miles) {
   return driveMinutes(roadMiles(miles));
 }
 
-// The lowest and highest price a rider (or a countering driver) can name,
-// in whole dollars, for a trip with the suggested price `suggestedUsd`.
-export function offerLimits(suggestedUsd) {
-  const min = MIN_OFFER_USD;
-  const max = Math.max(min, Math.ceil(suggestedUsd * MAX_OFFER_FACTOR));
-  return { min, max };
+// A driver's rates, checked: { base, perMile, perMinute } in dollars (cents at most), each
+// between 0 and its limit. Anything else (junk from a relay, a missing field) -> null.
+export function normalizeRates(r) {
+  if (!r || typeof r !== "object") return null;
+  const out = {};
+  for (const key of ["base", "perMile", "perMinute"]) {
+    const n = typeof r[key] === "string" && r[key].trim() !== "" ? Number(r[key]) : r[key];
+    if (typeof n !== "number" || !Number.isFinite(n) || n < 0 || n > RATE_LIMITS[key]) return null;
+    out[key] = Math.round(n * 100) / 100;
+  }
+  return out;
 }
 
-// Move an offer up or down one step, inside the limits. Result in whole dollars.
-export function stepOffer(usd, direction, suggestedUsd) {
-  const { min, max } = offerLimits(suggestedUsd);
-  const next = Math.round(usd / OFFER_STEP_USD) * OFFER_STEP_USD + direction * OFFER_STEP_USD;
-  return Math.min(max, Math.max(min, next));
+// What a driver typically charges for a trip, in dollars. Drivers with no rates use the app's.
+export function typicalFareUsd(rates, miles, minutes) {
+  return fareUsd(miles, minutes, { ...FARE_RATES, ...(normalizeRates(rates) || {}) });
 }
 
-// Keep a typed offer inside the limits. Not a number -> the suggestion.
-export function clampOffer(usd, suggestedUsd) {
-  const { min, max } = offerLimits(suggestedUsd);
-  const n = Number(usd);
-  if (!Number.isFinite(n)) return Math.round(suggestedUsd);
-  return Math.min(max, Math.max(min, Math.round(n)));
+export function median(values) {
+  const v = values.filter((x) => Number.isFinite(x)).sort((a, b) => a - b);
+  if (!v.length) return null;
+  const mid = Math.floor(v.length / 2);
+  return v.length % 2 ? v[mid] : (v[mid - 1] + v[mid]) / 2;
+}
+
+// Dollars <-> sats, exact (no rounding to a round number): an offer of $6.37 is whatever
+// sats that is at the current price, and shows back as $6.37.
+export function satsFromUsd(usd, btcUsd) {
+  const rate = btcUsd || FALLBACK_BTC_USD;
+  return Math.max(1, Math.round((usd / rate) * 1e8));
+}
+export function usdFromSats(sats, btcUsd) {
+  const rate = btcUsd || FALLBACK_BTC_USD;
+  return Math.round(sats * 1e-8 * rate * 100) / 100;
+}
+
+// The lowest and highest offer (in sats) for a trip whose suggested price is `suggestedSats`.
+export function offerLimitsSats(suggestedSats, btcUsd) {
+  const min = satsFromUsd(MIN_OFFER_USD, btcUsd);
+  return { min, max: Math.max(min, Math.round(suggestedSats * MAX_OFFER_FACTOR)) };
 }
 
 // How an offer compares with the suggested price: "low" | "fair" | "high".
