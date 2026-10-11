@@ -17,27 +17,28 @@ Payments go straight from rider to driver over **Lightning**.
 1. [Quick start](#quick-start)
 2. [The two apps](#the-two-apps)
 3. [How a ride works](#how-a-ride-works)
-4. [Price offers and counter-offers](#price-offers-and-counter-offers)
-5. [Driver gender preference (optional)](#driver-gender-preference-optional)
-6. [Driver requirements](#driver-requirements)
-7. [Architecture](#architecture)
-8. [Nostr events](#nostr-events)
-9. [Privacy](#privacy)
-10. [Payments](#payments)
-11. [Location and GPS](#location-and-gps)
-12. [Safety](#safety)
-13. [Blocking](#blocking)
-14. [Disputes and evidence](#disputes-and-evidence)
-15. [Reliability](#reliability)
-16. [Native app and background GPS](#native-app-and-background-gps)
-17. [Configuration](#configuration)
-18. [Testing](#testing)
-19. [Deploying](#deploying)
-20. [Separate repositories (generated)](#separate-repositories-generated)
-21. [Self-hosting map services](#self-hosting-map-services)
-22. [Trying it on an iPhone](#trying-it-on-an-iphone-without-the-apple-developer-program)
-23. [Known limits and roadmap](#known-limits-and-roadmap)
-24. [Changelog](#changelog)
+4. [During a trip (both apps)](#during-a-trip-both-apps)
+5. [Price offers and counter-offers](#price-offers-and-counter-offers)
+6. [Driver gender preference (optional)](#driver-gender-preference-optional)
+7. [Driver requirements](#driver-requirements)
+8. [Architecture](#architecture)
+9. [Nostr events](#nostr-events)
+10. [Privacy](#privacy)
+11. [Payments](#payments)
+12. [Location and GPS](#location-and-gps)
+13. [Safety](#safety)
+14. [Blocking](#blocking)
+15. [Disputes and evidence](#disputes-and-evidence)
+16. [Reliability](#reliability)
+17. [Native app and background GPS](#native-app-and-background-gps)
+18. [Configuration](#configuration)
+19. [Testing](#testing)
+20. [Deploying](#deploying)
+21. [Separate repositories (generated)](#separate-repositories-generated)
+22. [Self-hosting map services](#self-hosting-map-services)
+23. [Trying it on an iPhone](#trying-it-on-an-iphone-without-the-apple-developer-program)
+24. [Known limits and roadmap](#known-limits-and-roadmap)
+25. [Changelog](#changelog)
 
 ## Quick start
 ```bash
@@ -74,6 +75,18 @@ reverse. The Vite *mode* picks the app (`vite --mode rider|driver`).
 Cancels: the rider can cancel any time; the driver can cancel an accepted ride. A reservation more
 than 30 minutes ahead waits under *Activity → Upcoming*. Everything on screen is **derived from the
 signed events**, so a reload or a second device shows the same screen.
+
+## During a trip (both apps)
+- **Nearly full-screen map.** Once a driver is confirmed, the trip card is tucked away: only a handle and one line
+  (for example "Driver arriving in 5 min") show at the bottom. Drag the handle up, or tap it, to open the details; drag down or tap to close.
+  The card opens by itself when the user has a step to take: the rider when the driver arrives (check the car), the driver at the arrival
+  and when near the pickup or destination. It tucks away again when the trip stage changes.
+- **The camera follows the vehicle.** The map zooms in to street level on the car and keeps north at the top. Both apps do this
+  (the rider follows the driver's car; the driver follows their own).
+- **Take control any time.** Dragging or zooming the map stops the following, and a **Re-center** button appears. One tap brings the
+  car back to the middle at street zoom.
+- **Compass button.** Tap it to switch between **north-up** and **heading-up** (the map turns so the car drives up the screen). The
+  map turns only after the car moved about 12 m, so GPS noise does not spin it. Pins and price tags stay upright.
 
 ## Price offers and counter-offers
 - The app **suggests** a price from the trip: `base + per mile + per minute` (`FARE_RATES` in `src/config/settings.js`). The
@@ -272,6 +285,8 @@ To switch, copy `env.example` to `.env`, set `VITE_TILE_URL` (and `VITE_PHOTON_U
 - Free public map, geocoder and router services need replacing before launch.
 
 ## Changelog
+- **Trip screen** — the trip card is nearly collapsed and draggable; the map zooms in on the vehicle and follows it (north-up) with a compass toggle for heading-up and a Re-center button.
+- **Small fixes** — a "Your location" button on the pickup field (fills the GPS address; still editable). A driver's profile photo, vehicle photo and license photo show *Change*, not *Remove*, because all three are required.
 - **Offers, gender order, driver requirements** — the rider names the price (the app only suggests one) and drivers accept or counter; the rider can change the offer while waiting. Optional driver gender and a rider "show first" preference (order only). Pickup fills in from GPS; *Done* button after *Edit*. Driver setup names every missing item. Vehicle photo and driver's license photo are now required (license encrypted, kind 30092).
 - **Split repositories** — `scripts/export-apps.mjs` generates the rider and driver repositories from this one.
 - **Evidence, safety, blocking, reliability** — signed payment records and rider confirmations (kinds 30086, 30087); driver re-checks payments; copyable trip record. Safety sheet with car check, share-my-trip link and tracking page, SOS, report a problem, trusted contacts. Local blocking. Driver arrival suggestion. Outbox with retry, reconnect, connection banner, service worker and manifest. Native background-GPS shell (untested on device). Map services configurable through `.env`.

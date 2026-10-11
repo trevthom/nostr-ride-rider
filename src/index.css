@@ -30,6 +30,8 @@ button:disabled { cursor: not-allowed; }
 .leaflet-container { background: #ebebeb; font-family: inherit; }
 .leaflet-control-attribution { font-size: 9px !important; opacity: 0.8; margin-bottom: 0 !important; }
 .nr-pin { background: transparent; border: none; }
+/* Pins and price tags stay upright when the trip map is turned (heading-up). */
+.nr-up { transform: rotate(var(--nr-rot, 0deg)); transition: transform .6s ease; }
 
 /* Small animations (spinner, pulse, sheet slide-in, searching radar). */
 @keyframes spin { to { transform: rotate(360deg); } }

@@ -10,7 +10,7 @@
 //                      (lib/profile.js driveGaps, for the whole profile)
 // ════════════════════════════════════════════════════════════
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { resizeImage } from "../../lib/image.js";
 import { gapsText } from "../../lib/profile.js";
 
@@ -28,6 +28,7 @@ export default function VehicleSection({ vehicle, ready, onSave, gapsFor }) {
   const [saved, setSaved] = useState(false);
   const [imgErr, setImgErr] = useState("");
   const [stillNeeded, setStillNeeded] = useState(""); // names what is missing after a save
+  const fileRef = useRef(null);
 
   // Follow the saved vehicle (e.g. restored after login) until edited.
   const savedKey = JSON.stringify(formOf(vehicle));
@@ -37,6 +38,7 @@ export default function VehicleSection({ vehicle, ready, onSave, gapsFor }) {
 
   const onPhotoPick = async (e) => {
     const file = e.target.files?.[0];
+    e.target.value = ""; // so the same file can be picked again
     if (!file) return;
     setImgErr("");
     try {
@@ -70,7 +72,7 @@ export default function VehicleSection({ vehicle, ready, onSave, gapsFor }) {
       </div>
 
       <label className="cursor-pointer block">
-        <input type="file" accept="image/*" onChange={onPhotoPick} className="sr-only" aria-label="Vehicle photo" />
+        <input ref={fileRef} type="file" accept="image/*" onChange={onPhotoPick} className="sr-only" aria-label="Vehicle photo" />
         {veh.picture ? (
           <img src={veh.picture} alt="Vehicle" className="w-full h-32 object-cover rounded-lg border border-neutral-200" />
         ) : (
@@ -80,7 +82,7 @@ export default function VehicleSection({ vehicle, ready, onSave, gapsFor }) {
         )}
       </label>
       {veh.picture && (
-        <button onClick={() => edit({ picture: "" })} className="text-red-600 text-[11px] -mt-1">Remove vehicle photo</button>
+        <button type="button" onClick={() => fileRef.current?.click()} className="text-[11px] font-semibold underline -mt-1">Change vehicle photo</button>
       )}
       {imgErr && <p className="text-red-600 text-xs">{imgErr}</p>}
 

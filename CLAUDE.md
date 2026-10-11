@@ -103,8 +103,8 @@ src/
     geo.js geocode.js (search + reverseGeocode) routing.js (OSRM, cached) image.js lnurl.js locations.js profile.js (driveGaps/gapsText/isDriveReady)
   state/AppContext.jsx            # shared state (above)
   ui/                             # shared UI kit
-    Layout.jsx    # AppFrame, MapPage (+ measures the Sheet so the map pads for it), Sheet, FloatButton, Screen, TabBar
-    MapView.jsx   # Leaflet + OpenStreetMap tiles; pins, OSRM route, cars, "me" dot, price pills, ref.fit()
+    Layout.jsx    # AppFrame, MapPage (+ measures the Sheet so the map pads for it), Sheet (collapsible with `peek`/openKey/closeKey), FloatButton, Screen, TabBar
+    MapView.jsx   # Leaflet + OpenStreetMap tiles; pins, OSRM route, cars, "me" dot, price pills, ref.fit(); trip mode (`navigation` + `follow`)
     Button.jsx Icon.jsx Avatar.jsx Rating.jsx Money.jsx Parts.jsx (Row, Toggle, Field, ConfirmDialog, Modal, Spinner)
     PriceStepper.jsx (− $N + for offers/counters)  RatingForm.jsx ContactSheet.jsx UserModal.jsx NoticeBanner.jsx ErrorBoundary.jsx RelayEditor.jsx QRCode.jsx SatsAmount.jsx
   features/
@@ -250,6 +250,14 @@ rider's `in_progress` version also carries `driverPubkey`. Stage is `enroute`
   type-ahead to Nominatim — its policy forbids it), routes = OSRM (cached in routing.js).
   All are free public dev endpoints: rate-limited, swap for paid/self-hosted before launch
   (keep the return shapes; URLs come from `config/services.js` / `.env`).
+- **Trip screens** (rider `OnTrip`, driver `DriveTrip`): the `Sheet` is given a `peek` line, so it starts nearly collapsed and is dragged/tapped
+  open (`openKey` pops it open when the user has a step; `closeKey` = the stage tucks it away). Anything a test or a user must click
+  inside it (I've arrived, Start/Complete trip, Cancel, Safety, It matches) is hidden (`visibility`) while collapsed. The trip headline is also
+  in the peek line. `MapView navigation follow={{lat,lng,id}}` is trip mode: street-zoom camera on the vehicle, north-up by default,
+  compass button = heading-up, user drag/zoom stops following and shows **Re-center**. In trip mode the Leaflet map sits in an
+  oversized box turned with CSS; Leaflet's own drag is off and panning is done in MapView (its mouse maths ignores the turn); icons that
+  must stay upright carry the `nr-up` class. Never animate a zoom the app starts itself: Leaflet reports an animated zoom's start
+  later, so it would look like the user zoomed. Do not add `leaflet-rotate` (GPL-3 licence; it also patches Leaflet core).
 - **No StrictMode** (see main.jsx): it double-mounts the map in dev and caused crashes.
   Keep every hook above a screen's early `return null`.
 - **Login persistence**: with "Remember me" the key is saved encrypted with the user's password

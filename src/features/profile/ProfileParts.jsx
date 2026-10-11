@@ -149,7 +149,10 @@ export function AccountHeader({ photoRequired = false }) {
         {photoRequired && !user.picture && <p className="text-amber-700 text-xs mt-1">A face photo is required to drive.</p>}
         {err && <p className="text-red-600 text-xs mt-1">{err}</p>}
         {user.picture && (
-          <button type="button" onClick={() => save({ picture: "" })} className="text-xs text-neutral-500 underline mt-1">Remove photo</button>
+          // A driver must have a photo, so offer a change; a rider may remove it.
+          <button type="button" onClick={() => (photoRequired ? fileRef.current?.click() : save({ picture: "" }))} className="text-xs text-neutral-500 underline mt-1">
+            {photoRequired ? "Change photo" : "Remove photo"}
+          </button>
         )}
       </div>
       {lightbox && (

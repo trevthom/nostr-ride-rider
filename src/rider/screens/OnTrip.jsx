@@ -117,10 +117,18 @@ export default function OnTrip({ request, trip }) {
           me={stage === "riding" ? null : myPosition}
           fitKey={`${request.id}|${stage}|${loc ? "loc" : "noloc"}`}
           padBottom={400}
+          navigation
+          follow={loc ? { lat: loc.lat, lng: loc.lng, id: driverPubkey || "driver" } : null}
         />
       }
     >
-      <Sheet label="Your trip">
+      {/* Nearly collapsed while riding; it opens by itself when the driver arrives (to check the car). */}
+      <Sheet
+        label="Your trip"
+        peek={<p className="font-bold text-[17px] leading-6 truncate">{headline}</p>}
+        openKey={stage === "arrived" ? "arrived" : ""}
+        closeKey={stage}
+      >
         <h2 className="text-2xl font-bold leading-tight">{headline}</h2>
         <p className="text-neutral-600 text-[15px] mt-0.5">{sub}</p>
         {stage !== "arrived" && (

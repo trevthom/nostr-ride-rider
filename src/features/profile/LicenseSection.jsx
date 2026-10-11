@@ -49,15 +49,11 @@ export default function LicenseSection({ picture, onSave }) {
         )}
       </button>
       {picture && (
-        <div className="flex gap-4 text-xs">
-          <button type="button" onClick={() => fileRef.current?.click()} className="font-semibold underline">Replace photo</button>
-          <button type="button" onClick={() => onSave("")} className="text-red-600">Remove photo</button>
-        </div>
+        <button type="button" onClick={() => fileRef.current?.click()} className="text-xs font-semibold underline">Change license photo</button>
       )}
       {err && <p className="text-red-600 text-xs" role="alert">{err}</p>}
       <p className="text-neutral-500 text-[11px]">
-        Encrypted on your device with your key. Only you can open it. Riders and other apps never see it.
-        Removing it turns off driving until you add it back.
+        Encrypted on your device with your key. Only you can open it. Riders and other apps never see it. It is required to drive.
       </p>
     </div>
   );

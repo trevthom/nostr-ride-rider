@@ -5,7 +5,9 @@
 //              the middle of the page; on a phone it fills the screen.
 //   MapPage    Map fills the area; a Sheet slides up from the bottom and
 //              `top` floats over the map (back button, status pill).
-//   Sheet      The white bottom card (Uber/Lyft style).
+//   Sheet      The white bottom card (Uber/Lyft style). With a `peek` it can
+//              also be nearly collapsed: only a drag handle and one line show,
+//              and the user drags it up (or taps it) to open the details.
 //   Screen     A plain scrolling page with a big title (Activity, Account).
 // ════════════════════════════════════════════════════════════
 
@@ -43,9 +45,22 @@ export function MapPage({ map, top, children }) {
   );
 }
 
-export function Sheet({ children, className = "", label, maxHeight = "82%" }) {
+// `peek` makes the sheet collapsible: a short line shown next to the drag handle. The
+// sheet starts collapsed. `openKey` (when it changes to a non-empty value) opens it, and
+// `closeKey` (when it changes) collapses it, so a screen can pop it open when the user
+// has something to do and tuck it away again when the stage changes.
+const SHEET_MAX = 0.82; // share of the screen the open sheet may use
+
+export function Sheet({ children, className = "", label, maxHeight = "82%", peek, openKey = "", closeKey = "" }) {
   const report = useContext(SheetHeight);
   const ref = useRef(null);
+  const headRef = useRef(null);
+  const [open, setOpen] = useState(false);
+  const [drag, setDrag] = useState(null); // live height while the handle is being dragged
+  const [parentH, setParentH] = useState(0);
+  const [peekH, setPeekH] = useState(64);
+  const collapsible = peek !== undefined;
+
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
@@ -55,15 +70,96 @@ export function Sheet({ children, className = "", label, maxHeight = "82%" }) {
     try { ro = new ResizeObserver(update); ro.observe(el); } catch { /* older browsers: keep the first measurement */ }
     return () => ro && ro.disconnect();
   }, [report]);
+
+  // Measure the area the sheet may grow into, and the height of the handle + peek line.
+  useEffect(() => {
+    if (!collapsible) return;
+    const measure = () => {
+      if (ref.current?.parentElement) setParentH(ref.current.parentElement.clientHeight);
+      if (headRef.current) setPeekH(Math.ceil(headRef.current.getBoundingClientRect().height));
+    };
+    measure();
+    let ro;
+    try { ro = new ResizeObserver(measure); ro.observe(ref.current.parentElement); ro.observe(headRef.current); } catch { /* keep the first measurement */ }
+    return () => ro && ro.disconnect();
+  }, [collapsible, peek]);
+
+  useEffect(() => { if (collapsible) setOpen(false); }, [closeKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => { if (collapsible && openKey) setOpen(true); }, [openKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  if (!collapsible) {
+    return (
+      <section
+        ref={ref}
+        aria-label={label}
+        style={{ maxHeight }}
+        className={`absolute bottom-0 inset-x-0 z-[600] bg-white rounded-t-3xl shadow-[0_-6px_28px_rgba(0,0,0,0.16)] overflow-y-auto nr-slide-up ${className}`}
+      >
+        <div className="w-10 h-1 rounded-full bg-neutral-300 mx-auto mt-2.5" aria-hidden="true" />
+        <div className="px-5 pt-3 pb-[max(1.25rem,env(safe-area-inset-bottom))]">{children}</div>
+      </section>
+    );
+  }
+
+  const fullH = Math.round((parentH || 700) * SHEET_MAX);
+  const target = open ? fullH : peekH;
+  const height = drag ?? target;
+
+  // Drag the handle: up opens, down collapses, a tap toggles.
+  const down = (e) => {
+    if (e.button != null && e.button !== 0) return;
+    const startY = e.clientY;
+    const startH = ref.current ? ref.current.getBoundingClientRect().height : target;
+    let moved = 0;
+    const clamp = (h) => Math.min(fullH, Math.max(peekH, h));
+    const move = (ev) => {
+      moved = startY - ev.clientY; // up is positive
+      if (Math.abs(moved) > 4) setDrag(clamp(startH + moved));
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", up);
+      setDrag(null);
+      if (Math.abs(moved) <= 4) setOpen((o) => !o);
+      else setOpen(moved > 24 ? true : moved < -24 ? false : startH > (peekH + fullH) / 2);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", up);
+  };
+  const key = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen((o) => !o); } };
+
   return (
     <section
       ref={ref}
       aria-label={label}
-      style={{ maxHeight }}
-      className={`absolute bottom-0 inset-x-0 z-[600] bg-white rounded-t-3xl shadow-[0_-6px_28px_rgba(0,0,0,0.16)] overflow-y-auto nr-slide-up ${className}`}
+      style={{ maxHeight: height, transition: drag == null ? "max-height .28s ease" : "none" }}
+      className={`absolute bottom-0 inset-x-0 z-[600] bg-white rounded-t-3xl shadow-[0_-6px_28px_rgba(0,0,0,0.16)] overflow-hidden flex flex-col nr-slide-up ${className}`}
     >
-      <div className="w-10 h-1 rounded-full bg-neutral-300 mx-auto mt-2.5" aria-hidden="true" />
-      <div className="px-5 pt-3 pb-[max(1.25rem,env(safe-area-inset-bottom))]">{children}</div>
+      <div
+        ref={headRef}
+        role="button"
+        tabIndex={0}
+        aria-expanded={open}
+        aria-label={open ? "Trip details, drag down to collapse" : "Trip details, drag up to open"}
+        onPointerDown={down}
+        onKeyDown={key}
+        style={{ touchAction: "none" }}
+        className="shrink-0 cursor-grab select-none px-5 pt-2.5 pb-[max(0.75rem,env(safe-area-inset-bottom))] -mb-0"
+      >
+        <div className="w-10 h-1 rounded-full bg-neutral-300 mx-auto" aria-hidden="true" />
+        <div className="flex items-center gap-2 mt-2 min-h-[24px]">
+          <div className="flex-1 min-w-0">{peek}</div>
+          <Icon name={open ? "chevron-down" : "chevron-up"} size={20} className="text-neutral-400 shrink-0" />
+        </div>
+      </div>
+      <div
+        className="px-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] overflow-y-auto min-h-0"
+        style={{ visibility: open || drag != null ? "visible" : "hidden" }}
+      >
+        {children}
+      </div>
     </section>
   );
 }

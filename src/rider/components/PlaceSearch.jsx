@@ -3,7 +3,8 @@
 //  stacked like Uber, with live address results below (Photon /
 //  OpenStreetMap, lib/geocode.js). The pickup is filled in from the rider's
 //  GPS on its own (as soon as the address is known) unless the rider has
-//  already typed or cleared it. Recent places are suggested for the dropoff.
+//  already typed or cleared it. A "Your location" button on the pickup field
+//  fills it again at any time, and it can still be changed afterward. Recent places are suggested for the dropoff.
 //  onChange(field, place) is called when a result is chosen.
 //  onDone() shows a "Done" button once both places are set, so a rider who
 //  tapped Edit by mistake can go straight back to the quote.
@@ -68,7 +69,7 @@ export default function PlaceSearch({ pickup, dropoff, here, near, recents, onCh
 
   const q = text[focus].trim();
   const showResults = q.length >= 3 && !(focus === "pickup" && pickup && q === pickup.name) && !(focus === "dropoff" && dropoff && q === dropoff.name);
-  const suggestions = focus === "pickup" ? (here ? [{ ...here, current: true }] : []) : recents;
+  const suggestions = focus === "pickup" ? [] : recents; // the pickup has its own "Your location" button
 
   return (
     <div className="flex-1 min-h-0 overflow-y-auto bg-white">
@@ -100,6 +101,17 @@ export default function PlaceSearch({ pickup, dropoff, here, near, recents, onCh
                 autoComplete="off"
                 className="bg-transparent flex-1 min-w-0 py-3.5 text-[15px] placeholder-neutral-500 focus:outline-none"
               />
+              {field === "pickup" && (
+                <button
+                  type="button"
+                  onClick={() => here && choose("pickup", here)}
+                  disabled={!here}
+                  aria-label="Your location"
+                  className="shrink-0 ml-1 inline-flex items-center gap-1 bg-white rounded-full px-2.5 py-1.5 text-xs font-semibold border border-neutral-300 active:bg-neutral-100 disabled:opacity-40"
+                >
+                  <Icon name="locate" size={14} /> {here ? "Your location" : "Locating…"}
+                </button>
+              )}
               {focus === field && loading && <Spinner size={16} />}
               {text[field] && focus === field && !loading && (
                 <button type="button" aria-label="Clear" onClick={() => type(field, "")} className="p-1 text-neutral-500"><Icon name="x" size={16} /></button>
@@ -124,11 +136,11 @@ export default function PlaceSearch({ pickup, dropoff, here, near, recents, onCh
           <li key={`${place.name}-${i}`}>
             <button type="button" onClick={() => choose(focus, place)} className="w-full flex items-center gap-3 px-3 py-3 rounded-xl active:bg-neutral-100 text-left">
               <span className="w-10 h-10 rounded-full bg-neutral-100 flex items-center justify-center shrink-0">
-                <Icon name={place.current ? "locate" : showResults ? "pin" : "clock"} size={18} />
+                <Icon name={showResults ? "pin" : "clock"} size={18} />
               </span>
               <span className="min-w-0">
-                <span className="block text-[15px] font-medium truncate">{place.current ? "Current location" : place.name}</span>
-                <span className="block text-sm text-neutral-500 truncate">{place.current ? place.name : place.fullName || place.area}</span>
+                <span className="block text-[15px] font-medium truncate">{place.name}</span>
+                <span className="block text-sm text-neutral-500 truncate">{place.fullName || place.area}</span>
               </span>
             </button>
           </li>
