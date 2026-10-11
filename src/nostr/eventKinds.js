@@ -24,6 +24,8 @@ export const EVENT_KINDS = {
   RIDE_STAGE: 30085, // Driver progress on an accepted ride: arrived / riding
   RIDE_PAYMENT: 30086, // Rider's record of a payment (proof sealed to the driver): evidence
   RIDE_CONFIRM: 30087, // Rider's own confirmation: boarded / trip ended OK or a problem: evidence
+  RIDE_PICKUP_CHANGE: 30093, // Rider asks to change the pickup while the driver is on the way (exact place sealed)
+  RIDE_PICKUP_REPLY: 30094, // The assigned driver accepts or declines that change
   RATING: 30082, // A star rating + review
   DRIVER_ROUTE: 30083, // (removed feature; kept for back-compat)
 
@@ -42,4 +44,5 @@ export const EVENT_KINDS = {
 
   // Ephemeral (20000–29999): relays pass to live subscribers, not stored.
   RIDE_LOCATION: 21100, // encrypted: live location to the matched rider
+  RIDE_METER: 21101, // encrypted: the rider's app tells the driver's app the agreed trip distances (lib/meter.js)
 };

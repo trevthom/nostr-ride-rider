@@ -89,6 +89,9 @@ src/
   lib/
     rides.js      # trust rules: rideVersions/rideStatus/rideEnding/rideStage/rideDriver/rideKey/reputation
     trips.js      # derive current state: activeRideFor, activeDriveFor, offersForRide, rankOffers/offerGender, offerFrom, pendingOfferFor, acceptFor, upcomingRidesFor, isScheduledLater
+    odometer.js   # stepOdo/newOdo: miles of a GPS track (skips wobble, bad fixes, glitches) (pure)
+    meter.js      # referenceMiles (driver's distance unless the rider's differs >5%), meterView, fmt* (pure)
+    pickup.js     # pickupChange(request): pending|accepted|declined; PICKUP_CHANGE_NOTE (the exact place logic is in privacy.js)
     fare.js       # quoteFare/fareUsd/usdToSats/depositSats/pickupEta + normalizeRates/typicalFareUsd/median/satsFromUsd/usdFromSats/offerLimitsSats/offerLevel/replyKind (pure)
     earnings.js   # completedDrives, summarizeEarnings
     privacy.js    # publicPlace, seal/unseal, exactTrip, sealVehicle/myVehicle/offerPlate, sealLicense/myLicense
@@ -106,7 +109,7 @@ src/
     Layout.jsx    # AppFrame, MapPage (+ measures the Sheet so the map pads for it), Sheet (collapsible with `peek`/openKey/closeKey), FloatButton, Screen, TabBar
     MapView.jsx   # Leaflet + OpenStreetMap tiles; pins, OSRM route, cars, "me" dot, price pills, ref.fit(); trip mode (`navigation` + `follow`)
     Button.jsx Icon.jsx Avatar.jsx Rating.jsx Money.jsx Parts.jsx (Row, Toggle, Field, ConfirmDialog, Modal, Spinner)
-    AmountInput.jsx ($ or sats, unit swap; offers and counters)  RatingForm.jsx ContactSheet.jsx UserModal.jsx NoticeBanner.jsx ErrorBoundary.jsx RelayEditor.jsx QRCode.jsx SatsAmount.jsx
+    AmountInput.jsx ($ or sats, unit swap; offers, counters, tips)  TripMeter.jsx (time + distance card, peekMeter)  RatingForm.jsx ContactSheet.jsx UserModal.jsx NoticeBanner.jsx ErrorBoundary.jsx RelayEditor.jsx QRCode.jsx SatsAmount.jsx
   features/
     auth/        AuthScreen (role-aware copy) + AuthSteps (unlock, key backup)
     profile/     ProfileParts (useSaveProfile, AccountHeader, ContactMethods, RelaysSection, LogoutButton),
@@ -116,9 +119,10 @@ src/
     App.jsx  state/RiderContext.jsx
     screens/ HomeScreen (dispatch) PlanTrip (idle/search/quote) ActiveTrip (searching/choose/pay deposit)
              OnTrip (enroute/arrived/riding) Receipt  ActivityScreen  AccountScreen
-    components/ PlaceSearch, GenderPref, DriverInfo (+ Plate, useDriverInfo)
+    state/ useRiderMeter (rider's own odometers + the 5% rule)
+    components/ PlaceSearch, GenderPref, ChangePickup, TipSheet, DriverInfo (+ Plate, useDriverInfo)
   driver/
-    App.jsx  state/DriverContext.jsx
+    App.jsx  state/DriverContext.jsx  state/useDriveOdometer.js
     screens/ HomeScreen (dispatch) Onboarding OnlineHome (offline GO / online / incoming card / waiting)
              DriveTrip  DriveSummary  EarningsScreen  AccountScreen
     components/ RiderInfo, Checklist
@@ -136,13 +140,16 @@ test/*.test.mjs
 | 30082 | RATING | `p`(ratee), `e`(ride), `d`, `t` | `{rating, review, rideId}` |
 | 30083 | DRIVER_ROUTE | | unused (feature removed) |
 | 30084 | RIDE_COMPLETE | `e`(request), `p`(rider), `d`, `t` | `{requestId}` — by the assigned driver |
-| 30085 | RIDE_STAGE | `e`(request), `p`(rider), `d`="stage-<rideKey>", `t` | `{stage: "arrived" \| "riding"}` — by the assigned driver |
-| 30086 | RIDE_PAYMENT | `e`(request), `p`(driver), `d`="pay-<rideKey>-<phase>", `t` | `{phase:"deposit"\|"rest", amountSats, level, sealed}` — by the rider; `sealed` = `{pr, preimage, verify}` NIP-44 to the driver |
+| 30085 | RIDE_STAGE | `e`(request), `p`(rider), `d`="stage-<rideKey>", `t` | `{stage: "arrived" \| "riding", at, arrivedAt?}` — by the assigned driver; `at` = ms now, the "riding" marker recalls `arrivedAt` (a relay keeps only the newest marker) |
+| 30086 | RIDE_PAYMENT | `e`(request), `p`(driver), `d`="pay-<rideKey>-<phase>" (`-tip-<ms>` for a tip), `t` | `{phase:"deposit"\|"rest"\|"tip", amountSats, level, sealed}` — by the rider; `sealed` = `{pr, preimage, verify}` NIP-44 to the driver |
 | 30087 | RIDE_CONFIRM | `e`(request), `p`(driver), `d`="confirm-<rideKey>-<phase>", `t` | `{phase:"boarded"\|"ended"\|"problem", ok, note}` — by the rider |
+| 30093 | RIDE_PICKUP_CHANGE (addressable) | `e`(request), `p`(driver), `d`="pickup-<rideKey>-<changeId>", `t` | `{changeId, sealedDriver, sealedSelf}` — the new pickup `{pickup:{name,lat,lng}}` NIP-44 to the driver and to the rider; only the ride's rider |
+| 30094 | RIDE_PICKUP_REPLY (addressable) | `e`(request), `p`(rider), `d`="pickup-reply-<changeId>", `t` | `{changeId, accepted}` — only the assigned driver |
 | 30092 | DRIVER_LICENSE (addressable) | `d`="license", `t` | `{sealed}` or `{}` (removed) — the license photo (data URL) NIP-44 to the driver's OWN key; never sent to riders |
 | 30091 | TRIP_SHARE (addressable) | `d`="share", `t`, `expiration` | `{sealed}` — signed by a throwaway key; payload encrypted with that key (in the link #fragment) |
 | 30090 | PRESENCE (addressable) | `d`="presence", `t`, `expiration` | `{name, npub, vehicle, rates?, lat, lng, ts}` — public, coarsened location |
-| 21100 | RIDE_LOCATION (ephemeral) | `p`(rider), `expiration` | NIP-44 encrypted `{lat, lng, ts}` — exact, to rider only |
+| 21100 | RIDE_LOCATION (ephemeral) | `p`(rider), `expiration` | NIP-44 encrypted `{lat, lng, ts, pm?, tm?}` — exact, to rider only; `pm`/`tm` = the driver's odometer (miles to the pickup / on the trip) |
+| 21101 | RIDE_METER (ephemeral) | `p`(driver), `expiration` | NIP-44 encrypted `{ts, pm?, tm?}` — rider → driver: the distances both screens show (`referenceMiles`) |
 
 `status` ∈ `requested | accepted | in_progress | completed | cancelled`. The
 rider's `in_progress` version also carries `driverPubkey`. Stage is `enroute`
@@ -229,6 +236,19 @@ rider's `in_progress` version also carries `driverPubkey`. Stage is `enroute`
   vehicle photo + plate state/number + driver's license photo (`user.license`) + Lightning address. Gender is optional. Until then the
   Drive tab shows Onboarding and GO is unavailable. Every message about what is missing comes from `driveGaps`/`gapsText`
   so it names the exact items; keep it that way when adding a requirement.
+- **Tips**: optional and never required. `TipSheet` (opened from the Receipt's quiet link and from Activity → past trip, any time after the ride)
+  pays the driver's `lud16` via `PayDriver` and records `recordPayment(..., "tip", ...)` (a new d-tag each time, so there can be several). `tipsOf(request)`
+  (lib/evidence.js) reads them without keys (amount is public, only the rider can author, completed rides only); earnings count a tip on the day it was sent.
+- **Changing the pickup** (lib/privacy.js `pickupProposals/pickupReplies/acceptedPickup`, lib/pickup.js): the rider proposes (30093, new place sealed to the
+  driver AND to the rider), the assigned driver accepts/declines (30094). `exactTrip(request, user)` swaps in the newest ACCEPTED pickup, so every screen
+  follows. Pending/declined changes change nothing. It must NEVER reset or change the odometers and clocks (cancellation miles/minutes), and both people are told
+  (`PICKUP_CHANGE_NOTE`).
+- **Trip meter** (lib/odometer.js, lib/meter.js): the driver's odometer rides in each location update (`pm`,`tm`); the rider's app (`useRiderMeter`) keeps its OWN figure
+  inside the code (own phone GPS during the trip, the car's position updates on the way to the pickup), applies `referenceMiles` (driver's distance unless the rider's
+  differs by more than 5%; 0.05 mi floor near zero), and sends the result to the driver (21101) so both screens agree. The rider's own figure is never displayed. Times come
+  from `rideTimes(request)` (signed stage markers; they carry earlier times because relays keep only the newest marker). Display only for now.
+- **nostr-tools filters**: `pool.subscribeMany(relays, filter, params)` and `querySync` take ONE filter OBJECT in the installed 2.25 (an array reaches the relay as an
+  invalid filter and live subscriptions silently die). `test/pool-api.test.mjs` guards it. Test relays must be strict about this too.
 - **Pickup from GPS**: `PlaceSearch` fills the pickup from `here` on its own unless the rider typed or cleared it; it shows a
   *Done* button when both places are set.
 - **Completion is driver-driven**; the rider can cancel. Both sides get an optional rating

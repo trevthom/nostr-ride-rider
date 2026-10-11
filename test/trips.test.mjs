@@ -108,9 +108,9 @@ const drives = E.completedDrives(latestVersions(relay.query({ kinds: [K.RIDE_REQ
   .filter((d) => d.at > base - 40 * day && d.at <= base);
 assert.deepEqual(drives.map((d) => d.fareSats), [7200, 5000, 4000], "newest first, offer price used");
 const sum = E.summarizeEarnings(drives, base * 1000 + 3600_000);
-assert.deepEqual(sum.today, { sats: 7200, trips: 1 });
-assert.deepEqual(sum.week, { sats: 12200, trips: 2 });
-assert.deepEqual(sum.all, { sats: 16200, trips: 3 });
+assert.deepEqual(sum.today, { sats: 7200, trips: 1, tips: 0 });
+assert.deepEqual(sum.week, { sats: 12200, trips: 2, tips: 0 });
+assert.deepEqual(sum.all, { sats: 16200, trips: 3, tips: 0 });
 
 console.log("trips checks passed");
 process.exit(0);

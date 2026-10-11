@@ -15,6 +15,8 @@
 //      matched rider, end-to-end encrypted with NIP-44.
 //
 //  Subscriptions re-open automatically if the relay list changes.
+//  NOTE: nostr-tools 2.25 takes ONE filter object in subscribeMany / querySync,
+//  not an array of filters (an array reaches the relay as an invalid filter).
 // ════════════════════════════════════════════════════════════
 
 import { SimplePool } from "nostr-tools/pool";
@@ -97,7 +99,7 @@ export function subscribePresence(onDrivers, { excludePubkey } = {}) {
     // Pull current presences once.
     pool.querySync(getRelays(), filter).then((evs) => { if (!closed) evs.forEach(take); }).catch(() => {});
     // Then stream updates.
-    sub = pool.subscribeMany(getRelays(), [filter], { onevent: take });
+    sub = pool.subscribeMany(getRelays(), filter, { onevent: take });
   };
 
   open();
@@ -114,9 +116,10 @@ export function subscribePresence(onDrivers, { excludePubkey } = {}) {
 // ── Ride location (encrypted, driver → matched rider) ────────
 
 // Driver publishes their exact location, encrypted to one rider.
-export async function publishRideLocation(user, riderPubkey, { lat, lng }) {
+// `pm` and `tm` are the driver's odometers (miles to the pickup, miles on the trip).
+export async function publishRideLocation(user, riderPubkey, { lat, lng, pm, tm }) {
   const key = nip44.getConversationKey(user.sk, riderPubkey);
-  const content = nip44.encrypt(JSON.stringify({ lat, lng, ts: Date.now() }), key);
+  const content = nip44.encrypt(JSON.stringify({ lat, lng, ts: Date.now(), ...(Number.isFinite(pm) && { pm: Math.round(pm * 100) / 100 }), ...(Number.isFinite(tm) && { tm: Math.round(tm * 100) / 100 }) }), key);
   const event = finalizeEvent(
     {
       kind: EVENT_KINDS.RIDE_LOCATION,
@@ -143,7 +146,7 @@ export function subscribeRideLocation(user, driverPubkey, onLocation) {
     try { sub && sub.close(); } catch { /* ignore */ }
     sub = pool.subscribeMany(
       getRelays(),
-      [{ kinds: [EVENT_KINDS.RIDE_LOCATION], authors: [driverPubkey], "#p": [user.publicKey], "#t": [APP_TAG] }],
+      { kinds: [EVENT_KINDS.RIDE_LOCATION], authors: [driverPubkey], "#p": [user.publicKey], "#t": [APP_TAG] },
       {
         onevent(ev) {
           try {
@@ -156,6 +159,56 @@ export function subscribeRideLocation(user, driverPubkey, onLocation) {
     );
   };
 
+  open();
+  const offChange = onRelaysChange(open);
+  return () => {
+    offChange();
+    try { sub && sub.close(); } catch { /* ignore */ }
+  };
+}
+
+// ── Trip meter (encrypted, rider → matched driver) ───────────
+// The rider's app works out the distances both screens show (lib/meter.js) and sends them to the
+// driver's app, so the two screens agree. Ephemeral: only the latest matters.
+export async function publishMeter(user, driverPubkey, { pm, tm }) {
+  const key = nip44.getConversationKey(user.sk, driverPubkey);
+  const content = nip44.encrypt(JSON.stringify({ ts: Date.now(), ...(Number.isFinite(pm) && { pm: Math.round(pm * 100) / 100 }), ...(Number.isFinite(tm) && { tm: Math.round(tm * 100) / 100 }) }), key);
+  const event = finalizeEvent(
+    {
+      kind: EVENT_KINDS.RIDE_METER,
+      created_at: nowSec(),
+      tags: [["p", driverPubkey], ["t", APP_TAG], ["expiration", String(nowSec() + 60)]],
+      content,
+    },
+    user.sk
+  );
+  try {
+    await Promise.allSettled(pool.publish(getRelays(), event));
+  } catch {
+    /* ignore */
+  }
+}
+
+// Driver subscribes to the matched rider's meter. Calls onMeter({pm, tm, ts}). Returns unsubscribe.
+export function subscribeMeter(user, riderPubkey, onMeter) {
+  const key = nip44.getConversationKey(user.sk, riderPubkey);
+  let sub = null;
+  const open = () => {
+    try { sub && sub.close(); } catch { /* ignore */ }
+    sub = pool.subscribeMany(
+      getRelays(),
+      { kinds: [EVENT_KINDS.RIDE_METER], authors: [riderPubkey], "#p": [user.publicKey], "#t": [APP_TAG] },
+      {
+        onevent(ev) {
+          try {
+            onMeter(JSON.parse(nip44.decrypt(ev.content, key)));
+          } catch {
+            /* ignore undecryptable */
+          }
+        },
+      }
+    );
+  };
   open();
   const offChange = onRelaysChange(open);
   return () => {

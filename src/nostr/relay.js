@@ -35,6 +35,8 @@ const APP_KINDS = [
   EVENT_KINDS.RIDE_STAGE,
   EVENT_KINDS.RIDE_PAYMENT,
   EVENT_KINDS.RIDE_CONFIRM,
+  EVENT_KINDS.RIDE_PICKUP_CHANGE,
+  EVENT_KINDS.RIDE_PICKUP_REPLY,
   EVENT_KINDS.RATING,
 ];
 
@@ -91,7 +93,7 @@ class NostrRelay {
     try {
       this.sub = this.pool.subscribeMany(
         getRelays(),
-        [{ kinds: APP_KINDS, "#t": [APP_TAG], since: nowSec() - 86400 }], // only our events, last 24h
+        { kinds: APP_KINDS, "#t": [APP_TAG], since: nowSec() - 86400 }, // only our events, last 24h (ONE filter object, not an array)
         { onevent: (ev) => this._ingest(ev) }
       );
     } catch (e) {
@@ -168,7 +170,7 @@ class NostrRelay {
         .filter((e) => dset.has((e.tags.find((t) => t[0] === "d") || [])[1]))
         .map((e) => e.id);
       for (const ids of chunks(versionIds)) {
-        take(await q({ kinds: [EVENT_KINDS.RIDE_CANCEL, EVENT_KINDS.RIDE_COMPLETE, EVENT_KINDS.RIDE_STAGE, EVENT_KINDS.RIDE_PAYMENT, EVENT_KINDS.RIDE_CONFIRM, EVENT_KINDS.RATING], "#e": ids }));
+        take(await q({ kinds: [EVENT_KINDS.RIDE_CANCEL, EVENT_KINDS.RIDE_COMPLETE, EVENT_KINDS.RIDE_STAGE, EVENT_KINDS.RIDE_PAYMENT, EVENT_KINDS.RIDE_CONFIRM, EVENT_KINDS.RIDE_PICKUP_CHANGE, EVENT_KINDS.RIDE_PICKUP_REPLY, EVENT_KINDS.RATING], "#e": ids }));
       }
     } catch (e) {
       console.error("History fetch failed:", e);

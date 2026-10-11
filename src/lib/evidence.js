@@ -6,12 +6,14 @@
 //      the two of them can read it.
 //    • the rider's confirmations (kind 30087): "boarded" and "ended".
 //    • the driver's stage markers and completion (already in rides.js).
+//  • tips: a payment record with phase "tip". The rider may send any number of
+//    them, at any time after the ride is completed (optional, never required).
 //  Only the RIDE'S RIDER can author a payment record or a confirmation.
 // ════════════════════════════════════════════════════════════
 
 import { relay } from "../nostr/relay.js";
 import { EVENT_KINDS } from "../nostr/eventKinds.js";
-import { rideVersions, rideDriver } from "./rides.js";
+import { rideVersions, rideDriver, rideStatus } from "./rides.js";
 import { unseal } from "./privacy.js";
 import { preimageMatches } from "./bolt11.js";
 import { invoiceAmountMsat, invoiceStatus } from "./lnurl.js";
@@ -46,7 +48,23 @@ export function paymentRecords(request, user) {
       const detail = c.sealed ? unseal(user.sk, counterparty, c.sealed) : null;
       return { phase: c.phase, amountSats: Number(c.amountSats) || 0, level: c.level || "claimed", at: e.created_at, detail };
     })
-    .filter((r) => r.phase === "deposit" || r.phase === "rest");
+    .filter((r) => r.phase === "deposit" || r.phase === "rest" || r.phase === "tip");
+}
+
+// The tips the rider sent for a ride: [{ sats, at }] oldest first. Needs no keys: the
+// amount is in the public part of the record, and only the ride's rider can author one.
+// A tip only counts on a ride that was completed.
+export function tipsOf(request) {
+  const ids = new Set(rideVersions(request).map((e) => e.id));
+  const driver = rideDriver(request);
+  if (!driver || rideStatus(request) !== "completed") return [];
+  return relay
+    .query({ kinds: [EVENT_KINDS.RIDE_PAYMENT], "#e": [...ids], authors: [request.pubkey] })
+    .filter((e) => ids.has(etagOf(e)) && e.tags.some((t) => t[0] === "p" && t[1] === driver))
+    .sort((a, b) => a.created_at - b.created_at)
+    .map((e) => ({ c: parse(e) || {}, at: e.created_at }))
+    .filter(({ c }) => c.phase === "tip" && Number.isFinite(c.amountSats) && c.amountSats > 0 && c.amountSats <= 1e9)
+    .map(({ c, at }) => ({ sats: Math.round(c.amountSats), at }));
 }
 
 // The DRIVER's own check of a payment record (never trust the rider's word):

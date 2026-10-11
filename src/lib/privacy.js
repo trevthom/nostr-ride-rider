@@ -9,6 +9,8 @@
 //     to the chosen driver. exactTrip() reads whichever copy you may.
 //   • The driver's plate is sealed to their own key in their profile
 //     (vehicle.sealedPlate) and sent sealed to the rider in each offer.
+//   • A mid-ride change of the pickup (kinds 30093 / 30094) carries the new place sealed
+//     twice, to the driver and to the rider. It only counts once the assigned driver accepts.
 //   • The driver's license photo is sealed to their own key in its own event
 //     (kind 30092). It is never sent to a rider.
 // ════════════════════════════════════════════════════════════
@@ -17,7 +19,7 @@ import { nip44 } from "nostr-tools";
 import { relay } from "../nostr/relay.js";
 import { EVENT_KINDS } from "../nostr/eventKinds.js";
 import { getMetadata, getProfile } from "../nostr/profiles.js";
-import { rideVersions } from "./rides.js";
+import { rideVersions, rideDriver } from "./rides.js";
 
 const parse = (e) => { try { return JSON.parse(e.content); } catch { return null; } };
 const round2 = (n) => Math.round(n * 100) / 100; // ~1 km grid
@@ -71,7 +73,63 @@ export function exactTrip(request, user) {
     if (sealed) trip = unseal(user.sk, request.pubkey, sealed);
   }
   const pickup = place(trip?.pickup), dropoff = place(trip?.dropoff);
-  return pickup && dropoff ? { pickup, dropoff } : null;
+  if (!(pickup && dropoff)) return null;
+  // A pickup the rider changed on the way, and the driver accepted, replaces the first one.
+  const moved = user ? acceptedPickup(request, user) : null;
+  return { pickup: moved || pickup, dropoff };
+}
+
+// ── Changing the pickup mid-ride ──
+// The rider proposes a place (kind 30093); only the assigned driver's accept (kind 30094) makes it
+// count. Both are signed; only the ride's rider may propose and only its driver may answer.
+const etagOf = (e) => (e.tags.find((t) => t[0] === "e") || [])[1];
+
+// The rider's proposals for a ride, newest first: [{ event, c }].
+export function pickupProposals(request) {
+  const ids = rideVersions(request).map((e) => e.id);
+  return relay
+    .query({ kinds: [EVENT_KINDS.RIDE_PICKUP_CHANGE], authors: [request.pubkey], "#e": ids })
+    .filter((e) => ids.includes(etagOf(e)))
+    .map((event) => ({ event, c: parse(event) }))
+    .filter(({ c }) => c && typeof c.changeId === "string" && typeof c.sealedDriver === "string" && typeof c.sealedSelf === "string")
+    .sort((a, b) => b.event.created_at - a.event.created_at || (b.c.changeId < a.c.changeId ? -1 : b.c.changeId > a.c.changeId ? 1 : 0));
+}
+
+// The assigned driver's answers: [{ changeId, accepted, at }], newest first. Nobody else counts.
+export function pickupReplies(request) {
+  const driver = rideDriver(request);
+  if (!driver) return [];
+  const ids = rideVersions(request).map((e) => e.id);
+  return relay
+    .query({ kinds: [EVENT_KINDS.RIDE_PICKUP_REPLY], authors: [driver], "#e": ids })
+    .filter((e) => ids.includes(etagOf(e)))
+    .map((e) => ({ c: parse(e), at: e.created_at }))
+    .filter(({ c }) => c && typeof c.changeId === "string" && typeof c.accepted === "boolean")
+    .map(({ c, at }) => ({ changeId: c.changeId, accepted: c.accepted, at }))
+    .sort((a, b) => b.at - a.at);
+}
+
+// The place a proposal names, if `user` may read it (the rider, or the assigned driver). Else null.
+export function readPickup(proposal, request, user) {
+  if (!user) return null;
+  const sealed = user.publicKey === request.pubkey
+    ? unseal(user.sk, user.publicKey, proposal.c.sealedSelf)
+    : user.publicKey === rideDriver(request) ? unseal(user.sk, request.pubkey, proposal.c.sealedDriver) : null;
+  return place(sealed?.pickup);
+}
+
+// The pickup in force: the newest proposal the driver accepted, if `user` can read it.
+export function acceptedPickup(request, user) {
+  if (!rideDriver(request)) return null; // nothing to change before a driver is chosen
+  const replies = pickupReplies(request);
+  for (const p of pickupProposals(request)) {
+    const r = replies.find((x) => x.changeId === p.c.changeId);
+    if (r?.accepted) {
+      const at = readPickup(p, request, user);
+      if (at) return at;
+    }
+  }
+  return null;
 }
 
 // Split a vehicle into its public part + the plate sealed to ourselves.

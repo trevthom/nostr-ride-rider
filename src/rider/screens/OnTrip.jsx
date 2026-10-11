@@ -15,7 +15,7 @@ import { useRider } from "../state/RiderContext.jsx";
 import { subscribeRideLocation } from "../../nostr/live.js";
 import { haversineDistance } from "../../lib/geo.js";
 import { pickupEta } from "../../lib/fare.js";
-import { rideConfirm, rideDriver, rideStage } from "../../lib/rides.js";
+import { rideConfirm, rideDriver, rideStage, rideTimes } from "../../lib/rides.js";
 import { offerPlate } from "../../lib/privacy.js";
 import { offerFrom } from "../../lib/trips.js";
 import MapView from "../../ui/MapView.jsx";
@@ -28,6 +28,13 @@ import { ConfirmDialog } from "../../ui/Parts.jsx";
 import DriverInfo, { Plate, useDriverInfo, carText } from "../components/DriverInfo.jsx";
 import SafetySheet from "../components/SafetySheet.jsx";
 import Avatar from "../../ui/Avatar.jsx";
+import ChangePickup from "../components/ChangePickup.jsx";
+import { pickupChange, PICKUP_CHANGE_NOTE } from "../../lib/pickup.js";
+import { meterView } from "../../lib/meter.js";
+import { publishMeter } from "../../nostr/live.js";
+import TripMeter, { peekMeter } from "../../ui/TripMeter.jsx";
+import { useRiderMeter } from "../state/useRiderMeter.js";
+import { readPickup } from "../../lib/privacy.js";
 
 const r3 = (n) => Math.round(n * 1000) / 1000; // ~110 m: limits how often the route is re-fetched
 const miles = (a, b) => haversineDistance(a.lat, a.lng, b.lat, b.lng);
@@ -43,6 +50,7 @@ export default function OnTrip({ request, trip }) {
   const [contact, setContact] = useState(false);
   const [asking, setAsking] = useState(false);
   const [safety, setSafety] = useState(false);
+  const [changing, setChanging] = useState(false); // the change-pickup window
   const [, setNow] = useState(0);
   const vehicleSeen = useRef(null);
   const [routeInfo, setRouteInfo] = useState(null); // road time from the map's route
@@ -86,7 +94,23 @@ export default function OnTrip({ request, trip }) {
     return () => clearInterval(id);
   }, [share?.token, share?.sos, stage, loc?.lat, loc?.lng, toTarget]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Time and distance so far (the same on the driver's screen). The rider's own GPS figure is used inside
+  // the code only (lib/meter.js); it is sent to the driver's app, so both screens agree.
+  const meter = useRiderMeter({ request, stage, loc, pos: myPosition });
+  const view = meterView({ stage, times: rideTimes(request), nowMs: Date.now(), pickupMiles: meter.pickupMiles, tripMiles: meter.tripMiles });
+  const latestMeter = useRef(meter);
+  latestMeter.current = meter;
+  useEffect(() => {
+    if (!driverPubkey) return;
+    const send = () => publishMeter(user, driverPubkey, { pm: latestMeter.current.pickupMiles, tm: latestMeter.current.tripMiles });
+    send();
+    const id = setInterval(send, 6000);
+    return () => clearInterval(id);
+  }, [driverPubkey, user]);
+
   const confirm = rideConfirm(request);
+  const change = pickupChange(request); // the rider's latest request to move the pickup, and the driver's answer
+  const proposedName = change ? readPickup(change.proposal, request, user)?.name : null;
 
   const headline =
     stage === "arrived" ? "Your driver has arrived"
@@ -125,7 +149,12 @@ export default function OnTrip({ request, trip }) {
       {/* Nearly collapsed while riding; it opens by itself when the driver arrives (to check the car). */}
       <Sheet
         label="Your trip"
-        peek={<p className="font-bold text-[17px] leading-6 truncate">{headline}</p>}
+        peek={
+          <div className="flex items-baseline gap-2">
+            <p className="font-bold text-[17px] leading-6 truncate flex-1">{headline}</p>
+            <span className="text-sm text-neutral-500 shrink-0 tabular-nums">{peekMeter(view)}</span>
+          </div>
+        }
         openKey={stage === "arrived" ? "arrived" : ""}
         closeKey={stage}
       >
@@ -136,6 +165,8 @@ export default function OnTrip({ request, trip }) {
             {loc ? (live ? "Live location" : `Driver's location updated ${age < 120 ? `${age}s` : `${Math.round(age / 60)} min`} ago`) : "Waiting for your driver's location…"}
           </p>
         )}
+
+        <TripMeter view={view} className="mt-3" />
 
         <div className="mt-4 pt-4 border-t border-neutral-100">
           {driverPubkey ? <DriverInfo pubkey={driverPubkey} offerEvent={offer} /> : <p className="text-neutral-500">Driver details are loading…</p>}
@@ -180,6 +211,27 @@ export default function OnTrip({ request, trip }) {
           </button>
         </div>
 
+        {/* Changing the pickup (only while the driver is still on the way) */}
+        {stage === "enroute" && (
+          <div className="mt-3">
+            {change?.status === "pending" && (
+              <p className="text-sm text-amber-800 bg-amber-50 rounded-xl px-3 py-2" role="status">
+                Waiting for your driver to accept the new pickup{proposedName ? `: ${proposedName}` : ""}. You still meet at {pickup.name} until they do.
+              </p>
+            )}
+            {change?.status === "declined" && (
+              <p className="text-sm text-amber-800 bg-amber-50 rounded-xl px-3 py-2" role="status">Your driver declined the new pickup, so you still meet at {pickup.name}.</p>
+            )}
+            {change?.status === "accepted" && (
+              <p className="text-sm text-[#05683a] bg-[#e6f4ec] rounded-xl px-3 py-2" role="status">Your driver accepted the new pickup: {pickup.name}.</p>
+            )}
+            {change && <p className="text-xs text-neutral-500 mt-1.5">{PICKUP_CHANGE_NOTE}</p>}
+            <button type="button" onClick={() => setChanging(true)} className="mt-2 text-sm font-semibold underline">
+              {change?.status === "pending" ? "Change it again" : "Change pickup"}
+            </button>
+          </div>
+        )}
+
         <div className="mt-4 pt-4 border-t border-neutral-100 flex items-start gap-3">
           <div className="flex flex-col items-center pt-1.5" aria-hidden="true">
             <span className="w-2 h-2 rounded-full bg-black" />
@@ -199,6 +251,7 @@ export default function OnTrip({ request, trip }) {
         </div>
       </Sheet>
 
+      {changing && <ChangePickup request={request} onClose={() => setChanging(false)} />}
       <SafetySheet open={safety} onClose={() => setSafety(false)} request={request} destination={dropoff.name} />
       <ContactSheet open={contact} onClose={() => setContact(false)} pubkey={driverPubkey} name={profile?.name} />
       <ConfirmDialog

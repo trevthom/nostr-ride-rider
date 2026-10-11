@@ -1,7 +1,8 @@
 // ════════════════════════════════════════════════════════════
 //  RECEIPT — Shown after a trip ends. For a completed trip: the fare,
 //  paying the rest of it (the deposit was paid up front), and an optional
-//  rating of the driver. For a trip the driver cancelled: a short notice.
+//  rating of the driver, and a quiet "Leave a tip" link (a tip is optional and can
+//  be sent any time later from Activity). For a trip the driver cancelled: a short notice.
 //  "Paid" is remembered on this device so the rest is never paid twice.
 // ════════════════════════════════════════════════════════════
 
@@ -21,6 +22,8 @@ import { ConfirmDialog, Modal, inputCls } from "../../ui/Parts.jsx";
 import BlockButton from "../../ui/BlockButton.jsx";
 import PayDriver from "../../features/payments/PayDriver.jsx";
 import DriverInfo from "../components/DriverInfo.jsx";
+import TipSheet from "../components/TipSheet.jsx";
+import { tipsOf } from "../../lib/evidence.js";
 
 const parse = (e) => { try { return JSON.parse(e.content); } catch { return null; } };
 
@@ -41,6 +44,8 @@ export default function Receipt({ request }) {
   const [rated, setRated] = useState(false);
   const [leaving, setLeaving] = useState(false);
   const [reporting, setReporting] = useState(false);
+  const [tipping, setTipping] = useState(false);
+  const tipped = tipsOf(request).reduce((s, t) => s + t.sats, 0);
   const [note, setNote] = useState("");
   const [reported, setReported] = useState(!!rideConfirm(request).ended && !rideConfirm(request).ended.ok);
 
@@ -121,6 +126,12 @@ export default function Receipt({ request }) {
           </div>
         )}
 
+        {driverPubkey && (
+          <p className="text-sm mt-4">
+            {tipped > 0 && <span className="text-[#05944f] font-medium mr-2">Tip sent: <Money sats={tipped} className="font-semibold" />.</span>}
+            <button type="button" onClick={() => setTipping(true)} className="font-medium underline">{tipped > 0 ? "Tip again" : "Leave a tip (optional)"}</button>
+          </p>
+        )}
         {reported ? (
           <p className="text-sm text-neutral-600 mt-4">Your report was sent. The trip record is saved with it.</p>
         ) : (
@@ -140,6 +151,7 @@ export default function Receipt({ request }) {
         onConfirm={() => { setLeaving(false); finish(); }}
         onCancel={() => setLeaving(false)}
       />
+      {tipping && <TipSheet request={request} onClose={() => setTipping(false)} />}
       <Modal open={reporting} title="Report a problem" onClose={() => setReporting(false)}>
         <p className="text-neutral-600 text-[15px] mb-3">
           Say what went wrong. Your report is signed and saved with this trip's payment and driver records.

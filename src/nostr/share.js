@@ -84,6 +84,6 @@ export function subscribeShare(token, relays, onUpdate) {
   };
   let closed = false;
   pool.querySync(relays, filter).then((evs) => { if (!closed) evs.forEach(take); }).catch(() => {});
-  const sub = pool.subscribeMany(relays, [filter], { onevent: take });
+  const sub = pool.subscribeMany(relays, filter, { onevent: take });
   return () => { closed = true; try { sub.close(); } catch { /* ignore */ } };
 }

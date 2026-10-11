@@ -132,6 +132,38 @@ function computeStage(request) {
   return RIDE_STAGES[best];
 }
 
+// When each part of a drive began, in ms, from the signed events:
+//   { confirmedAt, arrivedAt, startedAt } (each null until it happens).
+// Stage markers are replaceable, so a relay keeps only the newest one. Each marker therefore
+// also carries the earlier times (`at`, and `arrivedAt` on the "riding" marker). A time claimed in
+// a marker is believed only if it is within 10 minutes of the event's own timestamp.
+export function rideTimes(request) {
+  return cached("tm:" + request.id, () => computeTimes(request));
+}
+function computeTimes(request) {
+  const { ids, rider, driver } = rideParties(request);
+  const out = { confirmedAt: null, arrivedAt: null, startedAt: null };
+  if (!driver) return out;
+  const accept = relay
+    .query({ kinds: [EVENT_KINDS.RIDE_ACCEPT], authors: [rider], "#p": [driver], "#e": [...ids] })
+    .sort((a, b) => a.created_at - b.created_at)[0];
+  out.confirmedAt = accept ? accept.created_at * 1000 : null;
+  const near = (claim, e) => (Number.isFinite(claim) && Math.abs(claim - e.created_at * 1000) <= 600000 ? claim : null);
+  const earliest = (a, b) => (a == null ? b : b == null ? a : Math.min(a, b));
+  relay.query({ kinds: [EVENT_KINDS.RIDE_STAGE], "#e": [...ids], authors: [driver] }).forEach((e) => {
+    if (!ids.has(etagOf(e))) return;
+    const c = parse(e) || {};
+    const own = near(c.at, e) ?? e.created_at * 1000;
+    if (c.stage === "arrived") out.arrivedAt = earliest(out.arrivedAt, own);
+    if (c.stage === "riding") {
+      out.startedAt = earliest(out.startedAt, own);
+      // The time of arrival may be recalled inside the riding marker (it can be older than the event).
+      if (Number.isFinite(c.arrivedAt) && c.arrivedAt <= own && own - c.arrivedAt <= 6 * HOUR) out.arrivedAt = earliest(out.arrivedAt, c.arrivedAt);
+    }
+  });
+  return out;
+}
+
 // The rider's own confirmations of a ride, newest per phase:
 // { boarded?, ended?, problem? }, each {ok, note, at}. ("problem" = reported mid-trip.)
 // Only the rider's count.

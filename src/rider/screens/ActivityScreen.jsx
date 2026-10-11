@@ -18,6 +18,8 @@ import Money from "../../ui/Money.jsx";
 import Button from "../../ui/Button.jsx";
 import Icon from "../../ui/Icon.jsx";
 import DriverInfo from "../components/DriverInfo.jsx";
+import TipSheet from "../components/TipSheet.jsx";
+import { tipsOf } from "../../lib/evidence.js";
 import { whenText } from "./ActiveTrip.jsx";
 
 const parse = (e) => { try { return JSON.parse(e.content); } catch { return null; } };
@@ -129,6 +131,8 @@ function PastTrip({ request, trip, onClose }) {
     .find((r) => ids.has((r.tags.find((t) => t[0] === "e") || [])[1]));
   const review = mine ? parse(mine) : null;
   const driver = driverPubkey ? getProfile(driverPubkey) : null;
+  const [tipping, setTipping] = useState(false);
+  const tipped = tipsOf(request).reduce((s, t) => s + t.sats, 0);
 
   return (
     <Modal open title={done ? "Trip details" : "Cancelled trip"} onClose={onClose}>
@@ -143,6 +147,7 @@ function PastTrip({ request, trip, onClose }) {
         <dl className="rounded-2xl bg-neutral-100 px-4 py-3 space-y-2 text-[15px] mb-4">
           <div className="flex justify-between"><dt className="font-semibold">Total</dt><dd><Money sats={o.priceSats} className="font-bold" /></dd></div>
           {o.upfrontSats > 0 && <div className="flex justify-between"><dt className="text-neutral-600">Deposit</dt><dd><Money sats={o.upfrontSats} /></dd></div>}
+          {tipped > 0 && <div className="flex justify-between"><dt className="text-neutral-600">Tip</dt><dd><Money sats={tipped} /></dd></div>}
         </dl>
       )}
       {driverPubkey && <DriverInfo pubkey={driverPubkey} offerEvent={offer} compact />}
@@ -152,7 +157,11 @@ function PastTrip({ request, trip, onClose }) {
           {review.review && <p className="text-neutral-600 mt-1">{review.review}</p>}
         </div>
       )}
+      {done && driverPubkey && (
+        <Button size="md" variant="secondary" className="mt-4" onClick={() => setTipping(true)}>{tipped > 0 ? "Tip again" : "Leave a tip"}</Button>
+      )}
       {!driver && !driverPubkey && <p className="text-neutral-500 text-sm">No driver was assigned.</p>}
+      {tipping && <TipSheet request={request} onClose={() => setTipping(false)} />}
     </Modal>
   );
 }

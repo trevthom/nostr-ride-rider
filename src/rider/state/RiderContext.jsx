@@ -8,7 +8,7 @@
 //    • the CURRENT ride, derived from signed events (so a reload or
 //      another device shows the same screen) and the receipt to show
 //      after a trip
-//    • actions: requestRide, raiseOffer, confirmDriver, cancelRide, rateDriver
+//    • actions: requestRide, raiseOffer, proposePickup, confirmDriver, cancelRide, rateDriver
 //  Banners: offers arriving, driver arrived, trip done, driver cancelled.
 // ════════════════════════════════════════════════════════════
 
@@ -22,6 +22,7 @@ import { reverseGeocode } from "../../lib/geocode.js";
 import { haversineDistance } from "../../lib/geo.js";
 import { pickupEta } from "../../lib/fare.js";
 import { publicPlace, seal, exactTrip } from "../../lib/privacy.js";
+import { PICKUP_CHANGE_NOTE } from "../../lib/pickup.js";
 import { activeRideFor, isOpenRide, upcomingRidesFor } from "../../lib/trips.js";
 import { rideDriver, rideEnding, rideKey, rideStatus, rideVersions } from "../../lib/rides.js";
 import { getSetting, setSetting } from "../../config/relays.js";
@@ -151,6 +152,9 @@ export function RiderProvider({ children }) {
       else if (ev.kind === EVENT_KINDS.RIDE_STAGE && c?.stage === "arrived") pushNotice("Your driver has arrived.");
       else if (ev.kind === EVENT_KINDS.RIDE_COMPLETE) pushNotice("Your trip is complete.");
       else if (ev.kind === EVENT_KINDS.RIDE_CANCEL) pushNotice("Your driver cancelled the ride.");
+      else if (ev.kind === EVENT_KINDS.RIDE_PICKUP_REPLY) {
+        pushNotice(c?.accepted ? `Your driver accepted the new pickup. ${PICKUP_CHANGE_NOTE}` : `Your driver declined the new pickup, so you still meet at the first place. ${PICKUP_CHANGE_NOTE}`);
+      }
     });
   }, [me, pushNotice, isBlockedPk]);
 
@@ -203,7 +207,7 @@ export function RiderProvider({ children }) {
   );
 
   // Keep a signed record of a payment (the proof is sealed to the driver, so only
-  // the two of them can read it). phase: "deposit" | "rest".
+  // the two of them can read it). phase: "deposit" | "rest" | "tip".
   const recordPayment = useCallback(
     (request, driverPubkey, phase, amountSats, proof) => {
       publish(
@@ -216,7 +220,8 @@ export function RiderProvider({ children }) {
             requestId: request.id, phase, amountSats, pr: proof.pr || "", preimage: proof.preimage || "", verify: proof.verify || "", at: Date.now(),
           }),
         },
-        [["e", request.id], ["p", driverPubkey], ["d", `pay-${rideKey(request)}-${phase}`], ["t", "ride-payment"]]
+        // A tip can be sent more than once, so each gets its own d-tag.
+        [["e", request.id], ["p", driverPubkey], ["d", `pay-${rideKey(request)}-${phase}${phase === "tip" ? "-" + Date.now() : ""}`], ["t", "ride-payment"]]
       );
     },
     [publish, user.sk]
@@ -269,6 +274,27 @@ export function RiderProvider({ children }) {
     [publish, refreshData, user, recordPayment]
   );
 
+  // Ask the driver (on the way to the pickup) to go to a different place. The new place is sealed to
+  // the driver and to the rider; it only takes effect when the driver accepts.
+  const proposePickup = useCallback(
+    (request, place) => {
+      const latest = rideVersions(request)[0] || request;
+      const driver = rideDriver(latest);
+      if (!driver || !place) return false;
+      const changeId = String(Date.now());
+      const pickup = { name: place.name, lat: place.lat, lng: place.lng };
+      publish(
+        EVENT_KINDS.RIDE_PICKUP_CHANGE,
+        { changeId, sealedDriver: seal(user.sk, driver, { pickup }), sealedSelf: seal(user.sk, me, { pickup }) },
+        [["e", latest.id], ["p", driver], ["d", `pickup-${rideKey(latest)}-${changeId}`], ["t", "ride-pickup"]]
+      );
+      refreshData();
+      pushNotice(`Sent to your driver, who can accept or decline. ${PICKUP_CHANGE_NOTE}`);
+      return true;
+    },
+    [publish, refreshData, user.sk, me, pushNotice]
+  );
+
   // Cancel the ride (open or running). A running ride tells the driver.
   const cancelRide = useCallback(
     (request) => {
@@ -319,7 +345,7 @@ export function RiderProvider({ children }) {
     share, startShare, stopShare, shareUpdate, shareUrl,
     activeRide, focused: !!focused, focusRide: (r) => setFocusId(r ? r.id : null), upcoming, receipt, dismissReceipt,
     genderPref, setGenderPref,
-    sendFailed, requestRide, raiseOffer, confirmDriver, recordPayment, confirmRide, cancelRide, rateDriver, recentPlaces,
+    sendFailed, requestRide, raiseOffer, proposePickup, confirmDriver, recordPayment, confirmRide, cancelRide, rateDriver, recentPlaces,
     nearestDriverEta: (to) => {
       if (!to || !drivers.length) return null;
       const miles = Math.min(...drivers.map((d) => haversineDistance(to.lat, to.lng, d.lat, d.lng)));

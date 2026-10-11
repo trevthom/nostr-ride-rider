@@ -20,26 +20,29 @@ Payments go straight from rider to driver over **Lightning**.
 4. [During a trip (both apps)](#during-a-trip-both-apps)
 5. [Typical fares (each driver sets their own)](#typical-fares-each-driver-sets-their-own)
 6. [Price offers and counter-offers](#price-offers-and-counter-offers)
-7. [Driver gender preference (optional)](#driver-gender-preference-optional)
-8. [Driver requirements](#driver-requirements)
-9. [Architecture](#architecture)
-10. [Nostr events](#nostr-events)
-11. [Privacy](#privacy)
-12. [Payments](#payments)
-13. [Location and GPS](#location-and-gps)
-14. [Safety](#safety)
-15. [Blocking](#blocking)
-16. [Disputes and evidence](#disputes-and-evidence)
-17. [Reliability](#reliability)
-18. [Native app and background GPS](#native-app-and-background-gps)
-19. [Configuration](#configuration)
-20. [Testing](#testing)
-21. [Deploying](#deploying)
-22. [Separate repositories (generated)](#separate-repositories-generated)
-23. [Self-hosting map services](#self-hosting-map-services)
-24. [Trying it on an iPhone](#trying-it-on-an-iphone-without-the-apple-developer-program)
-25. [Known limits and roadmap](#known-limits-and-roadmap)
-26. [Changelog](#changelog)
+7. [Tips (optional, any time after the ride)](#tips-optional-any-time-after-the-ride)
+8. [Changing the pickup while the driver is on the way](#changing-the-pickup-while-the-driver-is-on-the-way)
+9. [Trip time and distance (the meter)](#trip-time-and-distance-the-meter)
+10. [Driver gender preference (optional)](#driver-gender-preference-optional)
+11. [Driver requirements](#driver-requirements)
+12. [Architecture](#architecture)
+13. [Nostr events](#nostr-events)
+14. [Privacy](#privacy)
+15. [Payments](#payments)
+16. [Location and GPS](#location-and-gps)
+17. [Safety](#safety)
+18. [Blocking](#blocking)
+19. [Disputes and evidence](#disputes-and-evidence)
+20. [Reliability](#reliability)
+21. [Native app and background GPS](#native-app-and-background-gps)
+22. [Configuration](#configuration)
+23. [Testing](#testing)
+24. [Deploying](#deploying)
+25. [Separate repositories (generated)](#separate-repositories-generated)
+26. [Self-hosting map services](#self-hosting-map-services)
+27. [Trying it on an iPhone](#trying-it-on-an-iphone-without-the-apple-developer-program)
+28. [Known limits and roadmap](#known-limits-and-roadmap)
+29. [Changelog](#changelog)
 
 ## Quick start
 ```bash
@@ -114,6 +117,45 @@ signed events**, so a reload or a second device shows the same screen.
 - A rider with no replies can **change the offer** while waiting. The request is published again (same d-tag, new price); earlier replies stay valid.
 - Reservations work the same way.
 
+## Tips (optional, any time after the ride)
+- A tip is **never asked for**. The receipt only has a quiet *Leave a tip (optional)* link. After the receipt is closed, the rider can still tip
+  from **Activity → the past trip → Leave a tip**, at any time, and as often as they like.
+- Quick amounts ($1, $2, $5, $10) or **Other** (any amount in dollars and cents or sats, like an offer). The tip is paid over Lightning straight to
+  the driver's Lightning address (connected wallet, or any wallet by invoice).
+- Each tip is a signed payment record (kind 30086) with phase `tip`, sealed proof for the driver. Only the ride's rider can author one, and only on a
+  completed ride.
+- The driver gets a notice ("A rider sent you a $X tip"). The trip summary shows it, the trip record lists it, and **Earnings** include it
+  ("Includes $X in tips"). A tip counts on the day it was sent.
+
+## Changing the pickup while the driver is on the way
+- While the driver is on the way (before they arrive), the rider can tap **Change pickup**: search a place or use *Your location*, then
+  *Ask my driver to go there*.
+- The driver gets a notice and a card with the new place and how far it is from the first one. They **Accept new pickup** or **Keep first pickup**.
+  Until they accept, the first pickup stays for both people. If they accept, the route, the map and the trip record all use the new place.
+  If they decline, the rider is told and still meets at the first place (and may ask again).
+- **Changing the pickup does not change the miles or minutes already counted for a cancellation.** Both people are told this in the change window, on
+  the driver's card, and in the notices. (The odometers and clocks never reset when the pickup changes.)
+- The new place is end-to-end encrypted to the driver and the rider (kind 30093); the driver's answer is kind 30094. Only the ride's rider can propose
+  and only the assigned driver can answer; anyone else's event is ignored.
+
+## Trip time and distance (the meter)
+- During a trip both screens show **time and distance so far**: the drive to the pickup (from when the driver was confirmed until they arrive, with
+  the wait at the pickup shown separately) and the trip itself (from *Start trip*). The collapsed trip card shows the current figures.
+- **Which distance is shown.** The driver's app counts the miles of its own GPS. The rider's app counts its own figure and keeps it inside the code
+  (no screen shows it). The rule: **use the driver's distance as long as the rider's is within 5% of it; if they differ by more than 5%, use the
+  rider's.** The same rule is used for the driver's drive to the pickup (the rider's figure there comes from the car's position updates the
+  rider receives, since the rider is not in the car yet). During the trip the rider's figure is the rider's own phone GPS (or, if that is not
+  available, the car's position updates).
+  One addition: near zero a percentage means nothing, so a gap of 0.05 mile (about 80 m) or less always counts as "within".
+- The rider's app works out the result and sends it to the driver's app (encrypted, kind 21101), so **both screens show the same numbers**. If that
+  message is missing for 90 seconds, the driver's screen shows the driver's own figure.
+- **Counting miles** (`lib/odometer.js`): a fix worse than 50 m is skipped; a move smaller than 6 m (or half the accuracy) is GPS wobble; a jump faster than
+  120 mph is a glitch. Straight lines between fixes cut corners, so a track with few fixes reads a little low.
+- **Time** comes from the signed stage markers. A marker is replaceable on a relay (only the newest stays), so each carries the earlier times
+  (`at`, and `arrivedAt` on the "riding" marker). A time claimed in a marker is believed only if it is within 10 minutes of the event's timestamp.
+- Both odometers are saved on the device, so a reload keeps the count.
+- For now the meter is **for display only**. It will feed the proposed cancellation rules when those are built.
+
 ## Driver gender preference (optional)
 - A driver can set **Female**, **Male** or **Not set** in *Account → Gender*. It is stored in the driver's kind-0 profile (`gender`)
   and copied into each offer. It is self-declared.
@@ -152,12 +194,15 @@ More detail for contributors is in `CLAUDE.md` (the file map and every invariant
 | 30082 | Rating | either party | Stars and review |
 | 30084 | Ride complete | assigned driver | Ends a ride as completed |
 | 30085 | Ride stage | assigned driver | `arrived` / `riding` |
-| 30086 | Payment record | rider | Payment proof (invoice, preimage, LUD-21 URL) sealed to the driver |
+| 30086 | Payment record | rider | Payment proof (invoice, preimage, LUD-21 URL) sealed to the driver; phase `deposit`, `rest` or `tip` |
 | 30087 | Rider confirmation | rider | `boarded`, `ended`, or `problem` (with a note) |
+| 30093 | Pickup change | rider | A new pickup while the driver is on the way; the exact place sealed to the driver and the rider |
+| 30094 | Pickup change answer | assigned driver | Accept or decline that change |
 | 30092 | Driver license | driver | License photo, encrypted to the driver's own key; never shown to riders |
 | 30091 | Trip share | throwaway key | Live trip state for a "Share my trip" link, encrypted with a key in the link |
 | 30090 | Presence | driver | Online, coarse location, the driver's rates, short expiry |
-| 21100 | Ride location | driver | Exact location, encrypted to the rider, ephemeral |
+| 21100 | Ride location | driver | Exact location and the driver's odometer, encrypted to the rider, ephemeral |
+| 21101 | Trip meter | rider | The distances both screens show, encrypted to the driver, ephemeral |
 
 Every event carries the app tag `["t","nostrride"]` because kind numbers like 30078 are shared with other apps.
 
@@ -206,7 +251,7 @@ Either side can block. Blocking is **local to the app on this device**; the othe
 
 ## Disputes and evidence
 There is no escrow, so the apps keep a signed trail:
-- **Payment records** (kind 30086). After each payment the rider's app publishes a record: phase (`deposit` or `rest`), amount, how strongly it was checked, and the proof, sealed so only the rider and the driver can read it. The proof is the invoice, the payment preimage, and the LUD-21 verify URL.
+- **Payment records** (kind 30086). After each payment the rider's app publishes a record: phase (`deposit`, `rest` or `tip`), amount, how strongly it was checked, and the proof, sealed so only the rider and the driver can read it. The proof is the invoice, the payment preimage, and the LUD-21 verify URL.
 - **Proof level**: `preimage` (the preimage matches the invoice), `wallet` (the rider's wallet said it paid), `verify` (the Lightning server said settled), or `claimed` (the rider tapped "I've paid").
 - **The driver re-checks.** The driver app never trusts the rider's level. It asks the driver's own Lightning server (same host as the driver's Lightning address) whether the invoice is settled, and shows *Confirmed by your Lightning server*, *Proof matches the invoice* or *Not verified*.
 - **Rider confirmations** (kind 30087): `boarded`, `ended` (ok or a reported problem), and `problem` (mid-trip). Only the ride's rider can author them.
@@ -235,7 +280,7 @@ A web page cannot read the location with the screen off. `native/` wraps the **d
 
 ## Testing
 `npm test` runs `test/*.test.mjs` with Node's built-in runner: trust rules, ride stages, fares, trips,
-earnings, privacy, history, Lightning invoices, geocoding, publishing and the outbox, event ordering, contact links, GPS, payment evidence, blocking, trip sharing, native location, price offers and counters, driver rates, exact offer amounts, gender ordering, driver requirements, license privacy.
+earnings, privacy, history, Lightning invoices, geocoding, publishing and the outbox, event ordering, contact links, GPS, payment evidence, blocking, trip sharing, native location, tips, pickup changes, the odometer and the 5% distance rule, stage times, relay subscription calls, price offers and counters, driver rates, exact offer amounts, gender ordering, driver requirements, license privacy.
 The apps were also exercised end to end in a headless browser (a rider and a driver playing a full ride
 through a local relay). That harness is not in the repo.
 
@@ -299,6 +344,7 @@ To switch, copy `env.example` to `.env`, set `VITE_TILE_URL` (and `VITE_PHOTON_U
 - Free public map, geocoder and router services need replacing before launch.
 
 ## Changelog
+- **Tips, pickup change, trip meter, subscription fix** — an optional tip any time after a completed ride (driver is told; Earnings include tips). The rider can change the pickup while the driver is on the way; the driver accepts or declines; both are told that cancellation miles and minutes do not change. Time and distance show on both apps; the driver's distance is used unless the rider's own GPS figure differs by more than 5%. **Fix:** live subscriptions passed an array of filters, which the installed nostr-tools sends to relays as an invalid filter; they now pass one filter object (a test guards it).
 - **Typical fares and exact offers** — each driver sets their own base, per-mile and per-minute rates; riders see them (nearby list, the suggestion, each reply). Offers and counters are exact amounts in dollars and cents or sats, with a unit switch and the other unit shown below (no more $1 steps).
 - **Trip screen** — the trip card is nearly collapsed and draggable; the map zooms in on the vehicle and follows it (north-up) with a compass toggle for heading-up and a Re-center button.
 - **Small fixes** — a "Your location" button on the pickup field (fills the GPS address; still editable). A driver's profile photo, vehicle photo and license photo show *Change*, not *Remove*, because all three are required.
