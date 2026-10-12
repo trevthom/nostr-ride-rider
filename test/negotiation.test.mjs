@@ -29,17 +29,24 @@ assert.deepEqual(F.offerLimitsSats(10000, 100000), { min: 3000, max: 30000 }, "$
 assert.deepEqual(F.offerLimitsSats(100, 100000), { min: 3000, max: 3000 }, "a tiny trip still has a valid range");
 
 // ── Each driver's own rates ──
-assert.deepEqual(F.normalizeRates({ base: 2.5, perMile: 1.25, perMinute: 0.3 }), { base: 2.5, perMile: 1.25, perMinute: 0.3 });
-assert.deepEqual(F.normalizeRates({ base: "3", perMile: "1.5", perMinute: "0.2" }), { base: 3, perMile: 1.5, perMinute: 0.2 }, "numeric strings are accepted");
-assert.deepEqual(F.normalizeRates({ base: 1.239, perMile: 1, perMinute: 0 }), { base: 1.24, perMile: 1, perMinute: 0 }, "cents at most");
+assert.deepEqual(F.normalizeRates({ base: 2.5, perMile: 1.25, perMinute: 0.3 }), { base: 2.5, perMile: 1.25, perMinute: 0.3, currency: "USD" });
+assert.deepEqual(F.normalizeRates({ base: "3", perMile: "1.5", perMinute: "0.2" }), { base: 3, perMile: 1.5, perMinute: 0.2, currency: "USD" }, "numeric strings are accepted");
+assert.deepEqual(F.normalizeRates({ base: 1.239, perMile: 1, perMinute: 0 }), { base: 1.24, perMile: 1, perMinute: 0, currency: "USD" }, "cents at most");
 for (const bad of [null, undefined, "x", {}, { base: 1, perMile: 1 }, { base: -1, perMile: 1, perMinute: 1 }, { base: 1, perMile: 999, perMinute: 1 }, { base: NaN, perMile: 1, perMinute: 1 }, { base: "", perMile: 1, perMinute: 1 }, { base: {}, perMile: 1, perMinute: 1 }]) {
   assert.equal(F.normalizeRates(bad), null, "rejected: " + JSON.stringify(bad));
 }
-// base + per mile * miles + per minute * minutes, never below the app's minimum fare
-assert.equal(F.typicalFareUsd({ base: 3, perMile: 2, perMinute: 0.5 }, 10, 20), 33);
-assert.equal(F.typicalFareUsd({ base: 1, perMile: 0.5, perMinute: 0.1 }, 1, 2), 5, "the minimum fare applies");
-assert.equal(F.typicalFareUsd(null, 10, 20), F.fareUsd(10, 20), "no rates -> the app's rates");
-assert.equal(F.typicalFareUsd({ base: 1, perMile: 999, perMinute: 1 }, 10, 20), F.fareUsd(10, 20), "junk rates are ignored");
+// base + per mile * miles + per minute * minutes, exactly (there is no minimum fare)
+assert.equal(F.typicalFare({ base: 3, perMile: 2, perMinute: 0.5 }, 10, 20), 33);
+assert.equal(F.typicalFare({ base: 1, perMile: 0.5, perMinute: 0.1 }, 1, 2), 1.7, "no minimum fare");
+assert.equal(F.typicalFare(null, 10, 20), F.fareAmount(10, 20), "no rates -> the app's rates");
+assert.equal(F.typicalFare({ base: 1, perMile: 999, perMinute: 1 }, 10, 20), F.fareAmount(10, 20), "junk rates are ignored");
+// Rates carry their currency (dollars when missing); the sanity limits scale with the currency.
+assert.deepEqual(F.normalizeRates({ base: 300, perMile: 150, perMinute: 40, currency: "JPY" }), { base: 300, perMile: 150, perMinute: 40, currency: "JPY" });
+assert.equal(F.normalizeRates({ base: 300, perMile: 150, perMinute: 40 }), null, "300 dollars as a base fare is a typo");
+assert.equal(F.normalizeRates({ base: 1, perMile: 1, perMinute: 1, currency: "XXX" }), null, "unknown currency");
+assert.equal(F.typicalSats({ base: 1, perMile: 1, perMinute: 1, currency: "EUR" }, 2, 3, { EUR: 50000 }), 12000, "$6 equivalent: 6 EUR at 50,000 = 12,000 sats");
+assert.equal(F.typicalSats({ base: 1, perMile: 1, perMinute: 1, currency: "EUR" }, 2, 3, {}), null, "no price for that currency: not guessed");
+assert.equal(F.typicalSats(null, 10, 20, {}), 18000, "the app's rates are in dollars: the fallback price applies when none is known");
 assert.equal(F.median([7, 3, 5]), 5);
 assert.equal(F.median([2, 4, 6, 10]), 5);
 assert.equal(F.median([]), null);
@@ -53,14 +60,13 @@ assert.equal(F.replyKind(9000, 8000), "counter");
 assert.equal(F.replyKind(7000, 8000), "lower");
 assert.equal(F.replyKind(7000, undefined), "same", "old requests without an offer");
 
-// ── A counter-offer is an ordinary offer at a higher price; the deposit follows its price ──
+// ── A counter-offer is an ordinary offer at a higher price ──
 const req = pub(K.RIDE_REQUEST, { pickup: { name: "P", lat: 1, lng: 1 }, dropoff: { name: "D", lat: 2, lng: 2 }, status: "requested", time: "ASAP", fareSats: 8000, suggestedSats: 10000 }, [["d", "ride-n1"]], rider);
 const offer = (who, priceSats, eta, gender) =>
-  pub(K.RIDE_OFFER, { priceSats, upfrontSats: F.depositSats(priceSats, 20), etaMinutes: eta, gender }, [["e", req.id], ["p", rider.publicKey], ["d", "offer-" + req.id]], who);
+  pub(K.RIDE_OFFER, { priceSats, etaMinutes: eta, gender }, [["e", req.id], ["p", rider.publicKey], ["d", "offer-" + req.id]], who);
 const o1 = offer(d1, 8000, 9, "male");
 const o2 = offer(d2, 11000, 4, "female");
 const o3 = offer(d3, 8000, 6, "");
-assert.equal(JSON.parse(o2.content).upfrontSats, 2200, "deposit is 20% of the counter price");
 const all = T.offersForRide(req);
 assert.deepEqual(all.map((o) => o.pubkey), [d2.publicKey, d3.publicKey, d1.publicKey], "no preference: soonest first");
 
@@ -75,7 +81,7 @@ assert.equal(T.rankOffers(all, "other").map((o) => o.id).join(), all.map((o) => 
 
 // A driver's rates travel in their profile; junk is dropped.
 pub(K.METADATA, { name: "D2", rates: { base: 4, perMile: 1.5, perMinute: 0.35 } }, [], d2);
-assert.deepEqual(getProfile(d2.publicKey).rates, { base: 4, perMile: 1.5, perMinute: 0.35 });
+assert.deepEqual(getProfile(d2.publicKey).rates, { base: 4, perMile: 1.5, perMinute: 0.35, currency: "USD" });
 pub(K.METADATA, { name: "D2", rates: { base: 4, perMile: "<b>", perMinute: 0.35 } }, [], d2);
 assert.equal(getProfile(d2.publicKey).rates, null, "junk rates ignored");
 pub(K.METADATA, { name: "D2" }, [], d2);

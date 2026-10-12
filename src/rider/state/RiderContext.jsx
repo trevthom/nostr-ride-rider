@@ -8,8 +8,10 @@
 //    • the CURRENT ride, derived from signed events (so a reload or
 //      another device shows the same screen) and the receipt to show
 //      after a trip
-//    • actions: requestRide, raiseOffer, proposePickup, confirmDriver, cancelRide, rateDriver
-//  Banners: offers arriving, driver arrived, trip done, driver cancelled.
+//    • actions: requestRide, raiseOffer, proposePickup, confirmDriver, finishRide, rateDriver
+//    • the ride's MONEY: while a ride runs (and after it ended, until it is paid) the rider's app pays
+//      the driver in ecash ticks (features/payments/rideTicks.js) and reports `money` to the screens
+//  Banners: offers arriving, driver arrived, trip done, driver finished the ride, waived fares.
 // ════════════════════════════════════════════════════════════
 
 import { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
@@ -23,8 +25,14 @@ import { haversineDistance } from "../../lib/geo.js";
 import { pickupEta } from "../../lib/fare.js";
 import { publicPlace, seal, exactTrip } from "../../lib/privacy.js";
 import { PICKUP_CHANGE_NOTE } from "../../lib/pickup.js";
+import { stopRequestEvent, STOP_NOTE_FLAT } from "../../lib/stops.js";
 import { activeRideFor, isOpenRide, upcomingRidesFor } from "../../lib/trips.js";
-import { rideDriver, rideEnding, rideKey, rideStatus, rideVersions } from "../../lib/rides.js";
+import { rideDriver, rideEnding, rideKey, rideStatus, rideVersions, rideTimes } from "../../lib/rides.js";
+import { rideTerms, rideMint } from "../../lib/terms.js";
+import { ledgerSummary } from "../../lib/ridemoney.js";
+import { payDue } from "../../features/payments/rideTicks.js";
+import { redeemWaiversFor } from "../../features/payments/redeemWaivers.js";
+import { moneyText } from "../../ui/Money.jsx";
 import { getSetting, setSetting } from "../../config/relays.js";
 import { newShareToken, publishShare, shareLink } from "../../nostr/share.js";
 
@@ -32,11 +40,11 @@ const RiderContext = createContext(null);
 export const useRider = () => useContext(RiderContext);
 
 const HOUR = 3600000;
-const EMPTY_PLAN = { step: "idle", pickup: null, dropoff: null, when: "ASAP", notes: "", offerSats: null, offerKey: null };
+const EMPTY_PLAN = { step: "idle", pickup: null, dropoff: null, when: "ASAP", notes: "", fareMode: "standard", offerSats: null, offerKey: null };
 const parse = (e) => { try { return JSON.parse(e.content); } catch { return null; } };
 
 export function RiderProvider({ children }) {
-  const { user, rideRequests, publish, refreshData, pullRecent, pushNotice, liveTick, setView, isBlockedPk } = useApp();
+  const { user, rideRequests, publish, refreshData, pullRecent, pushNotice, liveTick, setView, isBlockedPk, ecash, priceFor, btcPrice } = useApp();
   const me = user.publicKey;
   const { pos: myPosition, error: geoError, status: gps } = useGeolocation(true);
 
@@ -92,8 +100,8 @@ export function RiderProvider({ children }) {
         if (!end || Date.now() - end.at * 1000 > 6 * HOUR) return false;
         const status = rideStatus(r);
         if (status === "completed") return true;
-        // A cancel by the driver is news; one by me is not.
-        return status === "cancelled" && end.by !== me && !!rideDriver(r);
+        // The driver finishing before the ride started is news; my own finish is not.
+        return status === "closed" && end.by !== me && !!rideDriver(r);
       })
       .sort((a, b) => b.end.at - a.end.at)[0]?.r || null;
   const dismissReceipt = useCallback((request) => {
@@ -150,13 +158,56 @@ export function RiderProvider({ children }) {
       const c = parse(ev);
       if (ev.kind === EVENT_KINDS.RIDE_OFFER && !isBlockedPk(ev.pubkey)) pushNotice("A driver can pick you up. Check the offer.");
       else if (ev.kind === EVENT_KINDS.RIDE_STAGE && c?.stage === "arrived") pushNotice("Your driver has arrived.");
-      else if (ev.kind === EVENT_KINDS.RIDE_COMPLETE) pushNotice("Your trip is complete.");
-      else if (ev.kind === EVENT_KINDS.RIDE_CANCEL) pushNotice("Your driver cancelled the ride.");
+      else if (ev.kind === EVENT_KINDS.RIDE_COMPLETE) pushNotice("Your driver finished the ride.");
+      else if (ev.kind === EVENT_KINDS.RIDE_FINISH) pushNotice("Your driver finished the ride.");
+      else if (ev.kind === EVENT_KINDS.RIDE_WAIVER && (c?.forgivenSats > 0 || c?.refundSats > 0)) pushNotice(`Your driver waived part of the fare${c.refundSats > 0 ? " and sent money back" : ""}.`);
+      else if (ev.kind === EVENT_KINDS.RIDE_STOP_REPLY) pushNotice(c?.accepted ? "Your driver accepted the extra stop." : "Your driver did not accept the extra stop.");
       else if (ev.kind === EVENT_KINDS.RIDE_PICKUP_REPLY) {
         pushNotice(c?.accepted ? `Your driver accepted the new pickup. ${PICKUP_CHANGE_NOTE}` : `Your driver declined the new pickup, so you still meet at the first place. ${PICKUP_CHANGE_NOTE}`);
       }
     });
   }, [me, pushNotice, isBlockedPk]);
+
+  // ── The ride's money: pay the driver tick by tick, and collect refunds ──
+  const payRide = activeRide && rideStatus(activeRide) === "in_progress" ? activeRide : receipt;
+  const milesRef = useRef(null); // the trip distance both screens show, reported by the trip screen
+  const reportMiles = useCallback((m) => { milesRef.current = m; }, []);
+  const [money, setMoney] = useState(null);
+  const payTerms = payRide ? rideTerms(payRide) : null;
+  const payMint = payRide ? rideMint(payRide) : null;
+  const payKey = payRide ? rideKey(payRide) : null;
+  const run = useCallback(async (request) => {
+    const terms = rideTerms(request);
+    if (!terms || !rideTimes(request).startedAt) return null;
+    const res = await payDue({ request, user, ecash, publish, terms, mint: rideMint(request), price: priceFor(terms.currency), nowMs: Date.now(), miles: milesRef.current });
+    return res;
+  }, [user, ecash, publish, priceFor]);
+  useEffect(() => { setMoney(null); }, [payKey]);
+  useEffect(() => {
+    if (!payRide || !payTerms) return;
+    let alive = true, running = false;
+    const tick = async () => {
+      if (running) return;
+      running = true;
+      try {
+        const res = await run(payRide);
+        if (alive && res) setMoney((m) => (m && m.status === res.status && m.owed === res.owed && m.paid === res.paid && m.due === res.due && m.sent === res.sent && m.outstanding === res.outstanding ? m : { ...res, at: Date.now() }));
+      } finally { running = false; }
+    };
+    tick();
+    const id = setInterval(tick, 3000);
+    return () => { alive = false; clearInterval(id); };
+  }, [payKey, !!ecash, !!payTerms, run]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Pay now, outside the timer (after adding funds): resolves to the result.
+  const payNow = useCallback(async (request) => run(request || payRide), [run, payRide]);
+
+  // Money the driver sent back (a waived fare) goes into the wallet by itself, for any ride.
+  useEffect(() => {
+    if (!ecash) return;
+    redeemWaiversFor({ user, ecash, rideRequests }).then((list) => {
+      list.forEach((r) => pushNotice(`${moneyText(r.sats, btcPrice)} came back to your wallet.`));
+    }).catch(() => {});
+  }, [ecash, rideRequests.length, liveTick]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Actions ──
   const [sendFailed, setSendFailed] = useState(false);
@@ -164,7 +215,7 @@ export function RiderProvider({ children }) {
   // Publish a ride request. Only an approximate area is public; the exact
   // trip is sealed to the rider (and to the driver after they are chosen).
   const requestRide = useCallback(
-    ({ pickup, dropoff, when, notes, miles, minutes, fareSats, suggestedSats }) => {
+    ({ pickup, dropoff, when, notes, miles, minutes, fareSats, suggestedSats, fareMode = "standard" }) => {
       setSendFailed(false);
       const sent = publish(
         EVENT_KINDS.RIDE_REQUEST,
@@ -174,7 +225,8 @@ export function RiderProvider({ children }) {
           time: when,
           notes,
           status: "requested",
-          fareSats, // the rider's offer; drivers accept it or counter
+          fareMode: fareMode === "flat" ? "flat" : "standard", // "standard": each driver's own rates · "flat": the rider's price
+          fareSats, // flat: the rider's offer (drivers accept or counter) · standard: the estimate
           suggestedSats, // what the app suggested (so a driver can see how far off the offer is)
           distanceMiles: Math.round(miles * 10) / 10,
           durationMin: minutes,
@@ -207,7 +259,7 @@ export function RiderProvider({ children }) {
   );
 
   // Keep a signed record of a payment (the proof is sealed to the driver, so only
-  // the two of them can read it). phase: "deposit" | "rest" | "tip".
+  // the two of them can read it). phase: "tip" (older rides also have "deposit" | "rest").
   const recordPayment = useCallback(
     (request, driverPubkey, phase, amountSats, proof) => {
       publish(
@@ -242,22 +294,17 @@ export function RiderProvider({ children }) {
     [publish, refreshData]
   );
 
-  // The rider picked a driver and paid the deposit: accept the offer and
-  // hand the driver the exact trip.
+  // The rider picked a driver: accept the offer (its rates and mint are now frozen for the ride) and hand the
+  // driver the exact trip. There is no deposit: the rider pays tick by tick once the ride starts.
   const confirmDriver = useCallback(
-    (request, offerEvent, proof = {}) => {
-      const { verified = false, level = "claimed" } = proof;
+    (request, offerEvent) => {
       const driver = offerEvent.pubkey;
-      const offer = parse(offerEvent) || {};
       const trip = exactTrip(request, user);
       publish(
         EVENT_KINDS.RIDE_ACCEPT,
         {
           offerId: offerEvent.id,
           requestId: request.id,
-          paidSats: offer.upfrontSats || 0,
-          verified,
-          level,
           ...(trip && { sealed: seal(user.sk, driver, trip) }),
         },
         [["e", offerEvent.id], ["e", request.id], ["p", driver], ["d", "accept-" + request.id], ["t", "ride-accept"]]
@@ -268,10 +315,9 @@ export function RiderProvider({ children }) {
         // p-tag the driver so their app can find this ride on the relays.
         [...request.tags.filter((t) => t[0] !== "p"), ["p", driver]]
       );
-      if ((offer.upfrontSats || 0) > 0) recordPayment(request, driver, "deposit", offer.upfrontSats, proof);
       refreshData();
     },
-    [publish, refreshData, user, recordPayment]
+    [publish, refreshData, user]
   );
 
   // Ask the driver (on the way to the pickup) to go to a different place. The new place is sealed to
@@ -295,18 +341,41 @@ export function RiderProvider({ children }) {
     [publish, refreshData, user.sk, me, pushNotice]
   );
 
-  // Cancel the ride (open or running). A running ride tells the driver.
-  const cancelRide = useCallback(
-    (request) => {
+  // Ask the driver to add a stop or change the destination during the ride. The place is sealed to the driver
+  // and to the rider; it only counts when the driver accepts. A flat price then becomes the driver's normal fare.
+  const proposeStop = useCallback(
+    (request, { mode, place }) => {
       const latest = rideVersions(request)[0] || request;
       const driver = rideDriver(latest);
+      if (!driver || !place) return false;
+      const ev = stopRequestEvent(latest, user, driver, { mode, place });
+      publish(ev.kind, ev.content, ev.tags);
+      refreshData();
+      pushNotice(rideTerms(latest)?.mode === "flat" ? `Sent to your driver. ${STOP_NOTE_FLAT}` : "Sent to your driver, who can accept it or finish the ride.");
+      return true;
+    },
+    [publish, refreshData, user, pushNotice]
+  );
+
+  // Finish the ride (there are no cancellations, and no fees for finishing). Before a driver is chosen the request
+  // is simply closed. Once the ride has started the rider owes what it has earned so far (base, miles, minutes),
+  // and the driver's copy of the meter and the clock are in the signed event. `miles` = the trip distance both screens show.
+  const finishRide = useCallback(
+    (request, { miles, reason = "rider", at } = {}) => {
+      const latest = rideVersions(request)[0] || request;
+      const driver = rideDriver(latest);
+      const times = rideTimes(latest);
+      const when = at ?? Date.now();
       publish(
-        EVENT_KINDS.RIDE_CANCEL,
-        { requestId: latest.id, reason: "Cancelled by rider" },
-        [["e", latest.id], ...(driver ? [["p", driver]] : []), ["d", "cancel-" + latest.id], ["t", "ride-cancel"]]
+        EVENT_KINDS.RIDE_FINISH,
+        {
+          requestId: latest.id, reason, role: "rider", at: when,
+          ...(times.startedAt ? { miles: Math.round((miles ?? 0) * 100) / 100, minutes: Math.round((Math.max(0, when - times.startedAt) / 60000) * 100) / 100 } : {}),
+        },
+        [["e", latest.id], ...(driver ? [["p", driver]] : []), ["d", "finish-" + latest.id], ["t", "ride-finish"]]
       );
-      // An open request is also re-published as cancelled so other clients drop it.
-      if (!driver) publish(EVENT_KINDS.RIDE_REQUEST, { ...parse(latest), status: "cancelled" }, latest.tags);
+      // An open request is also re-published as closed so other clients drop it.
+      if (!driver) publish(EVENT_KINDS.RIDE_REQUEST, { ...parse(latest), status: "closed" }, latest.tags);
       refreshData();
     },
     [publish, refreshData]
@@ -345,7 +414,8 @@ export function RiderProvider({ children }) {
     share, startShare, stopShare, shareUpdate, shareUrl,
     activeRide, focused: !!focused, focusRide: (r) => setFocusId(r ? r.id : null), upcoming, receipt, dismissReceipt,
     genderPref, setGenderPref,
-    sendFailed, requestRide, raiseOffer, proposePickup, confirmDriver, recordPayment, confirmRide, cancelRide, rateDriver, recentPlaces,
+    sendFailed, requestRide, raiseOffer, proposePickup, confirmDriver, recordPayment, confirmRide, proposeStop, finishRide, rateDriver, recentPlaces,
+    money, payNow, reportMiles, payTerms, payMint,
     nearestDriverEta: (to) => {
       if (!to || !drivers.length) return null;
       const miles = Math.min(...drivers.map((d) => haversineDistance(to.lat, to.lng, d.lat, d.lng)));

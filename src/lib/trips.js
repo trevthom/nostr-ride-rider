@@ -82,8 +82,7 @@ function validOffers(request) {
     const c = parse(o);
     return (
       o.pubkey !== request.pubkey &&
-      c && Number.isFinite(c.priceSats) && c.priceSats > 0 &&
-      (c.upfrontSats || 0) >= 0 && (c.upfrontSats || 0) <= c.priceSats
+      c && Number.isFinite(c.priceSats) && c.priceSats > 0
     );
   });
 }

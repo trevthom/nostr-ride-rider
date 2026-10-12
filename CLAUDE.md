@@ -6,7 +6,7 @@ should let you make correct edits without reading every file.
 ## What this is
 NostrRide **Rider app** — one half of a decentralized ridesharing system. The rider and driver
 apps are **separate repositories** that talk to each other only over **Nostr** (no server, no DB).
-This repo is the **rider** app: Uber/Lyft-style: "Where to?", fare quote, find a driver, pay a deposit, watch the car arrive, ride, pay the rest, rate.
+This repo is the **rider** app: Uber/Lyft-style: "Where to?", fare quote, find a driver, watch the car arrive, start with a 2-digit code, pay the driver in ecash as the ride runs, finish the ride, rate.
 The sibling repo is **nostr-ride-driver**. Both speak the same events (table below).
 
 > **Generated repository.** This is a copy of the rider app made from **trevthom/nostr-ride** by `scripts/export-apps.mjs`. Make changes in nostr-ride and export again: a hand edit here is overwritten by the next export.
@@ -40,7 +40,7 @@ the rider's current ride is `activeRideFor(requests, me)`, the driver's is
 same screen. Only UI-only things (plan form, which card is open) live in React state.
 
 Shared state: `src/state/AppContext.jsx` (`useApp()`): user, tab (`view`/`setView`),
-`rideRequests`, `publish`, `pullRecent`, notices, `btcUsd`, wallet, `liveTick`.
+`rideRequests`, `publish`, `pullRecent`, notices, `currency`/`prices`/`btcPrice`/`usdPrice`/`priceFor`, `ecash` (the Cashu wallet; loaded on demand), `wallet` (NWC), `liveTick`.
 Role state: `src/rider/state/RiderContext.jsx` (`useRider()`) and
 `src/driver/state/DriverContext.jsx` (`useDriver()`) — mounted only after login, keyed by pubkey.
 No router: each `App.jsx` maps `view` → screen; the tab bar hides during a trip.
@@ -50,15 +50,16 @@ Each screen is wrapped in an `ErrorBoundary`.
 | Step | Rider app | Event (kind) | Driver app |
 |---|---|---|---|
 | 0 | sees cars nearby | PRESENCE 30090 (public, coarse) | **GO** online (needs GPS + `isDriveReady`) |
-| 1 | picks route, sees the SUGGESTED price, sets an OFFER, taps **Request** | RIDE_REQUEST 30078 `status:requested`, `fareSats` (the offer), `suggestedSats` | incoming card (45 s countdown) + price tags on map |
-| 2 | "Finding your driver…" (can change the offer after 30 s) | RIDE_REQUEST again, same d-tag, new `fareSats` | **Accept** the offer, **counter** it (higher price), or Decline |
-| 3 | list of replies (preferred gender first if asked, then fastest) | RIDE_OFFER 30079 (`priceSats` = the offer or the counter, deposit %, ETA, `gender`, sealed plate; good 5 min) | "Waiting for rider…" |
-| 4 | **Choose** → pays the deposit (Lightning) | RIDE_ACCEPT 30080 (exact trip sealed to driver) + RIDE_REQUEST `in_progress`+`driverPubkey` | drive starts: route to pickup |
-| 5 | car moves live, "arriving in N min" | RIDE_LOCATION 21100 every 6 s (NIP-44 to rider) | **I've arrived** → RIDE_STAGE 30085 `arrived` |
-| 6 | "Your driver has arrived" | | **Start trip** → RIDE_STAGE `riding` |
-| 7 | "On the way to …" | | **Complete trip** → RIDE_COMPLETE 30084 |
-| 8 | receipt, pays the rest, rates | RATING 30082 (either way) | summary, rates the rider |
-Cancels: RIDE_CANCEL 30081 by the rider (any time) or the assigned driver. A driver with no
+| 1 | picks route, chooses **Standard fare** (each driver's rates) or a **Flat price** (own offer), taps **Request** | RIDE_REQUEST 30078 `status:requested`, `fareMode`, `fareSats` (the flat price, or the estimate), `suggestedSats` | incoming card (45 s countdown) + price tags on map |
+| 2 | "Finding your driver…" (can change a flat price after 30 s) | RIDE_REQUEST again, same d-tag, new `fareSats` | **Accept**; for a flat price also **counter** (higher price); or Decline |
+| 3 | list of replies with each driver's rates + mint (preferred gender first if asked, then fastest) | RIDE_OFFER 30079 (`mode` metered/flat, `priceSats`, frozen `rates`, `mint`, trip miles/minutes, ETA, `gender`, sealed plate; good 5 min) | "Waiting for rider…" |
+| 4 | **Choose** → confirm (needs ecash at the driver's mint for the start; NO deposit) | RIDE_ACCEPT 30080 (names the offer; exact trip sealed to driver) + RIDE_REQUEST `in_progress`+`driverPubkey` | drive starts: route to pickup. Nothing is charged yet |
+| 5 | car moves live, "arriving in N min" | RIDE_LOCATION 21100 every 6 s (NIP-44 to rider) | **I've arrived** works only within 50 m (good fix) → RIDE_STAGE 30085 `arrived` (+`distM`) |
+| 6 | "Your driver has arrived", checks the car (RIDE_CONFIRM `boarded`), types the driver's 2-digit code (RIDE_CONFIRM `code`) | | types the rider's code → **Start trip** → RIDE_STAGE `riding` (+`codes`) |
+| 7 | "On the way to …"; the rider's app pays ticks: base, each mile, each minute | RIDE_TICK 30095 (token sealed to driver) | redeems each tick at the mint, answers RIDE_TICK_REPLY 30096; sees fare so far, missed payments |
+| 8 | **Finish ride** (confirm) → pays the final tick; receipt; rates | RIDE_FINISH 30081 (either person; time + meter), RATING 30082 | **Finish ride** (confirm) or after 2 missed payments; summary; may waive (RIDE_WAIVER 30097); rates the rider |
+**There are no cancellations and no cancel fees.** Either person finishes the ride (RIDE_FINISH 30081). Before the ride
+starts nothing is owed (status `closed`); after it started the rider owes what it earned (status `completed`). A driver with no
 offer taken just sees the ride leave `requested` ("That ride is no longer available").
 Reservations (`time` > 30 min away) wait under Activity → Upcoming (`isScheduledLater`).
 
@@ -71,10 +72,10 @@ src/
   index.css  theme.js             # font, animations; few colors (THEME)
   config/
     app.js                        # APP_ROLE / IS_DRIVER_APP / APP_NAME
-    settings.js                   # tunables: FARE_RATES, FALLBACK_BTC_USD, DEFAULT_DEPOSIT_PERCENT,
-                                  #   REQUEST_CARD_SECONDS, OFFER_TTL_SECONDS, DEFAULT_REQUEST_RADIUS_MILES,
+    settings.js                   # tunables: FARE_RATES (USD, no minimum), FALLBACK_BTC_USD, MIN_OFFER_USD/MAX_OFFER_FACTOR (flat price),
+                                  #   RATE_LIMITS, REQUEST_CARD_SECONDS, OFFER_TTL_SECONDS, DEFAULT_REQUEST_RADIUS_MILES,
                                   #   USE_DEMO_DATA (dev only), CONTACT_PLATFORMS
-    services.js                   # tile / Photon / OSRM URLs, overridable by VITE_* env (see env.example)
+    services.js                   # tile / Photon / OSRM URLs + DEFAULT_MINT, overridable by VITE_* env (see env.example)
     relays.js                     # DEFAULT_RELAYS, getRelays/setRelays/useRelays, getSetting/setSetting (localStorage)
   nostr/
     eventKinds.js                 # EVENT_KINDS + APP_TAG
@@ -85,18 +86,31 @@ src/
     live.js                       # presence (public, coarse) + ride location (NIP-44, ephemeral)
     share.js                      # "Share my trip": throwaway-key link, encrypted trip updates (kind 30091)
     wallet.js                     # NIP-47 (NWC) client
+    ecash.js                      # EcashWallet: Cashu bookkeeping over a "mint adapter" (fund, pay, redeem, cash out, pending/recovery, encrypted save) — no network code, no Cashu import
+    cashuMint.js                  # the REAL mint adapter on @cashu/cashu-ts + userWallet(user) — the ONLY file that imports the Cashu library; loaded on demand (own chunk)
+    link.js                       # remembers when OUR relays were unreachable (never counted as the other person's silence)
     demoData.js                   # dev-only fake riders/requests (driver app only)
   lib/
-    rides.js      # trust rules: rideVersions/rideStatus/rideEnding/rideStage/rideDriver/rideKey/reputation
+    rides.js      # trust rules: rideVersions/rideStatus (requested→in_progress→completed|closed)/rideEnding (earliest finish; silence cut-off clamped)/rideStage/rideTimes/rideConfirm/rideDriver/rideKey/reputation
+    ticks.js      # PURE tick maths: unitSats, newLedger/advanceLedger (base, mile, minute), missedTicks, settle (final tick), convertToMetered (flat→normal fare), milesAt
+    ridemoney.js  # currentLedger(request,…): the saved ledger of a ride, advanced or settled; ledgerSummary; milesAtTime
+    payments.js   # tick/reply/waiver/alive event builders and readers (ticksOf, tickReplies, paidSats, sentSats, waiversOf, signalTimes, outstandingSats)
+    terms.js      # rideTerms(request): the CHOSEN offer's frozen rates/mode/price → ticks; rideMint; agreedOffer
+    finish.js     # finish reasons, SILENCE_FINISH_MS, bothQuiet/quietMs/finishCutoff, waiverSplit, readFinish
+    startcode.js  # the 2-digit start codes (HMAC of the NIP-44 conversation key), wrong-try lock
+    arrival.js    # canMarkArrived (≤ 50 m, good fix), arrivalMismatch (rider's check)
+    stops.js      # extra stop / new destination: stopChanges, stopTrip/fullTrip, hasAcceptedStop, nextStop; STOP_NOTE_*
+    currency.js   # CURRENCIES, get/setCurrency, formatFiat, toMinor, satsFromFiat/fiatFromSats (pure maths)
+    mints.js      # cleanMintUrl/isMintUrl/mintLabel
     trips.js      # derive current state: activeRideFor, activeDriveFor, offersForRide, rankOffers/offerGender, offerFrom, pendingOfferFor, acceptFor, upcomingRidesFor, isScheduledLater
     odometer.js   # stepOdo/newOdo: miles of a GPS track (skips wobble, bad fixes, glitches) (pure)
     meter.js      # referenceMiles (driver's distance unless the rider's differs >5%), meterView, fmt* (pure)
     pickup.js     # pickupChange(request): pending|accepted|declined; PICKUP_CHANGE_NOTE (the exact place logic is in privacy.js)
-    fare.js       # quoteFare/fareUsd/usdToSats/depositSats/pickupEta + normalizeRates/typicalFareUsd/median/satsFromUsd/usdFromSats/offerLimitsSats/offerLevel/replyKind (pure)
-    earnings.js   # completedDrives, summarizeEarnings
+    fare.js       # quoteFare/fareAmount/usdToSats/pickupEta + normalizeRates (incl. currency)/typicalFare/typicalSats/median/satsFromUsd/usdFromSats/offerLimitsSats/offerLevel/replyKind (pure)
+    earnings.js   # completedDrives (paid ticks + tips), summarizeEarnings
     privacy.js    # publicPlace, seal/unseal, exactTrip, sealVehicle/myVehicle/offerPlate, sealLicense/myLicense
     contact.js    # contactHref (safe links from untrusted handles)
-    evidence.js   # payment records (30086) + proofLevel + driver-side verifyPayment + disputeRecord; rideConfirm is in rides.js
+    evidence.js   # tip records (30086) + proofLevel + driver-side verifyPayment + disputeRecord (ticks, replies, waivers, finishes); rideConfirm is in rides.js
     bolt11.js     # paymentHash / preimageMatches
     blocks.js     # local block list helpers
     safety.js     # trusted contacts, sms link, trip message
@@ -109,18 +123,20 @@ src/
     Layout.jsx    # AppFrame, MapPage (+ measures the Sheet so the map pads for it), Sheet (collapsible with `peek`/openKey/closeKey), FloatButton, Screen, TabBar
     MapView.jsx   # Leaflet + OpenStreetMap tiles; pins, OSRM route, cars, "me" dot, price pills, ref.fit(); trip mode (`navigation` + `follow`)
     Button.jsx Icon.jsx Avatar.jsx Rating.jsx Money.jsx Parts.jsx (Row, Toggle, Field, ConfirmDialog, Modal, Spinner)
-    AmountInput.jsx ($ or sats, unit swap; offers, counters, tips)  TripMeter.jsx (time + distance card, peekMeter)  RatingForm.jsx ContactSheet.jsx UserModal.jsx NoticeBanner.jsx ErrorBoundary.jsx RelayEditor.jsx QRCode.jsx SatsAmount.jsx
+    AmountInput.jsx (local currency or sats, unit swap; flat prices, counters, tips, funds)  TripMeter.jsx (time + distance card, peekMeter)  RatingForm.jsx ContactSheet.jsx UserModal.jsx NoticeBanner.jsx ErrorBoundary.jsx RelayEditor.jsx QRCode.jsx SatsAmount.jsx
   features/
     auth/        AuthScreen (role-aware copy) + AuthSteps (unlock, key backup)
     profile/     ProfileParts (useSaveProfile, AccountHeader, ContactMethods, RelaysSection, LogoutButton),
-                 VehicleSection, LicenseSection, TypicalFareSection, LightningAddressSection, WalletSection, KeysSection
-    payments/    PayDriver (pay N sats to a Lightning address: NWC wallet, or invoice QR + LUD-21 watch)
+                 VehicleSection, LicenseSection, TypicalFareSection ("Your rates", locked during a ride), CurrencySection, LightningAddressSection, WalletSection, KeysSection
+    ecash/       EcashSection (balance, mint, paste a token, back up, driver cash out), myMint.js
+    payments/    PayDriver (a Lightning address: tips), AddFunds (mint invoice → ecash, NWC or any wallet), rideTicks.js (rider: payDue), redeemTicks.js (driver: redeem + reply),
+                 redeemWaivers.js (rider: collect refunds), useRideLink.js (quiet phone, sign of life, 10-minute silence)
   rider/
     App.jsx  state/RiderContext.jsx
-    screens/ HomeScreen (dispatch) PlanTrip (idle/search/quote) ActiveTrip (searching/choose/pay deposit)
+    screens/ HomeScreen (dispatch) PlanTrip (idle/search/quote: standard fare | flat price) ActiveTrip (searching/choose/confirm driver)
              OnTrip (enroute/arrived/riding) Receipt  ActivityScreen  AccountScreen
     state/ useRiderMeter (rider's own odometers + the 5% rule)
-    components/ PlaceSearch, GenderPref, ChangePickup, TipSheet, DriverInfo (+ Plate, useDriverInfo)
+    components/ PlaceSearch, GenderPref, ChangePickup, AddStop, FareTerms, TipSheet, DriverInfo (+ Plate, useDriverInfo)
   driver/
     App.jsx  state/DriverContext.jsx  state/useDriveOdometer.js
     screens/ HomeScreen (dispatch) Onboarding OnlineHome (offline GO / online / incoming card / waiting)
@@ -133,39 +149,48 @@ test/*.test.mjs
 | Kind | Name | Key tags | Content (JSON) |
 |---|---|---|---|
 | 0 | METADATA | — | `{name, about, communication[], picture, lud16, gender?, rates?, vehicle}` (+ fields from other apps, kept on merge) |
-| 30078 | RIDE_REQUEST | `d`(id), `t`, `p`(driver, once confirmed) | `{pickup, dropoff, time, notes, status, fareSats, suggestedSats, distanceMiles, durationMin, sealed}` — pickup/dropoff are COARSE; `sealed` = exact trip, NIP-44 to the rider. `fareSats` is the RIDER'S OFFER (older requests lack it; the driver app estimates); `suggestedSats` is what the app suggested |
-| 30079 | RIDE_OFFER | `e`(request), `p`(rider), `d`, `t` | `{priceSats, upfrontSats, etaMinutes, message, typicalSats, gender, plate}` — the driver's reply: the rider's offer (accept) or a higher price (counter); `gender` is optional and self-declared; `plate` NIP-44 to the rider |
-| 30080 | RIDE_ACCEPT | `e`(offer), `e`(request), `p`(driver), `d`, `t` | `{offerId, requestId, paidSats, verified, sealed}` — `sealed` = exact trip, NIP-44 to the driver |
-| 30081 | RIDE_CANCEL | `e`(request), `p`, `t` | `{requestId, reason}` |
+| 30078 | RIDE_REQUEST | `d`(id), `t`, `p`(driver, once confirmed) | `{pickup, dropoff, time, notes, status, fareMode, fareSats, suggestedSats, distanceMiles, durationMin, sealed}` — pickup/dropoff are COARSE; `sealed` = exact trip, NIP-44 to the rider. `fareMode` = `"standard"` (each driver's rates; `fareSats` is only an estimate) or `"flat"` (`fareSats` is the RIDER'S FLAT PRICE); older requests lack both (the driver app estimates); `suggestedSats` is what the app suggested. `status` ∈ `requested \| in_progress \| closed` (old: `cancelled`) |
+| 30079 | RIDE_OFFER | `e`(request), `p`(rider), `d`, `t` | `{priceSats, mode, rates, mint, tripMiles, tripMinutes, etaMinutes, message, typicalSats, gender, plate}` — the driver's reply. `mode:"flat"`: the rider's flat price (accept) or a higher price (counter); `mode:"metered"`: the driver's standard fare (`priceSats` = their estimate). `rates` = `{base, perMile, perMinute, currency}` (a frozen copy) and `mint` = where the driver is paid; `gender` optional, self-declared; `plate` NIP-44 to the rider. No deposit |
+| 30080 | RIDE_ACCEPT | `e`(offer), `e`(request), `p`(driver), `d`, `t` | `{offerId, requestId, sealed}` — `offerId` names the offer whose rates and mint are FROZEN for the ride; `sealed` = exact trip, NIP-44 to the driver |
+| 30081 | RIDE_FINISH | `e`(request), `p`, `d`="finish-<id>", `t` | `{requestId, reason: rider\|driver\|destination\|unpaid\|silence, role, at, miles?, minutes?, atDestination?}` — by the rider or the assigned driver; ends the ride (NO cancellations, NO fees). `at`/`miles` = the moment and meter the charge runs to |
 | 30082 | RATING | `p`(ratee), `e`(ride), `d`, `t` | `{rating, review, rideId}` |
 | 30083 | DRIVER_ROUTE | | unused (feature removed) |
-| 30084 | RIDE_COMPLETE | `e`(request), `p`(rider), `d`, `t` | `{requestId}` — by the assigned driver |
-| 30085 | RIDE_STAGE | `e`(request), `p`(rider), `d`="stage-<rideKey>", `t` | `{stage: "arrived" \| "riding", at, arrivedAt?}` — by the assigned driver; `at` = ms now, the "riding" marker recalls `arrivedAt` (a relay keeps only the newest marker) |
-| 30086 | RIDE_PAYMENT | `e`(request), `p`(driver), `d`="pay-<rideKey>-<phase>" (`-tip-<ms>` for a tip), `t` | `{phase:"deposit"\|"rest"\|"tip", amountSats, level, sealed}` — by the rider; `sealed` = `{pr, preimage, verify}` NIP-44 to the driver |
-| 30087 | RIDE_CONFIRM | `e`(request), `p`(driver), `d`="confirm-<rideKey>-<phase>", `t` | `{phase:"boarded"\|"ended"\|"problem", ok, note}` — by the rider |
+| 30084 | RIDE_COMPLETE | `e`(request), `p`(rider), `d`, `t` | `{requestId}` — by the assigned driver. Older apps only; read as "finished at the destination" |
+| 30085 | RIDE_STAGE | `e`(request), `p`(rider), `d`="stage-<rideKey>", `t` | `{stage: "arrived" \| "riding", at, arrivedAt?, distM?, codes?}` — by the assigned driver; `at` = ms now, the "riding" marker recalls `arrivedAt` (a relay keeps only the newest marker); `distM` = the driver's measured metres from the pickup (≤ 50); `codes` = both start codes were checked |
+| 30086 | RIDE_PAYMENT | `e`(request), `p`(driver), `d`="pay-<rideKey>-<phase>" (`-tip-<ms>` for a tip), `t` | `{phase:"tip" (old rides: "deposit"\|"rest"), amountSats, level, sealed}` — by the rider; `sealed` = `{pr, preimage, verify}` NIP-44 to the driver. Tips only |
+| 30087 | RIDE_CONFIRM | `e`(request), `p`(driver), `d`="confirm-<rideKey>-<phase>", `t` | `{phase:"boarded"\|"code"\|"ended"\|"problem", ok, note}` — by the rider (`code` = typed the driver's start code) |
 | 30093 | RIDE_PICKUP_CHANGE (addressable) | `e`(request), `p`(driver), `d`="pickup-<rideKey>-<changeId>", `t` | `{changeId, sealedDriver, sealedSelf}` — the new pickup `{pickup:{name,lat,lng}}` NIP-44 to the driver and to the rider; only the ride's rider |
 | 30094 | RIDE_PICKUP_REPLY (addressable) | `e`(request), `p`(rider), `d`="pickup-reply-<changeId>", `t` | `{changeId, accepted}` — only the assigned driver |
+| 30095 | RIDE_TICK (addressable) | `e`(request), `p`(driver), `d`="tick-<rideKey>-<seq>-<nonce>", `t` | `{seq, trigger, amountSats, mint, at, sealed}` — one ecash payment by the ride's rider; `sealed` = `{token}` (a cashuB token) NIP-44 to the driver; the amount is public |
+| 30096 | RIDE_TICK_REPLY (addressable) | `e`(request), `e`(tick), `p`(rider), `d`="tick-reply-<tickId>", `t` | `{tickId, ok, receivedSats, reason}` — only the assigned driver; `ok:false` only for a FINAL refusal (never for an unreachable mint) |
+| 30097 | RIDE_WAIVER (addressable) | `e`(request), `p`(rider), `d`="waive-<rideKey>-<ms>", `t` | `{forgivenSats, refundSats, reason, sealed?}` — only the assigned driver; `sealed` = `{token}` NIP-44 to the rider (the refund) |
+| 30098 | RIDE_ALIVE (addressable) | `e`(request), `p`(other), `d`="alive-<rideKey>-<role>", `t` | `{role, forRole, at}` — "still riding / still driving": a signed sign of life by the rider or the assigned driver, vouching for `forRole` |
+| 30099 | RIDE_STOP_CHANGE (addressable) | `e`(request), `p`(driver), `d`="stop-<rideKey>-<changeId>", `t` | `{changeId, mode: stop\|destination, sealedDriver, sealedSelf}` — the new place NIP-44 to the driver and the rider; only the ride's rider |
+| 30100 | RIDE_STOP_REPLY (addressable) | `e`(request), `p`(rider), `d`="stop-reply-<changeId>", `t` | `{changeId, accepted}` — only the assigned driver |
 | 30092 | DRIVER_LICENSE (addressable) | `d`="license", `t` | `{sealed}` or `{}` (removed) — the license photo (data URL) NIP-44 to the driver's OWN key; never sent to riders |
 | 30091 | TRIP_SHARE (addressable) | `d`="share", `t`, `expiration` | `{sealed}` — signed by a throwaway key; payload encrypted with that key (in the link #fragment) |
 | 30090 | PRESENCE (addressable) | `d`="presence", `t`, `expiration` | `{name, npub, vehicle, rates?, lat, lng, ts}` — public, coarsened location |
 | 21100 | RIDE_LOCATION (ephemeral) | `p`(rider), `expiration` | NIP-44 encrypted `{lat, lng, ts, pm?, tm?}` — exact, to rider only; `pm`/`tm` = the driver's odometer (miles to the pickup / on the trip) |
-| 21101 | RIDE_METER (ephemeral) | `p`(driver), `expiration` | NIP-44 encrypted `{ts, pm?, tm?}` — rider → driver: the distances both screens show (`referenceMiles`) |
+| 21101 | RIDE_METER (ephemeral) | `p`(driver), `expiration` | NIP-44 encrypted `{ts, pm?, tm?}` — rider → driver: the distances both screens show (`referenceMiles`); also the driver's live sign that the rider's app is there |
 
-`status` ∈ `requested | accepted | in_progress | completed | cancelled`. The
-rider's `in_progress` version also carries `driverPubkey`. Stage is `enroute`
-(default) → `arrived` → `riding`.
+`rideStatus` ∈ `requested | in_progress | completed | closed` (an old request marked `cancelled` reads as `closed`). A ride that ends
+after the `riding` marker is `completed`; one that ends before it is `closed` (nothing owed). The rider's `in_progress` version also
+carries `driverPubkey`. Stage is `enroute` (default) → `arrived` → `riding`.
 
 ## Invariants & gotchas (read before editing)
 - **Trust rules (lib/rides.js)**: relay events are signed, but anyone can sign
   one. A ride's versions are requests with the same **author + d-tag** (never
-  d-tag alone). A RIDE_CANCEL counts only from the rider or the assigned driver;
-  a RIDE_COMPLETE and a RIDE_STAGE only from the assigned driver; a RIDE_CONFIRM and a RIDE_PAYMENT only from the ride's rider; a RATING only from the
+  d-tag alone). A RIDE_FINISH counts only from the rider or the assigned driver (the EARLIEST valid one ends the ride; within 10 s the one that costs
+  the rider less; a claimed finish time must be close to the event's own time — except `silence`, which may run back to the last signed signal but never
+  before a signed event that proves someone was there); a RIDE_COMPLETE (old) and a RIDE_STAGE only from the assigned driver; a RIDE_CONFIRM, a RIDE_PAYMENT, a RIDE_TICK and a
+  RIDE_STOP_CHANGE only from the ride's rider; a RIDE_TICK_REPLY, a RIDE_WAIVER and a RIDE_STOP_REPLY only from the assigned driver; a RIDE_ALIVE from either; a RATING only from the
   other party of that ride (one per rater per ride). Stages only move forward (the
   furthest valid marker wins). Always go through `rideVersions`/`rideStatus`/`rideEnding`/
-  `rideStage`/`reputation` — don't re-derive.
+  `rideStage`/`reputation` and `lib/payments.js` — don't re-derive.
 - **Offers expire**: for a ride needed now an offer is good for `OFFER_TTL_SECONDS`
   (`offersForRide`, `pendingOfferFor`). After a driver is chosen, read their offer with
-  `offerFrom` (no time limit) — it carries the fare, deposit and sealed plate for the rest of the ride.
+  `offerFrom` (no time limit) — it carries the fare and sealed plate. For MONEY use `agreedOffer`/`rideTerms` (lib/terms.js): they read the offer the rider's RIDE_ACCEPT
+  names, so a driver's later offer can never change the rates or the mint of a running ride.
 - **Replaceable ordering**: `buildSignedEvent` gives every replaceable/addressable kind
   (0, 10000+, 30000+) a `created_at` strictly after the previous one for the same
   (kind, author, d). Relays keep the lowest id on a tie, so two saves within one second
@@ -198,17 +223,29 @@ rider's `in_progress` version also carries `driverPubkey`. Stage is `enroute`
   `publish(..., { localOnly: true })`. Don't use `relay.publish(createNostrEvent(...))`
   for user actions — real relays reject unsigned events.
 - **Addressable kinds need unique `d` tags** (offer-<reqId>, accept-<reqId>, rating-<rideId>,
-  stage-<rideKey>, cancel-/complete-<id>). Read replaceable lists through `latestVersions()`.
-- **Payment is peer to peer (no escrow)**: the rider pays the driver's `lud16` — the
-  deposit (`upfrontSats`) when choosing a driver, the rest on the receipt after the driver
-  completes. `PayDriver` gets an invoice via `lib/lnurl.js` (rejects a wrong-amount invoice)
-  and pays it via NWC or shows a QR (LUD-21 `verify` watched). Never invoice the rider's own
-  wallet. Only `confirmDriver` publishes RIDE_ACCEPT + `in_progress`. "Rest paid" is remembered
-  in localStorage (`riderPaid`) so it is never paid twice. Deposit is non-refundable after cancel.
-- **Evidence** (no escrow, so keep a trail): the rider app publishes a RIDE_PAYMENT after each payment
-  (`recordPayment`; `PayDriver` returns `{verified, level, pr, preimage, verify}`) and a RIDE_CONFIRM for
-  boarded / ended / problem (`confirmRide`). The rider's `level` is NOT trusted: the driver app re-checks
-  (`verifyPayment`: only a `verify` URL on the host of the driver's own lud16 is fetched).
+  stage-<rideKey>, finish-/complete-<id>, tick-<rideKey>-<seq>-<nonce>, tick-reply-<tickId>, …). Read replaceable lists through `latestVersions()`.
+- **Payment is pay-as-you-ride in ecash (no escrow, no deposit, NO cancellations or cancel fees)** — see docs/index.md "Pay as you ride". The rider pays the driver in TICKS
+  (lib/ticks.js): the base when the ride starts, each full mile, each full minute, and a final part at the finish. Money is in SATS; each tick's sats are fixed when it falls due
+  (the driver's rate, in the rate's currency, at that moment's BTC price). Both apps keep the same saved LEDGER (`lib/ridemoney.js currentLedger`) from the signed start time and
+  the agreed meter. The rider's app (`features/payments/rideTicks.js payDue`, run every 3 s by `RiderContext`) pays everything due as ONE token event (30095); a short wallet pays what
+  it can and the rest stays due (never lost, never paid twice: `sentSats` counts every non-refused tick). The driver's app (`redeemTicks.js`, run by `DriverContext`, for ALL its rides) redeems
+  each token and answers (30096): `ok:false` ONLY on a final refusal, never when the mint is unreachable. "Paid" = what the driver confirmed (`paidSats`). `missedTicks` (due > 30 s
+  and uncovered) ≥ 2 lets the driver finish. The rider may refill and pay what is missed, also after the ride. Flat price: same ticks, scaled to add up to the price and capped at it; finished AT
+  THE DESTINATION the rest is owed; an accepted extra stop converts it to the normal fare from the start (`convertToMetered`). The driver may waive (30097): unpaid forgiven first, the rest
+  sent back as an ecash token sealed to the rider (`redeemWaivers.js`; `ecash.payUpTo` sends the most the balance allows, because spending proofs costs the mint's input fee, and the waiver records the sats really sent; the modal caps the amount at what the driver still holds at the ride's mint). Never invoice the rider's own wallet. Only `confirmDriver` publishes RIDE_ACCEPT + `in_progress`.
+- **Ecash wallet** (`nostr/ecash.js`): bookkeeping only, over a mint adapter; `nostr/cashuMint.js` is the ONLY file that imports `@cashu/cashu-ts` (loaded on demand by `AppContext`).
+  Proofs are saved encrypted (NIP-44 to the user's own key, in pieces). Rules: one money move at a time (`_exclusive`); a token being sent sits in `pending` until its event is
+  published/queued (`settle`) or is returned (`unreserve`/`recoverPending`); a token is redeemed once (fingerprint); the sender adds the mint's input fee (`includeFees`) so the receiver
+  gets the full tick; `EcashError.definitive` separates a mint's "no" from an unreachable mint. Never log proofs or tokens. Test against `test/helpers/localmint.mjs` (real maths).
+- **Tips** still go over Lightning: the rider's `lud16` payment via `PayDriver` and a RIDE_PAYMENT `tip` record. **Evidence**: tips are re-checked by the driver app
+  (`verifyPayment`: only a `verify` URL on the host of the driver's own lud16 is fetched); the tick trail (30095/30096/30097/30098) is the evidence for the ride's money.
+- **Finish ride (lib/finish.js)**: one `finishRide` action per app (rider: RiderContext, driver: DriverContext), always behind a `ConfirmDialog`. Before the `riding` marker nothing is
+  owed (`closed`). A quiet phone is never a finish; `useRideLink` asks "still with you?" after 2 min (RIDE_ALIVE), and finishes with reason `silence` only when BOTH were silent for 10 min,
+  checked once when an app starts for the ride; time our own relays were down (`nostr/link.js`) is never counted. "I've arrived" needs `canMarkArrived` (≤ 50 m, good fix). The ride starts
+  with both 2-digit codes (`lib/startcode.js`): rider confirm `code` + the driver's typed check. A GPS gap ≤ 10 min is filled with a straight line (`odometer.js maxGapMs`).
+- **Local currency** (`lib/currency.js`): each person picks one in Account; `AppContext` exposes `currency`, `prices` (code → BTC price, last good ones kept 24 h), `btcPrice` (the chosen
+  currency's), `usdPrice`, `priceFor(code)`. A driver's rates carry their currency (`normalizeRates` adds `currency`, default USD; limits scale with the currency). Never guess a missing price:
+  show sats / wait. Use `formatFiat(x)` (never a literal "$"). The app's own rates and `MIN_OFFER_USD` are dollars (use `usdPrice`).
 - **Blocking** is local (`getSetting("blocked")`, `useApp().blockUser/isBlockedPk`): filter at the data
   boundary (driver `open` list, rider presence and `offersForRide` in ActiveTrip). Don't re-add blocked people anywhere else.
 - **Outbox**: `relay.publish` queues an event no relay accepted (`nostrride_outbox` in localStorage) and
@@ -219,17 +256,13 @@ rider's `in_progress` version also carries `driverPubkey`. Stage is `enroute`
   viewer. The share key is only ever in the URL fragment.
 - **Service worker** (`public/sw.js`, production only): caches the shell and hashed assets; never touches
   relays, tiles or APIs. It cannot receive push while the app is closed. Native shell (`native/`) skips it.
-- **Price offers** (`lib/fare.js`): SATS are the source of truth. The RIDER names the price as ANY amount, typed in dollars and cents or in sats
-  (`ui/AmountInput`: unit swap button, the other unit shown below; dollars↔sats via `satsFromUsd`/`usdFromSats` at `btcUsd || FALLBACK_BTC_USD`;
-  limits from `offerLimitsSats`: `MIN_OFFER_USD` .. `MAX_OFFER_FACTOR` × suggestion; out of range → message and the action is disabled). It is
-  published as `fareSats`. A driver accepts it or counters higher (`acceptRequest(request, priceSats)`, same input); `replyKind(price, offer)` names
-  the reply. The deposit is a % of the driver's price; the chosen driver's offer (`offerFrom`) carries the price for the rest of the ride.
-  The rider can republish the request with a new `fareSats` (`raiseOffer`) while no driver is chosen. No $1 steps any more.
-- **Typical fares**: each driver may set `rates` {base, perMile, perMinute} (kind 0 and public presence; `normalizeRates` rejects junk; limits
-  `RATE_LIMITS`). `typicalFareUsd(rates, miles, minutes)` = base + per mile × miles + per minute × minutes, never below `FARE_RATES.minimum`; no rates → the
-  app's. The rider's quote lists nearby drivers' typical fares and suggests their MEDIAN (the app's formula if no driver is near); each offer carries
-  `typicalSats`. Use the trip as the request publishes it (miles to a tenth) on both sides or the cents differ. Round money to whole cents before
-  showing it (`toFixed` on half-cents disagrees with `Math.round`).
+- **Fares** (`lib/fare.js`): the rider chooses `fareMode` `"standard"` (each driver's own rates; the request's `fareSats` is only an estimate; the driver cannot counter) or `"flat"` (the RIDER
+  names ANY amount, in the local currency or sats: `ui/AmountInput`, limits from `offerLimitsSats`: `MIN_OFFER_USD` .. `MAX_OFFER_FACTOR` × suggestion; published as `fareSats`; a driver accepts or
+  counters higher with `acceptRequest(request, priceSats)`; `replyKind(price, offer)` names the reply). The rider can republish a flat request with a new `fareSats` (`raiseOffer`) while no driver is chosen.
+- **Driver rates**: each driver may set `rates` {base, perMile, perMinute, currency} (kind 0 and public presence; `normalizeRates` rejects junk; limits `RATE_LIMITS`, scaled per currency). The fare is
+  base + per mile × miles + per minute × minutes (`fareAmount`), **no minimum fare**; no rates → `APP_RATES`. The rider's quote suggests the MEDIAN of nearby drivers' fares IN SATS (`typicalSats`)
+  (the app's formula if no driver is near); each offer carries `typicalSats`. The rates in an offer are FROZEN once the rider chooses it, and the Account screen locks the rates during a ride.
+  Use the trip as the request publishes it (miles to a tenth) on both sides or the cents differ. Round money to whole cents before showing it.
 - **Gender preference**: drivers MAY set `gender` ("male" | "female") in kind 0 (copied into offers); anything else is ignored.
   A rider's preference (`getSetting("genderPref")`, local only) only reorders the offers via `rankOffers`; never filter or hide a driver by it.
 - **Drive gating**: `isDriveReady(user)` = `driveGaps(user)` is empty (lib/profile.js): face photo + vehicle year/make/model +
@@ -241,17 +274,17 @@ rider's `in_progress` version also carries `driverPubkey`. Stage is `enroute`
   (lib/evidence.js) reads them without keys (amount is public, only the rider can author, completed rides only); earnings count a tip on the day it was sent.
 - **Changing the pickup** (lib/privacy.js `pickupProposals/pickupReplies/acceptedPickup`, lib/pickup.js): the rider proposes (30093, new place sealed to the
   driver AND to the rider), the assigned driver accepts/declines (30094). `exactTrip(request, user)` swaps in the newest ACCEPTED pickup, so every screen
-  follows. Pending/declined changes change nothing. It must NEVER reset or change the odometers and clocks (cancellation miles/minutes), and both people are told
+  follows. Pending/declined changes change nothing. It must NEVER reset or change the odometers and clocks (the ride's miles/minutes), and both people are told
   (`PICKUP_CHANGE_NOTE`).
 - **Trip meter** (lib/odometer.js, lib/meter.js): the driver's odometer rides in each location update (`pm`,`tm`); the rider's app (`useRiderMeter`) keeps its OWN figure
   inside the code (own phone GPS during the trip, the car's position updates on the way to the pickup), applies `referenceMiles` (driver's distance unless the rider's
   differs by more than 5%; 0.05 mi floor near zero), and sends the result to the driver (21101) so both screens agree. The rider's own figure is never displayed. Times come
-  from `rideTimes(request)` (signed stage markers; they carry earlier times because relays keep only the newest marker). Display only for now.
+  from `rideTimes(request)` (signed stage markers; they carry earlier times because relays keep only the newest marker). The meter now FEEDS THE TICKS (miles → mile ticks and the final tick).
 - **nostr-tools filters**: `pool.subscribeMany(relays, filter, params)` and `querySync` take ONE filter OBJECT in the installed 2.25 (an array reaches the relay as an
   invalid filter and live subscriptions silently die). `test/pool-api.test.mjs` guards it. Test relays must be strict about this too.
 - **Pickup from GPS**: `PlaceSearch` fills the pickup from `here` on its own unless the rider typed or cleared it; it shows a
   *Done* button when both places are set.
-- **Completion is driver-driven**; the rider can cancel. Both sides get an optional rating
+- **Either person finishes the ride** (no cancellations). Both sides get an optional rating
   (under 5 stars needs a reason — `ui/RatingForm.jsx`). Ended rides come back as the
   receipt/summary screen for up to 6 h until dismissed (`riderDone` / `driverDone` in localStorage).
 - **Live location**: the driver app broadcasts exact position to the rider (NIP-44, ephemeral) for the
@@ -277,7 +310,7 @@ rider's `in_progress` version also carries `driverPubkey`. Stage is `enroute`
   (keep the return shapes; URLs come from `config/services.js` / `.env`).
 - **Trip screens** (rider `OnTrip`, driver `DriveTrip`): the `Sheet` is given a `peek` line, so it starts nearly collapsed and is dragged/tapped
   open (`openKey` pops it open when the user has a step; `closeKey` = the stage tucks it away). Anything a test or a user must click
-  inside it (I've arrived, Start/Complete trip, Cancel, Safety, It matches) is hidden (`visibility`) while collapsed. The trip headline is also
+  inside it (I've arrived, Start trip, Finish ride, Safety, It matches, the code fields) is hidden (`visibility`) while collapsed. The trip headline is also
   in the peek line. `MapView navigation follow={{lat,lng,id}}` is trip mode: street-zoom camera on the vehicle, north-up by default,
   compass button = heading-up, user drag/zoom stops following and shows **Re-center**. In trip mode the Leaflet map sits in an
   oversized box turned with CSS; Leaflet's own drag is off and panning is done in MapView (its mouse maths ignores the turn); icons that
@@ -299,9 +332,9 @@ rider's `in_progress` version also carries `driverPubkey`. Stage is `enroute`
 ## "Going live" swap points
 - Relays: already real (`nostr/relay.js`, `nostr/live.js`). To harden: scope relays/geography,
   add reconnection, fetch remote kind-0 for display names beyond the ones we pull on demand.
-- Signing, maps/geocoding/routing, Lightning (NIP-47 + lud16): already real (see above).
+- Signing, maps/geocoding/routing, Lightning (NIP-47 + lud16): already real (see above). Ecash: the Cashu client is real and tested against a local mint with real maths, but NOT yet run against a public mint or on a phone; pick the production mint with `VITE_DEFAULT_MINT`.
 - Native background GPS: `native/` (Capacitor) + `lib/nativeGeo.js`, written but NOT run on a device.
-- Not built yet: push while the app is closed (needs a push server), arbiter/ruling flow, synced block list (NIP-51), in-app chat/call (Contact sheet shows the other person's Signal/Telegram/phone),
+- Not built yet: swaps between mints, automatic cash out, push while the app is closed (needs a push server), arbiter/ruling flow, synced block list (NIP-51), in-app chat/call (Contact sheet shows the other person's Signal/Telegram/phone),
   ride types
   (Comfort/XL), surge pricing.
 

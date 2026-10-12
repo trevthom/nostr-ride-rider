@@ -1,19 +1,25 @@
 // ════════════════════════════════════════════════════════════
 //  EVIDENCE — The signed record of a ride that helps settle a dispute
 //  (there is no escrow, so there must be a trail):
-//    • the rider's payment records (kind 30086). The proof — invoice,
-//      preimage, LUD-21 verify URL — is sealed to the driver, so only
-//      the two of them can read it.
-//    • the rider's confirmations (kind 30087): "boarded" and "ended".
-//    • the driver's stage markers and completion (already in rides.js).
+//    • the rider's ecash ticks (kind 30095) and the driver's answers (30096),
+//      waivers (30097) and signs of life (30098) — see lib/payments.js. The
+//      token inside a tick is sealed to the driver; the amounts are public.
+//    • the rider's Lightning payment records (kind 30086) — now only tips (older rides
+//      also have a deposit and "rest"). The proof — invoice, preimage, LUD-21 verify URL —
+//      is sealed to the driver, so only the two of them can read it.
+//    • the rider's confirmations (kind 30087): "boarded", "code" and "ended".
+//    • the driver's stage markers and the finish events (already in rides.js).
 //  • tips: a payment record with phase "tip". The rider may send any number of
 //    them, at any time after the ride is completed (optional, never required).
 //  Only the RIDE'S RIDER can author a payment record or a confirmation.
+//  When two signed accounts disagree, the one that costs the rider less wins. No third party.
 // ════════════════════════════════════════════════════════════
 
 import { relay } from "../nostr/relay.js";
 import { EVENT_KINDS } from "../nostr/eventKinds.js";
 import { rideVersions, rideDriver, rideStatus } from "./rides.js";
+import { ticksOf, tickReplies, waiversOf } from "./payments.js";
+import { stopChanges } from "./stops.js";
 import { unseal } from "./privacy.js";
 import { preimageMatches } from "./bolt11.js";
 import { invoiceAmountMsat, invoiceStatus } from "./lnurl.js";
@@ -96,7 +102,11 @@ export function disputeRecord(request, user) {
     ride: { rider: request.pubkey, driver: rideDriver(request), versions: ids },
     stages: mine(EVENT_KINDS.RIDE_STAGE).filter((e) => e.pubkey === rideDriver(request)).map(brief),
     complete: mine(EVENT_KINDS.RIDE_COMPLETE).filter((e) => e.pubkey === rideDriver(request)).map(brief),
-    cancels: mine(EVENT_KINDS.RIDE_CANCEL).map(brief),
+    finishes: mine(EVENT_KINDS.RIDE_FINISH).map(brief),
+    ticks: ticksOf(request).map((t) => ({ id: t.id, trigger: t.trigger, amountSats: t.amountSats, mint: t.mint, at: t.createdAt, reply: tickReplies(request).get(t.id) || null })),
+    waivers: waiversOf(request).map((w) => ({ forgivenSats: w.forgivenSats, refundSats: w.refundSats, reason: w.reason, at: w.at })),
+    stopChanges: stopChanges(request).map((c) => ({ id: c.id, mode: c.mode, status: c.status, at: c.at })),
+    signsOfLife: mine(EVENT_KINDS.RIDE_ALIVE).map(brief),
     confirmations: mine(EVENT_KINDS.RIDE_CONFIRM).filter((e) => e.pubkey === request.pubkey).map(brief),
     payments: paymentRecords(request, user).map((r) => ({ phase: r.phase, amountSats: r.amountSats, level: r.level, at: r.at, invoice: r.detail?.pr || null, preimage: r.detail?.preimage || null, verify: r.detail?.verify || null })),
   };

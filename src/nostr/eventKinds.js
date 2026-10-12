@@ -19,13 +19,19 @@ export const EVENT_KINDS = {
   RIDE_REQUEST: 30078, // A rider asking for a ride
   RIDE_OFFER: 30079, // A driver offering to take a request
   RIDE_ACCEPT: 30080, // A rider accepting one offer
-  RIDE_CANCEL: 30081, // A cancelled ride
+  RIDE_FINISH: 30081, // Either person finishes the ride (no cancellations, no cancel fees)
   RIDE_COMPLETE: 30084, // A completed ride (published by the driver)
   RIDE_STAGE: 30085, // Driver progress on an accepted ride: arrived / riding
   RIDE_PAYMENT: 30086, // Rider's record of a payment (proof sealed to the driver): evidence
   RIDE_CONFIRM: 30087, // Rider's own confirmation: boarded / trip ended OK or a problem: evidence
   RIDE_PICKUP_CHANGE: 30093, // Rider asks to change the pickup while the driver is on the way (exact place sealed)
   RIDE_PICKUP_REPLY: 30094, // The assigned driver accepts or declines that change
+  RIDE_TICK: 30095, // Rider -> driver: one ecash payment while the ride runs (token sealed to the driver)
+  RIDE_TICK_REPLY: 30096, // Driver -> rider: that payment was received (or could not be redeemed)
+  RIDE_WAIVER: 30097, // Driver -> rider: part of the fare is waived (the unpaid part, and/or ecash sent back)
+  RIDE_ALIVE: 30098, // "Still riding" / "Still driving": a signed sign of life for the ride
+  RIDE_STOP_CHANGE: 30099, // Rider asks to add a stop or change the destination mid-ride (place sealed)
+  RIDE_STOP_REPLY: 30100, // The assigned driver accepts the extra stop (or finishes the ride instead)
   RATING: 30082, // A star rating + review
   DRIVER_ROUTE: 30083, // (removed feature; kept for back-compat)
 

@@ -22,7 +22,7 @@ import Button from "../../ui/Button.jsx";
 import Icon from "../../ui/Icon.jsx";
 
 export default function PayDriver({ amountSats, address, memo = "NostrRide fare", onPaid }) {
-  const { wallet, btcUsd } = useApp();
+  const { wallet, btcPrice } = useApp();
   const [busy, setBusy] = useState(""); // "" | "wallet" | "invoice" | "check"
   const [error, setError] = useState("");
   const [invoice, setInvoice] = useState(null); // { pr, verify }
@@ -107,7 +107,7 @@ export default function PayDriver({ amountSats, address, memo = "NostrRide fare"
     setTimeout(() => setCopied(false), 1500);
   };
 
-  const amountText = moneyText(amountSats, btcUsd);
+  const amountText = moneyText(amountSats, btcPrice);
   return (
     <div>
       {/* Option 1: connected wallet */}

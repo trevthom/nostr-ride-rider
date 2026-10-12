@@ -1,7 +1,8 @@
 // ════════════════════════════════════════════════════════════
 //  APP STATE — The state BOTH apps share: the logged-in user, which
 //  tab is showing, the ride requests from the relays, transient
-//  banners, the BTC price, and the connected Lightning wallet.
+//  banners, the local currency and the BTC prices, the ecash wallet,
+//  and the connected Lightning (NWC) wallet.
 //
 //  Role-specific state lives next to each app:
 //    src/rider/state/RiderContext.jsx    (requesting + riding)
@@ -24,6 +25,9 @@ import { APP_NAME, IS_DRIVER_APP } from "../config/app.js";
 import { getSetting, setSetting, reconnectAll } from "../config/relays.js";
 import { addBlock, removeBlock, isBlocked } from "../lib/blocks.js";
 import { showSystemNotification } from "../lib/notify.js";
+import { PRICE_CODES, PRICE_MAX_AGE_MS, getCurrency, setCurrency as saveCurrency, onCurrencyChange } from "../lib/currency.js";
+import { FALLBACK_BTC_USD } from "../config/settings.js";
+import { link } from "../nostr/link.js";
 
 const AppContext = createContext(null);
 
@@ -34,11 +38,19 @@ const APP_EVENT_KINDS = new Set([
   EVENT_KINDS.RIDE_REQUEST,
   EVENT_KINDS.RIDE_OFFER,
   EVENT_KINDS.RIDE_ACCEPT,
-  EVENT_KINDS.RIDE_CANCEL,
+  EVENT_KINDS.RIDE_FINISH,
   EVENT_KINDS.RIDE_COMPLETE,
   EVENT_KINDS.RIDE_STAGE,
   EVENT_KINDS.RIDE_PAYMENT,
   EVENT_KINDS.RIDE_CONFIRM,
+  EVENT_KINDS.RIDE_PICKUP_CHANGE,
+  EVENT_KINDS.RIDE_PICKUP_REPLY,
+  EVENT_KINDS.RIDE_TICK,
+  EVENT_KINDS.RIDE_TICK_REPLY,
+  EVENT_KINDS.RIDE_WAIVER,
+  EVENT_KINDS.RIDE_ALIVE,
+  EVENT_KINDS.RIDE_STOP_CHANGE,
+  EVENT_KINDS.RIDE_STOP_REPLY,
   EVENT_KINDS.RATING,
 ]);
 
@@ -78,29 +90,67 @@ export function AppProvider({ initialView, children }) {
   const unblockUser = useCallback((pubkey) => setBlocked((l) => { const n = removeBlock(l, pubkey); setSetting("blocked", n); return n; }), []);
   const isBlockedPk = useCallback((pubkey) => isBlocked(blocked, pubkey), [blocked]);
 
-  // BTC price (USD) so sats amounts can show a fiat estimate. Refreshed
-  // periodically; null until first fetch (then USD is just hidden).
-  const [btcUsd, setBtcUsd] = useState(null);
+  // The local currency (chosen in Account) and the BTC price in every supported currency (code → price).
+  // Charges are stated in the local currency and turned into sats at the price of the moment. The last good
+  // prices are kept on this device, so a price feed outage does not stop a ride.
+  const [currency, setCurrencyState] = useState(getCurrency());
+  useEffect(() => onCurrencyChange(setCurrencyState), []);
+  const setCurrency = useCallback((code) => saveCurrency(code), []);
+  const [priceInfo, setPriceInfo] = useState(() => {
+    const saved = getSetting("prices", null);
+    return saved && saved.prices && Date.now() - saved.at < PRICE_MAX_AGE_MS ? { prices: saved.prices, at: saved.at, live: false } : { prices: {}, at: 0, live: false };
+  });
   useEffect(() => {
     let alive = true;
     const fetchPrice = async () => {
       try {
-        const res = await fetch("https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd");
+        const res = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=${PRICE_CODES.map((c) => c.toLowerCase()).join(",")}`);
         const data = await res.json();
-        if (alive && data?.bitcoin?.usd) setBtcUsd(data.bitcoin.usd);
+        const row = data?.bitcoin || {};
+        const prices = {};
+        PRICE_CODES.forEach((c) => { const v = row[c.toLowerCase()]; if (typeof v === "number" && v > 0) prices[c] = v; });
+        if (alive && Object.keys(prices).length) {
+          const next = { prices, at: Date.now(), live: true };
+          setPriceInfo(next);
+          setSetting("prices", { prices, at: next.at });
+        }
       } catch {
-        /* leave null; USD just won't show */
+        /* keep the last prices; a fiat amount just may not show */
       }
     };
     fetchPrice();
     const id = setInterval(fetchPrice, 5 * 60 * 1000);
     return () => { alive = false; clearInterval(id); };
   }, []);
+  const prices = priceInfo.prices;
+  // The BTC price in the chosen currency (null until known). Dollars fall back to a fixed price so fares can still be quoted.
+  const btcPrice = prices[currency] ?? null;
+  const usdPrice = prices.USD ?? null;
+  const priceFor = useCallback((code) => prices[code] ?? (code === "USD" ? FALLBACK_BTC_USD : null), [prices]);
 
   // Connect to the real relays once when the app starts.
   useEffect(() => {
     relay.startSync();
+    link.start();
   }, []);
+
+  // The ecash wallet of the logged-in user. Its code is loaded on demand (a separate chunk), proofs are
+  // opened with the user's key, and anything paid but not yet claimed is claimed. `ecashTick` re-renders screens.
+  const [ecash, setEcash] = useState(null);
+  const [, setEcashTick] = useState(0);
+  useEffect(() => {
+    if (!user?.sk) { setEcash(null); return; }
+    let alive = true, off = null;
+    import("../nostr/cashuMint.js").then((m) => {
+      if (!alive) return;
+      const w = m.userWallet(user);
+      off = w.onChange(() => setEcashTick((t) => t + 1));
+      setEcash(w);
+      w.claimAll().catch(() => {});
+      w.recoverPending().catch(() => {});
+    }).catch(() => {});
+    return () => { alive = false; if (off) off(); };
+  }, [user?.publicKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Re-read the latest ride requests from the cache (newest per request),
   // skipping anything malformed or not shaped like a ride.
@@ -207,6 +257,7 @@ export function AppProvider({ initialView, children }) {
     setUser(null);
     setProfileModalPubkey(null);
     setWallet(emptyWalletState());
+    setEcash(null);
     setNotices([]);
     setView(initialView);
   }, [initialView]);
@@ -262,12 +313,18 @@ export function AppProvider({ initialView, children }) {
     publish,
     wallet,
     setWallet,
+    ecash,
+    currency,
+    setCurrency,
+    prices,
+    priceFor,
+    btcPrice,
+    usdPrice,
     blocked,
     blockUser,
     unblockUser,
     isBlockedPk,
     liveTick,
-    btcUsd,
   };
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

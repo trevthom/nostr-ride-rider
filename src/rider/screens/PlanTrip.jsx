@@ -4,20 +4,22 @@
 //    idle    map + "Where to?" bar + recent places
 //    search  pickup / dropoff fields with live address results
 //    quote   route on the map, the typical fares of the drivers nearby (each
-//            driver sets their own rates), a suggested price, the rider's own
-//            offer (any amount, in dollars and cents or sats), Now/Later,
-//            notes → Request. Drivers accept the offer or counter.
+//            driver sets their own rates), a suggested price, and the choice of fare:
+//              Standard fare  every driver's own rates (base, per mile, per minute), paid tick by tick
+//              Flat price     the rider's own price (any amount, in local money or sats): a driver
+//                             accepts it or counters; traffic and detours never raise it
+//            Now/Later, notes → Request.
 // ════════════════════════════════════════════════════════════
 
 import { useEffect, useRef, useState } from "react";
 import { useApp } from "../../state/AppContext.jsx";
 import { useRider } from "../state/RiderContext.jsx";
-import { median, normalizeRates, offerLevel, offerLimitsSats, quoteFare, satsFromUsd, typicalFareUsd } from "../../lib/fare.js";
-import { FALLBACK_BTC_USD, FARE_RATES } from "../../config/settings.js";
+import { median, normalizeRates, offerLevel, offerLimitsSats, quoteFare, typicalFare, typicalSats } from "../../lib/fare.js";
+import { formatFiat } from "../../lib/currency.js";
+import { FARE_RATES } from "../../config/settings.js";
 import MapView from "../../ui/MapView.jsx";
 import Money, { moneyText } from "../../ui/Money.jsx";
 import AmountInput from "../../ui/AmountInput.jsx";
-import { formatUsd } from "../../ui/SatsAmount.jsx";
 import Icon from "../../ui/Icon.jsx";
 import Button from "../../ui/Button.jsx";
 import { MapPage, Sheet, FloatButton } from "../../ui/Layout.jsx";
@@ -109,7 +111,7 @@ function Idle() {
 }
 
 function Quote() {
-  const { btcUsd, wallet } = useApp();
+  const { btcPrice, usdPrice, prices, currency } = useApp();
   const { plan, setPlan, drivers, requestRide, nearestDriverEta, gps, myPosition, geoError } = useRider();
   const { pickup, dropoff } = plan;
   const [route, setRoute] = useState(null); // { miles, minutes, straight }
@@ -119,21 +121,27 @@ function Quote() {
   const key = `${pickup.lat},${pickup.lng}|${dropoff.lat},${dropoff.lng}`;
   useEffect(() => setRoute(null), [key]);
 
-  const rate = btcUsd || FALLBACK_BTC_USD;
   // Use the trip as the request will publish it (miles to a tenth), so a driver's typical fare
   // works out to the same cents on both screens.
   const trip = route && { miles: Math.round(route.miles * 10) / 10, minutes: route.minutes };
-  const quote = trip ? quoteFare(trip, btcUsd) : null; // the app's own rates (the fallback)
-  // Every driver nearby sets their own typical fare. Show each, and suggest the middle one.
+  const quote = trip ? quoteFare(trip, usdPrice) : null; // the app's own rates (the fallback)
+  // Every driver nearby sets their own rates (in their own currency). Show each one's fare for this trip in the rider's
+  // currency, and suggest the middle one. Sats are the common ground, so drivers in other currencies compare fairly.
   const typicals = trip
     ? drivers
-        .map((d) => { const r = normalizeRates(d.rates); return { id: d.pubkey, name: d.name || "Driver", custom: !!r, usd: typicalFareUsd(r, trip.miles, trip.minutes) }; })
-        .sort((a, b) => a.usd - b.usd)
+        .map((d) => {
+          const r = normalizeRates(d.rates);
+          const sats = typicalSats(r, trip.miles, trip.minutes, prices);
+          return { id: d.pubkey, name: d.name || "Driver", custom: !!r, sats, own: r ? `${formatFiat(typicalFare(r, trip.miles, trip.minutes), r.currency)}` : "" };
+        })
+        .filter((t) => t.sats != null)
+        .sort((a, b) => a.sats - b.sats)
     : [];
-  const suggestedUsd = quote ? Math.round((typicals.length ? median(typicals.map((t) => t.usd)) : quote.usd) * 100) / 100 : 0; // whole cents, so every screen shows the same amount
-  const suggestedSats = quote ? satsFromUsd(suggestedUsd, btcUsd) : 0;
-  // The rider names the price. An offer belongs to one route: a new pickup or dropoff starts from the suggestion again.
-  const limits = offerLimitsSats(suggestedSats, btcUsd);
+  const appSats = quote ? typicalSats(null, trip.miles, trip.minutes, { USD: usdPrice }) ?? quote.sats : 0;
+  const suggestedSats = quote ? Math.round(typicals.length ? median(typicals.map((t) => t.sats)) : appSats) : 0;
+  const flat = plan.fareMode === "flat";
+  // A flat price belongs to one route: a new pickup or dropoff starts from the suggestion again.
+  const limits = offerLimitsSats(suggestedSats, usdPrice);
   const offerSats = quote ? (plan.offerKey === key ? plan.offerSats : suggestedSats) : 0; // null while the field is empty
   const offerOk = Number.isFinite(offerSats) && offerSats >= limits.min && offerSats <= limits.max;
   const level = quote && offerOk ? offerLevel(offerSats, suggestedSats) : "fair";
@@ -143,14 +151,14 @@ function Quote() {
     new Date(Date.now() + offsetMs - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 
   const request = () => {
-    if (!quote || !offerOk) return;
+    if (!quote || (flat && !offerOk)) return;
     if (timed) {
       const t = Date.parse(plan.when);
       if (isNaN(t)) return setError("Pick a valid date and time.");
       if (t > Date.now() + 7 * 86400000) return setError("Scheduled rides can be at most 1 week ahead.");
       if (t < Date.now() - 60000) return setError("Pick a time in the future.");
     }
-    requestRide({ pickup, dropoff, when: plan.when, notes: plan.notes.trim(), miles: route.miles, minutes: route.minutes, fareSats: Math.round(offerSats), suggestedSats });
+    requestRide({ pickup, dropoff, when: plan.when, notes: plan.notes.trim(), miles: route.miles, minutes: route.minutes, fareMode: flat ? "flat" : "standard", fareSats: flat ? Math.round(offerSats) : suggestedSats, suggestedSats });
   };
 
   const arrive = new Date(Date.now() + ((eta || 5) + (route?.minutes || 0)) * 60000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
@@ -208,16 +216,50 @@ function Quote() {
           </div>
         </div>
 
-        {/* The rider's offer: any amount. Drivers accept it or counter. */}
+        {/* The fare: each driver's standard fare, or the rider's flat price. */}
         {quote && (
+          <div className="mt-3 flex gap-2" role="group" aria-label="Fare">
+            {[["standard", "Standard fare"], ["flat", "Flat price"]].map(([id, label]) => (
+              <button key={id} type="button" aria-pressed={plan.fareMode === id} onClick={() => setPlan({ fareMode: id })}
+                className={`flex-1 py-2.5 rounded-full text-sm font-semibold ${plan.fareMode === id ? "bg-black text-white" : "bg-neutral-100 text-neutral-700"}`}>
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
+        {quote && !flat && (
+          <div className="mt-3 rounded-2xl bg-neutral-100 px-4 py-3">
+            <p className="text-sm text-neutral-800">
+              You pay the driver's own rates as you ride: a base rate when the ride starts, then every mile and every minute. About <span className="font-semibold">{moneyText(suggestedSats, btcPrice)}</span> for this trip. Traffic can make it cost more.
+            </p>
+            {typicals.length > 0 ? (
+              <div className="mt-3 pt-3 border-t border-neutral-200">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500 mb-1.5">Drivers nearby</p>
+                <ul className="flex flex-wrap gap-1.5">
+                  {typicals.slice(0, 6).map((t) => (
+                    <li key={t.id} className="text-xs bg-white border border-neutral-200 rounded-full px-2.5 py-1">
+                      <span className="font-semibold">{t.name}</span> {moneyText(t.sats, btcPrice)}
+                      {!t.custom && <span className="text-neutral-400"> · app rates</span>}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : (
+              <p className="text-xs text-neutral-500 mt-2">
+                {`App rates: ${formatFiat(FARE_RATES.base, "USD")} base + ${formatFiat(FARE_RATES.perMile, "USD")}/mi + ${formatFiat(FARE_RATES.perMinute, "USD")}/min.`}
+              </p>
+            )}
+          </div>
+        )}
+        {quote && flat && (
           <div className="mt-3 rounded-2xl bg-neutral-100 px-4 pt-3 pb-3">
-            <p className="text-center text-xs font-semibold uppercase tracking-wider text-neutral-500 mb-2">Your offer</p>
+            <p className="text-center text-xs font-semibold uppercase tracking-wider text-neutral-500 mb-2">Your flat price</p>
             <AmountInput
               sats={offerSats}
-              rate={rate}
+              rate={btcPrice}
               min={limits.min}
               max={limits.max}
-              label="Your offer"
+              label="Your flat price"
               onChange={(v) => setPlan({ offerSats: v, offerKey: key })}
             />
             {offerOk && (
@@ -230,27 +272,14 @@ function Quote() {
               </p>
             )}
             <p className="text-center text-xs text-neutral-500 mt-1">
-              {typicals.length
-                ? `Suggested ${formatUsd(suggestedUsd)}: the middle of what ${typicals.length === 1 ? "the driver" : `${typicals.length} drivers`} nearby typically charge for this trip.`
-                : `Suggested ${formatUsd(suggestedUsd)}: $${FARE_RATES.base.toFixed(2)} base + $${FARE_RATES.perMile.toFixed(2)}/mi + $${FARE_RATES.perMinute.toFixed(2)}/min, for this trip.`}
+              Suggested {moneyText(suggestedSats, btcPrice)}: the {typicals.length ? "middle of what nearby drivers typically charge" : "app's rates"} for this trip.
               {offerSats !== suggestedSats && (
                 <> <button type="button" onClick={() => setPlan({ offerSats: null, offerKey: null })} className="underline font-semibold">Use suggested</button></>
               )}
             </p>
-            {typicals.length > 0 && (
-              <div className="mt-3 pt-3 border-t border-neutral-200">
-                <p className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500 mb-1.5">Typical fares nearby</p>
-                <ul className="flex flex-wrap gap-1.5">
-                  {typicals.slice(0, 6).map((t) => (
-                    <li key={t.id} className="text-xs bg-white border border-neutral-200 rounded-full px-2.5 py-1">
-                      <span className="font-semibold">{t.name}</span> {formatUsd(t.usd)}
-                      {!t.custom && <span className="text-neutral-400"> · app rates</span>}
-                    </li>
-                  ))}
-                </ul>
-                <p className="text-[11px] text-neutral-500 mt-1.5">Each driver sets their own base, per-mile and per-minute rates.</p>
-              </div>
-            )}
+            <p className="text-center text-xs text-neutral-600 mt-2">
+              Once a driver accepts, the price does not change for traffic or detours. If you add a stop or change the destination during the ride, you pay the driver's normal fare instead, counted from the start.
+            </p>
           </div>
         )}
         {pickup.fromGps && gps !== "good" && (
@@ -258,7 +287,10 @@ function Quote() {
             Your pickup comes from a weak location. {gpsMessage(gps, myPosition, geoError)} Tap Edit to check the address.
           </p>
         )}
-        {quote && !quote.live && (
+        {quote && !btcPrice && (
+          <p className="text-xs text-amber-700 mt-1.5">The bitcoin price for {currency} is not available yet, so amounts show in sats.</p>
+        )}
+        {quote && btcPrice && !quote.live && currency === "USD" && (
           <p className="text-xs text-amber-700 mt-1.5">Live bitcoin price unavailable, so this uses an estimated rate.</p>
         )}
 
@@ -307,15 +339,15 @@ function Quote() {
 
         <div className="flex items-center gap-2 text-sm text-neutral-600 mt-3">
           <Icon name="zap" size={16} className="text-[#f7931a]" />
-          {wallet.connected ? "Pay with your connected wallet" : "Pay over Lightning from any wallet"}
+          You pay in ecash while you ride, from your wallet in Account.
         </div>
 
         {error && <p className="text-red-600 text-sm mt-2">{error}</p>}
-        <Button className="mt-4" onClick={request} disabled={!quote || !offerOk}>
-          {!quote ? "Finding route…" : offerOk ? <>Request ride · {moneyText(offerSats, btcUsd)}</> : "Enter your offer"}
+        <Button className="mt-4" onClick={request} disabled={!quote || (flat && !offerOk)}>
+          {!quote ? "Finding route…" : flat ? (offerOk ? <>Request ride · {moneyText(offerSats, btcPrice)} flat</> : "Enter your price") : <>Request ride · about {moneyText(suggestedSats, btcPrice)}</>}
         </Button>
         <p className="text-neutral-500 text-xs text-center mt-2">
-          Drivers can accept your price or counter it. You choose who to ride with, and drivers see only the approximate area until you do.
+          {flat ? "Drivers can accept your price or counter it. " : "Drivers who accept charge their own rates. "}You choose who to ride with, and drivers see only the approximate area until you do.
         </p>
       </Sheet>
     </MapPage>

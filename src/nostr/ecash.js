@@ -1,0 +1,292 @@
+// ════════════════════════════════════════════════════════════
+//  ECASH — The ecash (Cashu) wallet both apps use. A rider pays the driver
+//  in small ecash tokens while the ride runs (lib/ticks.js); the driver
+//  redeems each token at the mint straight away, so the money is theirs as it
+//  is earned. Ecash is a bearer note: whoever holds the token owns it.
+//
+//  This file holds the wallet's BOOKKEEPING and has no network code of its
+//  own. Everything that talks to a mint goes through a small "mint adapter"
+//  (nostr/cashuMint.js is the real one; the tests use a fake mint):
+//
+//    adapter(url) → {
+//      quoteMint(sats) → { id, invoice, expiry }      ask the mint for a Lightning invoice to fund
+//      quoteState(id) → "UNPAID" | "PAID" | "ISSUED"
+//      mint(sats, id) → proofs                         turn a paid invoice into ecash
+//      split(proofs, sats) → { keep, send }            exactly `sats` to send (fees on top), the rest to keep
+//      receive(token) → proofs                         swap a received token for fresh proofs
+//      quoteMelt(invoice) → { id, sats, fee }          what paying a Lightning invoice costs
+//      melt(quote, proofs) → { paid, change }          pay it from ecash
+//      states(proofs) → ["UNSPENT" | "SPENT" | "PENDING"]
+//      encode(proofs) → "cashuB…"
+//    }
+//
+//  Safety rules:
+//    • Proofs are saved on this device ONLY ENCRYPTED to the user's own key (NIP-44), in
+//      pieces, because one NIP-44 message holds at most 64 KB.
+//    • A token being sent is kept in `pending` until the event that carries it is published
+//      (or queued in the outbox). A crash in between loses nothing: recoverPending() takes
+//      back what the mint still says is unspent.
+//    • A paid funding invoice is remembered (`quotes`) until its ecash is claimed, so a
+//      reload between "paid" and "minted" loses nothing.
+//    • Nobody but the user can read the proofs. Never log them.
+//
+//  The wallet is a plain object so it can be tested without a browser.
+// ════════════════════════════════════════════════════════════
+
+import { nip44 } from "nostr-tools";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { bytesToHex } from "@noble/hashes/utils.js";
+import { getSetting, setSetting } from "../config/relays.js";
+
+const CHUNK = 30000; // characters per sealed piece
+const sum = (proofs) => proofs.reduce((s, p) => s + Number(p.amount), 0);
+export const proofsTotal = sum;
+
+// code: "funds" | "amount" | "mint" | "token" | "used". `definitive` = the answer will not change if tried
+// again (a mint that says "already spent"); false = worth another try (the mint did not answer).
+export class EcashError extends Error {
+  constructor(code, message, definitive = false) { super(message); this.code = code; this.definitive = definitive; }
+}
+
+// ── Saving: encrypted to the user's own key ──
+export function makeStore(user) {
+  const key = "ecash_" + user.publicKey.slice(0, 16);
+  const ck = () => nip44.getConversationKey(user.sk, user.publicKey);
+  return {
+    load() {
+      const pieces = getSetting(key, null);
+      if (!Array.isArray(pieces)) return null;
+      try {
+        return JSON.parse(pieces.map((p) => nip44.decrypt(p, ck())).join(""));
+      } catch { return null; }
+    },
+    save(state) {
+      const text = JSON.stringify(state);
+      const pieces = [];
+      for (let i = 0; i < text.length; i += CHUNK) pieces.push(nip44.encrypt(text.slice(i, i + CHUNK), ck()));
+      setSetting(key, pieces);
+    },
+    erase() { setSetting(key, null); },
+  };
+}
+
+const emptyState = () => ({ v: 1, mints: {}, pending: [], quotes: [], redeemed: [] });
+
+export class EcashWallet {
+  // store: { load, save }   mintFor: (url) => adapter   tokenInfo: (token) => { mint, sats } | null
+  constructor({ store, mintFor, tokenInfo }) {
+    this.store = store;
+    this.mintFor = mintFor;
+    this.tokenInfo = tokenInfo;
+    this.state = { ...emptyState(), ...(store.load() || {}) };
+    this.listeners = new Set();
+    this.busy = Promise.resolve(); // one money move at a time, so two taps cannot spend the same proofs
+  }
+
+  onChange(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); }
+  _save() {
+    this.store.save(this.state);
+    this.listeners.forEach((fn) => { try { fn(); } catch { /* ignore */ } });
+  }
+  _exclusive(fn) {
+    const run = this.busy.then(fn, fn);
+    this.busy = run.catch(() => {});
+    return run;
+  }
+  _proofs(url) { return this.state.mints[url]?.proofs || []; }
+  _setProofs(url, proofs) { this.state.mints[url] = { proofs }; }
+
+  balance(url) { return sum(this._proofs(url)); }
+  balances() { return Object.fromEntries(Object.keys(this.state.mints).map((u) => [u, this.balance(u)]).filter(([, b]) => b > 0)); }
+  total() { return Object.values(this.balances()).reduce((a, b) => a + b, 0); }
+  pendingList() { return this.state.pending.slice(); }
+  quotesList() { return this.state.quotes.slice(); }
+
+  // ── Funding: pay a Lightning invoice, get ecash ──
+  // Returns { id, invoice, expiry }. Pay `invoice` with the NWC wallet or any Lightning wallet, then claim().
+  fundStart(url, sats) {
+    return this._exclusive(async () => {
+      const amount = Math.round(sats);
+      if (!(amount >= 1)) throw new EcashError("amount", "Enter an amount of at least 1 sat.");
+      const q = await this.mintFor(url).quoteMint(amount);
+      this.state.quotes.push({ id: q.id, mint: url, sats: amount, invoice: q.invoice, expiry: q.expiry ?? null, at: Date.now() });
+      this.state.quotes = this.state.quotes.slice(-20);
+      this._save();
+      return q;
+    });
+  }
+
+  // Claim one funding invoice if it has been paid. Returns { state, sats }:
+  // state "UNPAID" (not yet), "ISSUED" (claimed now or before). Never claims twice.
+  claim(id) {
+    return this._exclusive(async () => {
+      const q = this.state.quotes.find((x) => x.id === id);
+      if (!q) return { state: "ISSUED", sats: 0 };
+      const mint = this.mintFor(q.mint);
+      const st = await mint.quoteState(id);
+      if (st === "UNPAID") return { state: "UNPAID", sats: 0 };
+      if (st === "ISSUED") { this.state.quotes = this.state.quotes.filter((x) => x.id !== id); this._save(); return { state: "ISSUED", sats: 0 }; }
+      const proofs = await mint.mint(q.sats, id);
+      this._setProofs(q.mint, [...this._proofs(q.mint), ...proofs]);
+      this.state.quotes = this.state.quotes.filter((x) => x.id !== id);
+      this._save();
+      return { state: "ISSUED", sats: sum(proofs) };
+    });
+  }
+
+  // Claim everything that was paid while the app was closed. Returns the sats added.
+  async claimAll() {
+    let added = 0;
+    for (const q of this.quotesList()) {
+      try { added += (await this.claim(q.id)).sats; } catch { /* the mint is down: try again later */ }
+    }
+    return added;
+  }
+
+  // ── Paying: take exactly `sats` out as a token ──
+  // Returns { id, token, sats }. Call settle(id) once the event carrying the token is published
+  // (or queued), or unreserve(id) if it never will be. Throws EcashError "funds" when short.
+  pay(url, sats) {
+    return this._exclusive(async () => {
+      const amount = Math.round(sats);
+      if (!(amount >= 1)) throw new EcashError("amount", "Nothing to pay.");
+      const have = this._proofs(url);
+      if (sum(have) < amount) throw new EcashError("funds", "Not enough ecash at this mint.");
+      const mint = this.mintFor(url);
+      let split;
+      try {
+        split = await mint.split(have, amount);
+      } catch (e) {
+        // Fees can make the exact amount a few sats short of the balance.
+        throw new EcashError(sum(have) - amount < 5 ? "funds" : "mint", e?.message || "The mint did not answer.");
+      }
+      const id = Math.random().toString(36).slice(2) + Date.now().toString(36);
+      this._setProofs(url, split.keep);
+      this.state.pending.push({ id, mint: url, sats: amount, proofs: split.send, at: Date.now() });
+      this._save();
+      return { id, token: mint.encode(split.send), sats: amount };
+    });
+  }
+  // Like pay(), but when the mint's fee makes the whole balance a few sats too short, sends the most the balance allows.
+  // Spending proofs costs the sender a fee, so a wallet cannot send back every sat it holds. Returns the same as pay();
+  // read `sats` for what was really sent. Only a "funds" shortage is retried; the checks are local, so a miss costs no mint call.
+  async payUpTo(url, sats) {
+    let amount = Math.min(Math.round(sats), this.balance(url));
+    for (let cut = 1; ; cut *= 2) {
+      try { return await this.pay(url, amount); }
+      catch (e) {
+        if (e.code !== "funds" || cut > 256 || amount - cut < 1) throw e;
+        amount -= cut;
+      }
+    }
+  }
+  settle(id) {
+    this.state.pending = this.state.pending.filter((p) => p.id !== id);
+    this._save();
+  }
+  unreserve(id) {
+    const p = this.state.pending.find((x) => x.id === id);
+    if (!p) return;
+    this._setProofs(p.mint, [...this._proofs(p.mint), ...p.proofs]);
+    this.settle(id);
+  }
+  // After a crash: a pending token older than `afterMs` whose proofs the mint still calls unspent was never
+  // delivered, so it goes back into the wallet. Spent ones were delivered and are dropped.
+  async recoverPending(afterMs = 5 * 60000) {
+    for (const p of this.pendingList()) {
+      if (Date.now() - p.at < afterMs) continue;
+      try {
+        const states = await this.mintFor(p.mint).states(p.proofs);
+        if (states.every((s) => s === "UNSPENT")) this.unreserve(p.id);
+        else if (states.every((s) => s === "SPENT")) this.settle(p.id);
+      } catch { /* the mint is down: keep it for next time */ }
+    }
+  }
+
+  // ── Receiving: a token someone sent us ──
+  // `only` (optional) = the mint URLs we accept. `ref` (optional) = what this token paid for (a tick's id): it is saved with the
+  // token's fingerprint, so the SAME payment seen again is recognised (`EcashError.ref` / `.sats` on a "used" error) while the same
+  // token inside ANOTHER payment is a replay. Returns { sats, mint }. Throws EcashError.
+  redeem(token, { only, ref } = {}) {
+    return this._exclusive(async () => {
+      const meta = this.tokenInfo(token);
+      if (!meta) throw new EcashError("token", "That is not an ecash token.", true);
+      if (only && !only.includes(meta.mint)) throw new EcashError("mint", "This token is from a mint we do not accept.", true);
+      const tag = bytesToHex(sha256(new TextEncoder().encode(token))).slice(0, 32); // a fingerprint of the whole token
+      const prev = this.state.redeemed.find((x) => (x.h || x) === tag);
+      if (prev) {
+        const err = new EcashError("used", "This token was already redeemed.", true);
+        err.ref = prev.ref ?? null;
+        err.sats = prev.sats ?? null;
+        throw err;
+      }
+      let proofs;
+      try {
+        proofs = await this.mintFor(meta.mint).receive(token);
+      } catch (e) {
+        throw new EcashError("mint", e?.message || "The mint refused this token (already spent?).", e?.definitive === true);
+      }
+      this._setProofs(meta.mint, [...this._proofs(meta.mint), ...proofs]);
+      this.state.redeemed = [...this.state.redeemed, { h: tag, ref: ref ?? null, sats: sum(proofs) }].slice(-500);
+      this._save();
+      return { sats: sum(proofs), mint: meta.mint };
+    });
+  }
+
+  // ── Cashing out to Lightning ──
+  // getInvoice(sats) → a bolt11 invoice for exactly that amount (for example from a Lightning address).
+  // Pays as much of the balance as the mint's fee allows. Returns { paidSats, feeSats }.
+  cashOut(url, getInvoice) {
+    return this._exclusive(async () => {
+      const mint = this.mintFor(url);
+      const have = this._proofs(url);
+      const balance = sum(have);
+      if (balance < 2) throw new EcashError("funds", "Nothing to cash out.");
+      // The mint tells the fee only when it is shown an invoice, so look for the largest invoice whose amount + fee
+      // (+ the mint's fee for spending the proofs, known only when the proofs are split) fits the balance. Aim to leave
+      // 2-6 sats over; if the split still does not fit, ask for a smaller invoice.
+      let amount = Math.max(1, balance - Math.ceil(balance * 0.02) - 2);
+      let best = null, split = null;
+      for (let attempt = 0; attempt < 4 && !split; attempt++) {
+        best = null;
+        for (let i = 0; i < 6; i++) {
+          const quote = await mint.quoteMelt(await getInvoice(amount));
+          const need = quote.sats + quote.fee;
+          const slack = balance - need;
+          if (slack >= 0) best = { quote, need };
+          if (slack >= 2 && slack <= 6) break;
+          amount = Math.max(1, amount + slack - 4);
+        }
+        if (!best) break;
+        try {
+          split = await mint.split(have, best.need);
+        } catch {
+          amount = Math.max(1, best.quote.sats - 3); // the input fee did not fit
+        }
+      }
+      if (!best || !split) throw new EcashError("funds", "The balance is too small to cover the mint's fee.");
+      const q = best.quote, need = best.need;
+      this._setProofs(url, split.keep);
+      this.state.pending.push({ id: "melt-" + q.id, mint: url, sats: need, proofs: split.send, at: Date.now() });
+      this._save();
+      let res;
+      try {
+        res = await mint.melt(q, split.send);
+      } catch (e) {
+        this.unreserve("melt-" + q.id);
+        throw new EcashError("mint", e?.message || "The mint could not pay the invoice.");
+      }
+      if (!res.paid) { this.unreserve("melt-" + q.id); throw new EcashError("mint", "The Lightning payment failed. Your ecash is still here."); }
+      this._setProofs(url, [...this._proofs(url), ...res.change]);
+      this.settle("melt-" + q.id);
+      return { paidSats: q.sats, feeSats: need - sum(res.change) - q.sats };
+    });
+  }
+
+  // Everything, as tokens, to keep a backup (one token per mint).
+  exportTokens() {
+    return Object.keys(this.state.mints)
+      .filter((u) => this.balance(u) > 0)
+      .map((u) => ({ mint: u, sats: this.balance(u), token: this.mintFor(u).encode(this._proofs(u)) }));
+  }
+}

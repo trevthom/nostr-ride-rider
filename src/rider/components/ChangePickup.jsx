@@ -3,7 +3,7 @@
 //  meet you somewhere else. Pick a place (search, or "Your location"), then
 //  send it. The driver gets a notice and can accept or decline; until they
 //  accept, the first pickup stays. Changing the pickup does not change the
-//  miles or minutes already counted for a cancellation, and both people
+//  miles or minutes already counted for the ride, and both people
 //  are told so.
 // ════════════════════════════════════════════════════════════
 

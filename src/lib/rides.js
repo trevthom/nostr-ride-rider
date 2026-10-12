@@ -4,8 +4,10 @@
 //  Trust rules (relay events are signed, but ANYONE can sign one):
 //   • A ride's versions are the requests with the same AUTHOR and
 //     d-tag (the NIP-01 address kind:pubkey:d) — never d-tag alone.
-//   • A cancel counts only from the rider or the assigned driver.
-//   • A completion counts only from the assigned driver.
+//   • A finish counts only from the rider or the assigned driver.
+//   • A completion (the driver finished at the destination) counts only from the assigned driver.
+//   • A tick (payment) and a stop change count only from the ride's rider; a tick reply, a
+//     waiver and a stop reply only from the assigned driver; "still riding / driving" from either.
 //   • A rating counts only from the other party of that ride.
 //   • A stage marker (arrived / riding) counts only from the assigned driver.
 //   • A confirmation (boarded / ended) and a payment record count only from the rider.
@@ -13,6 +15,7 @@
 
 import { relay } from "../nostr/relay.js";
 import { EVENT_KINDS } from "../nostr/eventKinds.js";
+import { readFinish } from "./finish.js";
 
 const HOUR = 3600000;
 const parse = (e) => { try { return JSON.parse(e.content); } catch { return null; } };
@@ -68,45 +71,77 @@ function rideParties(request) {
   return { ids: new Set(versions.map((e) => e.id)), rider: request.pubkey, driver };
 }
 
-// The valid cancel / complete event for a ride (or undefined).
-function findCancel({ ids, rider, driver }) {
-  return relay.query({ kinds: [EVENT_KINDS.RIDE_CANCEL], "#e": [...ids] })
-    .find((c) => ids.has(etagOf(c)) && (c.pubkey === rider || (driver && c.pubkey === driver)));
-}
-function findComplete({ ids, driver }) {
-  if (!driver) return undefined;
-  return relay.query({ kinds: [EVENT_KINDS.RIDE_COMPLETE], "#e": [...ids], authors: [driver] })
-    .find((c) => ids.has(etagOf(c)));
+// What each person's app signs during a ride (kinds that prove they were there). Used for the silence rule.
+export const RIDER_SIGNAL_KINDS = [EVENT_KINDS.RIDE_TICK, EVENT_KINDS.RIDE_CONFIRM, EVENT_KINDS.RIDE_ALIVE, EVENT_KINDS.RIDE_STOP_CHANGE, EVENT_KINDS.RIDE_PICKUP_CHANGE];
+export const DRIVER_SIGNAL_KINDS = [EVENT_KINDS.RIDE_STAGE, EVENT_KINDS.RIDE_TICK_REPLY, EVENT_KINDS.RIDE_ALIVE, EVENT_KINDS.RIDE_WAIVER, EVENT_KINDS.RIDE_PICKUP_REPLY, EVENT_KINDS.RIDE_STOP_REPLY];
+
+// The newest signed sign of life (ms) from either person before `finish` was signed; 0 if none.
+function lastSignalMs({ ids, rider, driver }, finish) {
+  let best = 0;
+  relay.query({ kinds: [...RIDER_SIGNAL_KINDS, ...DRIVER_SIGNAL_KINDS], "#e": [...ids] }).forEach((e) => {
+    if (e.id === finish.id || e.created_at > finish.created_at || !ids.has(etagOf(e))) return;
+    const ok = (e.pubkey === rider && RIDER_SIGNAL_KINDS.includes(e.kind)) || (driver && e.pubkey === driver && DRIVER_SIGNAL_KINDS.includes(e.kind));
+    if (ok) best = Math.max(best, e.created_at * 1000);
+  });
+  return best;
 }
 
-// Effective ride status. Completion/cancellation are driven by explicit
-// events (so the DRIVER can complete a ride they don't "own"): a valid
-// RIDE_COMPLETE or RIDE_CANCEL e-tagging any version of the request wins
-// over the request's own status field.
+// The events that end a ride, earliest first: a finish by the rider or the assigned driver, or a
+// completion by the assigned driver. When two arrive together (within 10 s) the one that costs the
+// rider less goes first. Each is { kind, event, by, at, fin } (fin = the checked finish details).
+function endings({ ids, rider, driver }) {
+  const list = [];
+  // The time a finish claims is believed only if it is close to the event's own time (a person cannot
+  // back-date a finish to owe less, or post-date it). The one exception is "both phones were silent": the
+  // charge then runs to the last signal, which is earlier than the event, but never earlier than a
+  // signed event that proves someone was still there.
+  const sane = (fin, e) => {
+    if (!fin) return fin;
+    const t = e.created_at * 1000;
+    if (fin.reason === "silence") {
+      const floor = lastSignalMs({ ids, rider, driver }, e);
+      return { ...fin, at: fin.at != null ? Math.min(t, Math.max(fin.at, floor)) : floor || t };
+    }
+    return { ...fin, at: fin.at != null && fin.at >= t - 120000 && fin.at <= t + 5000 ? fin.at : t };
+  };
+  relay.query({ kinds: [EVENT_KINDS.RIDE_FINISH], "#e": [...ids] })
+    .filter((c) => ids.has(etagOf(c)) && (c.pubkey === rider || (driver && c.pubkey === driver)))
+    .forEach((c) => list.push({ kind: "finish", event: c, by: c.pubkey, at: c.created_at, fin: sane(readFinish(parse(c)), c) }));
+  if (driver) {
+    // Older apps ended a ride with RIDE_COMPLETE: the driver finished at the destination.
+    relay.query({ kinds: [EVENT_KINDS.RIDE_COMPLETE], "#e": [...ids], authors: [driver] })
+      .filter((c) => ids.has(etagOf(c)))
+      .forEach((c) => list.push({ kind: "complete", event: c, by: c.pubkey, at: c.created_at, fin: sane(readFinish({ ...(parse(c) || {}), role: "driver", reason: "destination", atDestination: true }), c) }));
+  }
+  const cost = (e) => (e.fin && e.fin.miles != null ? e.fin.miles : Infinity);
+  return list.sort((a, b) => (Math.abs(a.at - b.at) <= 10 ? cost(a) - cost(b) || a.at - b.at : a.at - b.at));
+}
+
+// Effective ride status:
+//   requested → accepted → in_progress → completed | closed
+// A ride ends by an explicit event (so the DRIVER can end a ride they don't "own"). It is
+// "completed" if it had started (the driver marked "riding") and "closed" if it had not:
+// nothing is owed for a ride that never started. An old "cancelled" request reads as "closed".
 export function rideStatus(request) {
   return cached("s:" + request.id, () => computeStatus(request));
 }
 function computeStatus(request) {
   const base = parse(request)?.status || "requested";
-  if (base === "cancelled") return "cancelled";
-  const parties = rideParties(request);
-  if (findCancel(parties)) return "cancelled";
-  if (base === "completed") return "completed";
-  if (findComplete(parties)) return "completed";
+  if (base === "cancelled" || base === "closed") return "closed";
+  const first = endings(rideParties(request))[0];
+  if (first) return first.kind === "complete" || rideStage(request) === "riding" ? "completed" : "closed";
   return base;
 }
 
-// Who ended the ride (and when) — for messaging on the other party's screen.
+// Who ended the ride, when and how — for the screen of the other person and for the receipt.
+//   { type: "completed" | "closed", by, at, fin }  (null while the ride runs)
 export function rideEnding(request) {
   return cached("end:" + request.id, () => computeEnding(request));
 }
 function computeEnding(request) {
-  const parties = rideParties(request);
-  const cancel = findCancel(parties);
-  if (cancel) return { type: "cancelled", by: cancel.pubkey, at: cancel.created_at };
-  const done = findComplete(parties);
-  if (done) return { type: "completed", by: done.pubkey, at: done.created_at };
-  return null;
+  const first = endings(rideParties(request))[0];
+  if (!first) return null;
+  return { type: rideStatus(request) === "completed" ? "completed" : "closed", by: first.by, at: first.at, fin: first.fin };
 }
 
 // The assigned driver's pubkey for a ride (null until the rider accepts one).
@@ -165,7 +200,8 @@ function computeTimes(request) {
 }
 
 // The rider's own confirmations of a ride, newest per phase:
-// { boarded?, ended?, problem? }, each {ok, note, at}. ("problem" = reported mid-trip.)
+// { boarded?, code?, ended?, problem? }, each {ok, note, at}. ("problem" = reported mid-trip;
+// "code" = the rider typed the driver's start code correctly, lib/startcode.js.)
 // Only the rider's count.
 export function rideConfirm(request) {
   return cached("cfm:" + request.id, () => computeConfirm(request));
@@ -178,7 +214,7 @@ function computeConfirm(request) {
     .sort((a, b) => a.created_at - b.created_at)
     .forEach((e) => {
       const c = parse(e);
-      if (c && (c.phase === "boarded" || c.phase === "ended" || c.phase === "problem")) {
+      if (c && (c.phase === "boarded" || c.phase === "code" || c.phase === "ended" || c.phase === "problem")) {
         out[c.phase] = { ok: c.ok !== false, note: typeof c.note === "string" ? c.note.slice(0, 500) : "", at: e.created_at };
       }
     });

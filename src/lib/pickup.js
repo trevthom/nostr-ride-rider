@@ -5,8 +5,8 @@
 //  first pickup stays in force (lib/privacy.js exactTrip does the swap).
 //
 //  Changing the pickup NEVER changes the miles or minutes already counted
-//  for a cancellation: the trip meter and the cancellation clocks run on
-//  signed events and the odometers, not on where the pickup is.
+//  for the ride: the trip meter and the payment clocks run on signed events
+//  and the odometers, not on where the pickup is.
 //
 //    pickupChange(request) → { id, at, status, proposal } | null
 //      status: "pending" (waiting for the driver) | "accepted" | "declined"
@@ -15,7 +15,7 @@
 import { pickupProposals, pickupReplies } from "./privacy.js";
 
 export const PICKUP_CHANGE_NOTE =
-  "Changing the pickup does not change the miles or minutes already counted if the ride is cancelled.";
+  "Changing the pickup does not change the miles or minutes already counted for the ride.";
 
 export function pickupChange(request) {
   const [newest] = pickupProposals(request);

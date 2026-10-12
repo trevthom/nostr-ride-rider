@@ -3,7 +3,7 @@
 //
 //  Some events (ride requests, routes) carry a "d" tag and can be
 //  re-published to change their status, e.g. a request going from
-//  "requested" -> "in_progress" -> "cancelled". The relay stores
+//  "requested" -> "in_progress" -> "closed". The relay stores
 //  every version; this helper collapses them so the app only sees
 //  the latest one per (kind + author + d-tag).
 //

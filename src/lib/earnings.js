@@ -1,14 +1,15 @@
 // ════════════════════════════════════════════════════════════
-//  EARNINGS — What a driver has earned, from completed drives.
-//  The fare is the price the driver's offer carried (falling back to
-//  the fare quoted in the request). Payment itself is peer-to-peer over
-//  Lightning, so this is the agreed fare, not a wallet balance.
+//  EARNINGS — What a driver has earned, from finished rides: the ecash payments
+//  (ticks) the driver CONFIRMED, plus tips. Older rides, from before ticks, count
+//  the price the driver's offer carried. This is a record of the rides, not a wallet balance:
+//  the money itself is in the driver's ecash wallet (Account).
 // ════════════════════════════════════════════════════════════
 
 import { relay } from "../nostr/relay.js";
 import { EVENT_KINDS } from "../nostr/eventKinds.js";
 import { rideEnding, rideStatus, rideVersions } from "./rides.js";
 import { tipsOf } from "./evidence.js";
+import { paidSats, ticksOf } from "./payments.js";
 
 const parse = (e) => { try { return JSON.parse(e.content); } catch { return null; } };
 
@@ -22,7 +23,8 @@ export function completedDrives(requests, pubkey) {
       const offer = relay
         .query({ kinds: [EVENT_KINDS.RIDE_OFFER], authors: [pubkey], "#e": ids })
         .sort((a, b) => b.created_at - a.created_at)[0];
-      const fareSats = parse(offer || {})?.priceSats ?? parse(request)?.fareSats ?? 0;
+      const legacy = parse(offer || {})?.priceSats ?? parse(request)?.fareSats ?? 0;
+      const fareSats = ticksOf(request).length ? paidSats(request) : legacy; // what actually arrived (older rides: the agreed price)
       const tips = tipsOf(request);
       return { request, fareSats: Number(fareSats) || 0, tips, tipSats: tips.reduce((s, t) => s + t.sats, 0), at: rideEnding(request)?.at || request.created_at };
     })

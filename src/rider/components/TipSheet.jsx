@@ -13,33 +13,36 @@ import { useApp } from "../../state/AppContext.jsx";
 import { useRider } from "../state/RiderContext.jsx";
 import { getProfile } from "../../nostr/profiles.js";
 import { rideDriver } from "../../lib/rides.js";
-import { satsFromUsd } from "../../lib/fare.js";
-import { FALLBACK_BTC_USD } from "../../config/settings.js";
+import { satsFromFiat, formatFiat, getCurrency } from "../../lib/currency.js";
 import { Modal } from "../../ui/Parts.jsx";
 import Money, { moneyText } from "../../ui/Money.jsx";
 import AmountInput from "../../ui/AmountInput.jsx";
 import PayDriver from "../../features/payments/PayDriver.jsx";
 import Icon from "../../ui/Icon.jsx";
 
+// Quick amounts are in dollars-equivalent; in another currency they are rounded to a friendly figure.
 const QUICK_USD = [1, 2, 5, 10];
 const MAX_TIP_USD = 200; // a typo guard
 
 export default function TipSheet({ request, onClose }) {
-  const { btcUsd, liveTick } = useApp();
+  const { btcPrice, liveTick } = useApp();
   const { recordPayment } = useRider();
   void liveTick; // the driver's Lightning address arrives with their profile
   const driverPubkey = rideDriver(request);
   const driver = driverPubkey ? getProfile(driverPubkey) : null;
-  const rate = btcUsd || FALLBACK_BTC_USD;
 
   const [choice, setChoice] = useState(null); // a quick amount in USD, or "other"
   const [custom, setCustom] = useState(null); // sats typed in "other"
   const [sent, setSent] = useState([]); // tips sent in this window (sats)
   const [round, setRound] = useState(0); // new PayDriver for each tip
 
-  const min = satsFromUsd(0.25, btcUsd);
-  const max = satsFromUsd(MAX_TIP_USD, btcUsd);
-  const sats = choice === "other" ? custom : choice ? satsFromUsd(choice, btcUsd) : null;
+  // A tip is entered in the local currency; the quick buttons are 1, 2, 5, 10 of it (so 1000 yen buttons would be silly:
+  // the unit scales for currencies where one unit is worth much less than a dollar).
+  const unit = btcPrice ? Math.max(1, 10 ** Math.round(Math.log10(Math.max(1, (btcPrice / 100000) * 1)))) : 1;
+  const quick = QUICK_USD.map((q) => q * unit);
+  const min = btcPrice ? satsFromFiat(0.25 * unit, btcPrice) : 100;
+  const max = btcPrice ? satsFromFiat(MAX_TIP_USD * unit, btcPrice) : 10_000_000;
+  const sats = choice === "other" ? custom : choice ? (btcPrice ? satsFromFiat(choice, btcPrice) : null) : null;
   const ok = Number.isFinite(sats) && sats >= min && sats <= max;
 
   const paid = (proof) => {
@@ -63,10 +66,10 @@ export default function TipSheet({ request, onClose }) {
       )}
 
       <div className="flex gap-2 flex-wrap" role="group" aria-label="Quick tip amounts">
-        {QUICK_USD.map((usd) => (
-          <button key={usd} type="button" aria-pressed={choice === usd} onClick={() => setChoice(usd)}
-            className={`flex-1 min-w-[4.5rem] py-2.5 rounded-full text-sm font-semibold ${choice === usd ? "bg-black text-white" : "bg-neutral-100 text-neutral-700"}`}>
-            ${usd}
+        {btcPrice && quick.map((amount) => (
+          <button key={amount} type="button" aria-pressed={choice === amount} onClick={() => setChoice(amount)}
+            className={`flex-1 min-w-[4.5rem] py-2.5 rounded-full text-sm font-semibold ${choice === amount ? "bg-black text-white" : "bg-neutral-100 text-neutral-700"}`}>
+            {formatFiat(amount, getCurrency()).replace(/\.00$/, "")}
           </button>
         ))}
         <button type="button" aria-pressed={choice === "other"} onClick={() => setChoice("other")}
@@ -77,13 +80,13 @@ export default function TipSheet({ request, onClose }) {
 
       {choice === "other" && (
         <div className="mt-4 rounded-2xl bg-neutral-100 px-4 py-3">
-          <AmountInput sats={custom} rate={rate} min={min} max={max} onChange={setCustom} label="Tip amount" />
+          <AmountInput sats={custom} rate={btcPrice} min={min} max={max} onChange={setCustom} label="Tip amount" />
         </div>
       )}
 
       {ok && (
         <div className="mt-4">
-          <p className="font-semibold mb-2">Tip {moneyText(Math.round(sats), btcUsd)}</p>
+          <p className="font-semibold mb-2">Tip {moneyText(Math.round(sats), btcPrice)}</p>
           <PayDriver key={`${round}-${Math.round(sats)}`} amountSats={Math.round(sats)} address={driver?.lud16} memo="NostrRide tip" onPaid={paid} />
         </div>
       )}

@@ -1,10 +1,11 @@
 // ════════════════════════════════════════════════════════════
 //  ACTIVE TRIP (before pickup) — What the rider sees after requesting:
-//    Searching     "Finding your driver…" while no one has replied; the rider
-//                  can raise the offer
-//    ChooseDriver  drivers who accepted the offer or countered it (preferred
-//                  gender first if the rider asked, then fastest)
-//    PayDeposit    the chosen driver's deposit (Lightning), then confirm
+//    Searching     "Finding your driver…" while no one has replied; with a flat
+//                  price the rider can raise it
+//    ChooseDriver  drivers who accepted (their standard fare, or the flat price)
+//                  or countered it (preferred gender first if the rider asked, then fastest)
+//    ConfirmDriver the chosen driver's terms and the rider's ecash balance. There is no deposit:
+//                  the rider pays tick by tick once the ride starts.
 //  Once a driver is confirmed the ride is in_progress → OnTrip.jsx.
 //  Which one shows is decided from the signed events, not app memory.
 // ════════════════════════════════════════════════════════════
@@ -17,14 +18,17 @@ import { rideStatus } from "../../lib/rides.js";
 import { exactTrip } from "../../lib/privacy.js";
 import { offersForRide, offerGender, rankOffers } from "../../lib/trips.js";
 import { offerLimitsSats, replyKind } from "../../lib/fare.js";
-import { FALLBACK_BTC_USD } from "../../config/settings.js";
+import { normalizeTerms, unitSats } from "../../lib/ticks.js";
+import Icon from "../../ui/Icon.jsx";
+import { isMintUrl } from "../../lib/mints.js";
 import MapView from "../../ui/MapView.jsx";
 import Money, { moneyText } from "../../ui/Money.jsx";
 import AmountInput from "../../ui/AmountInput.jsx";
 import Button from "../../ui/Button.jsx";
 import { MapPage, Sheet, FloatButton } from "../../ui/Layout.jsx";
 import { ConfirmDialog } from "../../ui/Parts.jsx";
-import PayDriver from "../../features/payments/PayDriver.jsx";
+import AddFunds from "../../features/payments/AddFunds.jsx";
+import FareTerms, { offerRates, RatesLine } from "../components/FareTerms.jsx";
 import DriverInfo from "../components/DriverInfo.jsx";
 import GenderPref from "../components/GenderPref.jsx";
 import OnTrip from "./OnTrip.jsx";
@@ -34,7 +38,7 @@ export const whenText = (time) => (time === "ASAP" ? "Now" : new Date(time).toLo
 
 export default function ActiveTrip({ request }) {
   const { user, liveTick, isBlockedPk } = useApp();
-  const { cancelRide, focused, focusRide, genderPref } = useRider();
+  const { finishRide, focused, focusRide, genderPref } = useRider();
   const [picked, setPicked] = useState(null); // offer id being confirmed
   const [asking, setAsking] = useState(false);
   void liveTick;
@@ -49,34 +53,34 @@ export default function ActiveTrip({ request }) {
   const offers = rankOffers(offersForRide(request).filter((o) => !isBlockedPk(o.pubkey)), genderPref);
   const chosen = offers.find((o) => o.id === picked);
   const back = focused ? <FloatButton icon="chevron-left" label="Back to home" onClick={() => focusRide(null)} /> : null;
-  const cancelDialog = (
+  const closeDialog = (
     <ConfirmDialog
       open={asking}
-      title="Cancel this request?"
-      message="Drivers will stop seeing your request."
-      confirmLabel="Cancel request"
+      title="Close this request?"
+      message="Drivers will stop seeing your request. Nothing is owed."
+      confirmLabel="Close request"
       cancelLabel="Keep looking"
       danger
-      onConfirm={() => { setAsking(false); focusRide(null); cancelRide(request); }}
+      onConfirm={() => { setAsking(false); focusRide(null); finishRide(request); }}
       onCancel={() => setAsking(false)}
     />
   );
 
   if (chosen) {
-    return <PayDeposit request={request} trip={trip} offer={chosen} onBack={() => setPicked(null)} />;
+    return <ConfirmDriver request={request} trip={trip} offer={chosen} onBack={() => setPicked(null)} />;
   }
   if (offers.length) {
     return (
       <>
         <ChooseDriver request={request} trip={trip} offers={offers} onPick={(o) => setPicked(o.id)} onCancel={() => setAsking(true)} top={back} />
-        {cancelDialog}
+        {closeDialog}
       </>
     );
   }
   return (
     <>
       <Searching request={request} trip={trip} onCancel={() => setAsking(true)} top={back} />
-      {cancelDialog}
+      {closeDialog}
     </>
   );
 }
@@ -99,13 +103,14 @@ function TripLines({ trip }) {
 
 function Searching({ request, trip, onCancel, top }) {
   const { drivers, sendFailed, raiseOffer } = useRider();
-  const { btcUsd } = useApp();
+  const { btcPrice } = useApp();
   const content = parse(request) || {};
   const [editing, setEditing] = useState(false);
-  const rate = btcUsd || FALLBACK_BTC_USD;
+  const { usdPrice } = useApp();
+  const flat = content.fareMode === "flat";
   const offerNow = content.fareSats > 0 ? content.fareSats : 0;
   const suggestedNow = content.suggestedSats > 0 ? content.suggestedSats : offerNow;
-  const limits = offerLimitsSats(suggestedNow, btcUsd);
+  const limits = offerLimitsSats(suggestedNow, usdPrice);
   const [draft, setDraft] = useState(offerNow); // null while the field is empty
   const draftOk = Number.isFinite(draft) && draft >= limits.min && draft <= limits.max && draft !== offerNow;
   const [now, setNow] = useState(Date.now());
@@ -137,31 +142,31 @@ function Searching({ request, trip, onCancel, top }) {
           <TripLines trip={trip} />
           {content.fareSats > 0 && (
             <div className="flex items-center justify-between mt-3 text-[15px]">
-              <span className="text-neutral-600">Your offer</span>
+              <span className="text-neutral-600">{flat ? "Your flat price" : "Standard fare, about"}</span>
               <Money sats={content.fareSats} className="font-bold" />
             </div>
           )}
         </div>
-        {content.fareSats > 0 && !scheduled && (
+        {flat && content.fareSats > 0 && !scheduled && (
           editing ? (
             <div className="mt-3 rounded-2xl bg-neutral-100 px-4 py-3">
-              <AmountInput sats={draft} rate={rate} min={limits.min} max={limits.max} onChange={setDraft} label="New offer" />
+              <AmountInput sats={draft} rate={btcPrice} min={limits.min} max={limits.max} onChange={setDraft} label="New price" />
               <div className="flex gap-2 mt-3">
-                <Button variant="outline" size="md" onClick={() => { setEditing(false); setDraft(offerNow); }}>Keep {moneyText(offerNow, btcUsd)}</Button>
+                <Button variant="outline" size="md" onClick={() => { setEditing(false); setDraft(offerNow); }}>Keep {moneyText(offerNow, btcPrice)}</Button>
                 <Button size="md" disabled={!draftOk} onClick={() => { raiseOffer(request, Math.round(draft)); setEditing(false); }}>
-                  Update offer
+                  Update price
                 </Button>
               </div>
             </div>
           ) : (
             waited > 30 && (
               <button type="button" onClick={() => { setDraft(Math.min(limits.max, Math.round(offerNow * 1.15))); setEditing(true); }} className="mt-3 text-sm font-semibold underline">
-                No replies yet? Change your offer
+                No replies yet? Change your price
               </button>
             )
           )
         )}
-        <Button variant="secondary" className="mt-4" onClick={onCancel}>Cancel request</Button>
+        <Button variant="secondary" className="mt-4" onClick={onCancel}>Close request</Button>
       </Sheet>
     </MapPage>
   );
@@ -169,8 +174,9 @@ function Searching({ request, trip, onCancel, top }) {
 
 function ChooseDriver({ request, trip, offers, onPick, onCancel, top }) {
   const { drivers, genderPref } = useRider();
-  const { btcUsd } = useApp();
+  const { btcPrice } = useApp();
   const content = parse(request) || {};
+  const flat = content.fareMode === "flat";
   const etas = offers.map((o) => parse(o).etaMinutes || 0);
   const prices = offers.map((o) => parse(o).priceSats);
   const fastest = offers.length > 1 ? Math.min(...etas) : null;
@@ -180,13 +186,16 @@ function ChooseDriver({ request, trip, offers, onPick, onCancel, top }) {
       <Sheet label="Choose your driver">
         <h2 className="text-2xl font-bold">{offers.length === 1 ? "A driver can take you" : `${offers.length} drivers can take you`}</h2>
         <p className="text-neutral-600 text-[15px] mt-0.5 mb-2">
-          Your offer: <span className="font-semibold">{moneyText(content.fareSats, btcUsd)}</span>. Some drivers may ask for more. Pick one to continue. You pay only after you choose.
+          {flat
+            ? <>Your flat price: <span className="font-semibold">{moneyText(content.fareSats, btcPrice)}</span>. Some drivers may ask for more. </>
+            : <>You pay each driver's own rates as you ride. </>}
+          Pick one to continue. Nothing is paid until the ride starts.
         </p>
         <GenderPref className="mb-2" />
         <ul className="divide-y divide-neutral-100">
           {offers.map((o, i) => {
             const c = parse(o);
-            const kind = replyKind(c.priceSats, content.fareSats);
+            const kind = flat ? replyKind(c.priceSats, content.fareSats) : "same";
             const preferred = !!genderPref && offerGender(o) === genderPref;
             return (
               <li key={o.id} className="py-3">
@@ -200,16 +209,19 @@ function ChooseDriver({ request, trip, offers, onPick, onCancel, top }) {
                       {preferred && <span className="ml-1.5 text-[11px] bg-neutral-100 text-neutral-700 rounded-full px-2 py-0.5 align-middle">Your preference</span>}
                     </p>
                     <p className="text-sm">
+                      {!(c.mode === "flat") && <span className="text-neutral-500 text-xs mr-1">about</span>}
                       <Money sats={c.priceSats} className="font-semibold" />
                     </p>
-                    {c.typicalSats > 0 && <p className="text-xs text-neutral-500">Their typical fare for this trip: {moneyText(c.typicalSats, btcUsd)}</p>}
-                    <p className={`text-xs ${kind === "counter" ? "text-amber-700" : "text-[#05683a]"}`}>
-                      {kind === "counter"
-                        ? `Counter-offer: ${moneyText(c.priceSats - content.fareSats, btcUsd)} more than your offer`
-                        : kind === "lower"
-                        ? "Lower than your offer"
-                        : "Accepts your price"}
-                    </p>
+                    <FareTerms offer={c} className="mt-0.5" />
+                    {flat && (
+                      <p className={`text-xs mt-0.5 ${kind === "counter" ? "text-amber-700" : "text-[#05683a]"}`}>
+                        {kind === "counter"
+                          ? `Counter-offer: ${moneyText(c.priceSats - content.fareSats, btcPrice)} more than your price`
+                          : kind === "lower"
+                          ? "Lower than your price"
+                          : "Accepts your price"}
+                      </p>
+                    )}
                   </div>
                   <Button size="sm" full={false} onClick={() => onPick(o)}>Choose</Button>
                 </div>
@@ -217,58 +229,77 @@ function ChooseDriver({ request, trip, offers, onPick, onCancel, top }) {
             );
           })}
         </ul>
-        <Button variant="secondary" size="md" className="mt-2" onClick={onCancel}>Cancel request</Button>
+        <Button variant="secondary" size="md" className="mt-2" onClick={onCancel}>Close request</Button>
       </Sheet>
     </MapPage>
   );
 }
 
-function PayDeposit({ request, trip, offer, onBack }) {
-  const { liveTick } = useApp();
+// What the rider needs in the ecash wallet before the ride can start: the base rate, two minutes and a mile, so the
+// first payments are never late. (The whole ride is not locked away: it is paid as it is used.)
+function startFunds(c, btcPrice) {
+  const rates = offerRates(c);
+  const terms = rates && normalizeTerms({ mode: c.mode === "flat" ? "flat" : "metered", currency: rates.currency, base: rates.base, perMile: rates.perMile, perMinute: rates.perMinute, flatSats: c.priceSats, tripMiles: c.tripMiles, tripMinutes: c.tripMinutes });
+  const per = terms && unitSats(terms, btcPrice);
+  return per ? per.base + 2 * per.minute + per.mile : null;
+}
+
+function ConfirmDriver({ request, trip, offer, onBack }) {
+  const { liveTick, ecash, prices, priceFor, btcPrice } = useApp();
   const { confirmDriver, drivers } = useRider();
   const c = parse(offer);
-  const driver = getProfile(offer.pubkey);
   const [done, setDone] = useState(false);
+  const [adding, setAdding] = useState(false);
   const busy = useRef(false);
-  void liveTick; // the driver's Lightning address arrives with their profile
-  const upfront = c.upfrontSats || 0;
-  const rest = Math.max(0, c.priceSats - upfront);
+  void liveTick; // the balance changes when funds arrive
+  const rates = offerRates(c);
+  const mint = isMintUrl(c.mint) ? c.mint : null;
+  const price = rates ? priceFor(rates.currency) : null;
+  const need = c.mode === "flat" ? startFunds(c, null) : startFunds(c, price);
+  const have = ecash && mint ? ecash.balance(mint) : 0;
+  const short = need != null ? Math.max(0, need - have) : 0;
+  const ready = !!rates && !!mint && need != null && short === 0;
+  void prices;
 
-  const go = (proof) => {
-    if (busy.current) return;
+  const go = () => {
+    if (busy.current || !ready) return;
     busy.current = true;
     setDone(true);
-    confirmDriver(request, offer, proof);
+    confirmDriver(request, offer);
   };
 
   return (
-    <MapPage map={<MapView pickup={trip.pickup} cars={drivers} fitKey={request.id} padBottom={460} />}
+    <MapPage map={<MapView pickup={trip.pickup} cars={drivers} fitKey={request.id} padBottom={500} />}
       top={<FloatButton icon="chevron-left" label="Choose a different driver" onClick={onBack} />}>
       <Sheet label="Confirm your driver">
         <h2 className="text-2xl font-bold mb-3">Confirm your driver</h2>
         <DriverInfo pubkey={offer.pubkey} offerEvent={offer} />
         <dl className="mt-4 rounded-2xl bg-neutral-100 px-4 py-3 space-y-2 text-[15px]">
-          <div className="flex justify-between"><dt className="text-neutral-600">Fare</dt><dd><Money sats={c.priceSats} className="font-semibold" /></dd></div>
-          {upfront > 0 && (
-            <>
-              <div className="flex justify-between"><dt className="font-semibold">Deposit due now</dt><dd><Money sats={upfront} className="font-bold" /></dd></div>
-              <div className="flex justify-between"><dt className="text-neutral-600">Rest, after the trip</dt><dd><Money sats={rest} /></dd></div>
-            </>
+          <div className="flex justify-between"><dt className="text-neutral-600">{c.mode === "flat" ? "Flat price" : "Estimated fare"}</dt><dd><Money sats={c.priceSats} className="font-semibold" /></dd></div>
+          {c.mode !== "flat" && rates && (
+            <div className="text-xs text-neutral-600"><RatesLine rates={rates} /></div>
           )}
+          {need != null && <div className="flex justify-between"><dt className="text-neutral-600">Needed to start</dt><dd><Money sats={need} /></dd></div>}
+          {mint && <div className="flex justify-between"><dt className="text-neutral-600">Your ecash here</dt><dd><Money sats={have} className={short ? "text-amber-700 font-semibold" : ""} /></dd></div>}
         </dl>
-        {upfront > 0 && (
-          <p className="text-neutral-500 text-xs mt-2">
-            The deposit goes straight to the driver over Lightning (no escrow). It covers their drive to you and is
-            not refunded if you cancel after they are on the way.
-          </p>
-        )}
-        <div className="mt-4">
-          {upfront === 0 ? (
-            <Button variant="go" onClick={() => go({ verified: false })} loading={done}>Confirm driver</Button>
-          ) : (
-            <PayDriver amountSats={upfront} address={driver?.lud16} memo="NostrRide deposit" onPaid={go} />
+        <p className="text-neutral-500 text-xs mt-2">
+          {c.mode === "flat"
+            ? "You pay the flat price tick by tick as you ride, and never more, even in traffic. Adding a stop or changing the destination turns it into the driver's normal fare, counted from the start."
+            : "You pay as you ride: the base rate when the ride starts, then each mile and each minute. You can finish the ride at any time and pay only for what you used."}
+          {" "}If you miss two payments in a row, the driver may finish the ride. There is no deposit.
+        </p>
+        {!rates || !mint ? (
+          <p className="text-amber-700 text-sm mt-3" role="alert">This driver's reply is missing its rates or its ecash mint, so it cannot be used. Choose another driver.</p>
+        ) : need == null ? (
+          <p className="text-amber-700 text-sm mt-3" role="alert">The bitcoin price for {rates.currency} is not available yet. Try again in a moment.</p>
+        ) : null}
+        <div className="mt-4 space-y-2">
+          {short > 0 && mint && (
+            <Button onClick={() => setAdding(true)} disabled={!ecash}><Icon name="zap" size={18} /> Add {moneyText(short, btcPrice)} to your wallet</Button>
           )}
+          <Button variant="go" onClick={go} loading={done} disabled={!ready}>Confirm driver</Button>
         </div>
+        {adding && mint && <AddFunds mint={mint} needSats={short} onClose={() => setAdding(false)} />}
       </Sheet>
     </MapPage>
   );

@@ -30,13 +30,19 @@ const APP_KINDS = [
   EVENT_KINDS.RIDE_REQUEST,
   EVENT_KINDS.RIDE_OFFER,
   EVENT_KINDS.RIDE_ACCEPT,
-  EVENT_KINDS.RIDE_CANCEL,
+  EVENT_KINDS.RIDE_FINISH,
   EVENT_KINDS.RIDE_COMPLETE,
   EVENT_KINDS.RIDE_STAGE,
   EVENT_KINDS.RIDE_PAYMENT,
   EVENT_KINDS.RIDE_CONFIRM,
   EVENT_KINDS.RIDE_PICKUP_CHANGE,
   EVENT_KINDS.RIDE_PICKUP_REPLY,
+  EVENT_KINDS.RIDE_TICK,
+  EVENT_KINDS.RIDE_TICK_REPLY,
+  EVENT_KINDS.RIDE_WAIVER,
+  EVENT_KINDS.RIDE_ALIVE,
+  EVENT_KINDS.RIDE_STOP_CHANGE,
+  EVENT_KINDS.RIDE_STOP_REPLY,
   EVENT_KINDS.RATING,
 ];
 
@@ -118,7 +124,7 @@ class NostrRelay {
 
   // A user's FULL ride history (the live sync only covers 24 h): what
   // they wrote, what was addressed to them, every version of the rides
-  // those events point at, and the cancels/completions/ratings on those
+  // those events point at, and the finishes/payments/ratings on those
   // rides. Feeds Past Rides and reputation. At most once per 5 min per
   // pubkey unless `force`. Resolves when done (never rejects).
   async fetchHistory(pubkey, { force = false } = {}) {
@@ -170,7 +176,7 @@ class NostrRelay {
         .filter((e) => dset.has((e.tags.find((t) => t[0] === "d") || [])[1]))
         .map((e) => e.id);
       for (const ids of chunks(versionIds)) {
-        take(await q({ kinds: [EVENT_KINDS.RIDE_CANCEL, EVENT_KINDS.RIDE_COMPLETE, EVENT_KINDS.RIDE_STAGE, EVENT_KINDS.RIDE_PAYMENT, EVENT_KINDS.RIDE_CONFIRM, EVENT_KINDS.RIDE_PICKUP_CHANGE, EVENT_KINDS.RIDE_PICKUP_REPLY, EVENT_KINDS.RATING], "#e": ids }));
+        take(await q({ kinds: APP_KINDS.filter((k) => k !== EVENT_KINDS.RIDE_REQUEST && k !== EVENT_KINDS.RIDE_OFFER && k !== EVENT_KINDS.RIDE_ACCEPT), "#e": ids }));
       }
     } catch (e) {
       console.error("History fetch failed:", e);
@@ -319,6 +325,14 @@ class NostrRelay {
     const h = this.health.get(key);
     if (!h || Date.now() - h.at > 15000) this._probe(key);
     return h && !h.ok ? "failed" : "connecting";
+  }
+
+  // Is at least one relay connected right now? (Used to leave relay outages out of the silence clock.)
+  linkUp() {
+    try {
+      for (const up of this.pool.listConnectionStatus().values()) if (up) return true;
+    } catch { /* no pool state */ }
+    return false;
   }
 
   async _probe(key) {

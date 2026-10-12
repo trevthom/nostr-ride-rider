@@ -17,9 +17,10 @@ import {
   isInvoiceSettled,
 } from "../../nostr/wallet.js";
 import QRCode from "../../ui/QRCode.jsx";
+import { formatFiat } from "../../lib/currency.js";
 
 export default function WalletSection() {
-  const { wallet, setWallet, btcUsd } = useApp();
+  const { wallet, setWallet, btcPrice } = useApp();
   const [uri, setUri] = useState("");
   const [connecting, setConnecting] = useState(false);
   const [error, setError] = useState("");
@@ -80,7 +81,7 @@ export default function WalletSection() {
   if (!wallet.connected) {
     return (
       <div>
-        <p className="text-neutral-500 text-xs uppercase tracking-wider font-semibold mb-2">Lightning Wallet</p>
+        <p className="text-neutral-500 text-xs uppercase tracking-wider font-semibold mb-2">Lightning Wallet (for adding funds)</p>
         <div className="bg-neutral-100 rounded-xl border border-neutral-200 p-4">
           <p className="text-neutral-500 text-xs mb-3">
             Paste your Nostr Wallet Connect string to pay and get paid in sats. We read your real
@@ -131,8 +132,8 @@ export default function WalletSection() {
             {(balance ?? 0).toLocaleString()} <span className="text-amber-700 text-base">sats</span>
           </p>
         )}
-        {balance != null && btcUsd && (
-          <p className="text-neutral-500 text-sm mt-0.5">≈ ${(balance * 1e-8 * btcUsd).toFixed(2)}</p>
+        {balance != null && btcPrice && (
+          <p className="text-neutral-500 text-sm mt-0.5">≈ {formatFiat(balance * 1e-8 * btcPrice)}</p>
         )}
         <div className="flex gap-2 mt-4">
           <ActionBtn onClick={() => setPanel(panel === "send" ? null : "send")} active={panel === "send"}>↑ Send</ActionBtn>

@@ -246,8 +246,9 @@ export function RelaysSection() {
 }
 
 export function LogoutButton() {
-  const { logout } = useApp();
+  const { logout, ecash } = useApp();
   const [ask, setAsk] = useState(false);
+  const holds = ecash ? ecash.total() : 0;
   return (
     <div>
       <Button variant="secondary" onClick={() => setAsk(true)}>
@@ -259,7 +260,7 @@ export function LogoutButton() {
       <ConfirmDialog
         open={ask}
         title="Log out of the app?"
-        message={`This removes your saved key from this device. You need your nsec (or password) to get back into ${APP_NAME}.`}
+        message={`This removes your saved key from this device. You need your nsec (or password) to get back into ${APP_NAME}.${holds > 0 ? ` Your ecash (${holds.toLocaleString()} sats) stays on this device, locked with your key. Without your nsec you cannot open it.` : ""}`}
         confirmLabel="Log out"
         cancelLabel="Stay logged in"
         danger

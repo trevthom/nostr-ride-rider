@@ -20,13 +20,11 @@ const trip = { pickup: { name: "P", lat: 1, lng: 1 }, dropoff: { name: "D", lat:
 const now = () => Math.floor(Date.now() / 1000);
 
 // ── Fare ──
-assert.equal(F.fareUsd(0.5, 2), 5, "minimum fare");
-assert.equal(F.fareUsd(10, 20), 18); // 2 + 11 + 5
+assert.equal(F.fareAmount(0.5, 2), 3.05, "no minimum fare: base + per mile + per minute exactly"); // 2 + 0.55 + 0.5
+assert.equal(F.fareAmount(10, 20), 18); // 2 + 11 + 5
 const q = F.quoteFare({ miles: 10, minutes: 20 }, 100000);
 assert.equal(q.usd, 18); assert.equal(q.sats, 18000); assert.equal(q.live, true);
 assert.equal(F.quoteFare({ miles: 10, minutes: 20 }, null).live, false, "fallback price flagged");
-assert.equal(F.depositSats(10000, 20), 2000); assert.equal(F.depositSats(10000, 0), 0); assert.equal(F.depositSats(3, 20), 1);
-assert.equal(F.depositSats(10000, 150), 10000, "percent is capped");
 
 // ── Stages: only the assigned driver, only forward ──
 const r1 = ev(K.RIDE_REQUEST, rider, { ...trip, status: "in_progress", driverPubkey: driver, fareSats: 9000 }, [["d", "ride-1"]], now());
@@ -54,8 +52,8 @@ assert.equal(T.activeRideFor(reqs, rider).id, r1b.id, "running ride is active fo
 assert.equal(T.activeDriveFor(reqs, driver).id, r1b.id, "and for the assigned driver");
 assert.equal(T.activeDriveFor(reqs, rider), null);
 assert.equal(T.activeRideFor(reqs, attacker), null);
-ev(K.RIDE_CANCEL, other, {}, [["e", open.id]]); // other is the rider on this ride
-assert.equal(T.activeRideFor(reqs, other), null, "a cancelled ride is no longer active");
+ev(K.RIDE_FINISH, other, {}, [["e", open.id]]); // other is the rider on this ride
+assert.equal(T.activeRideFor(reqs, other), null, "a finished ride is no longer active");
 
 // Reservations far in the future wait under "Upcoming" and don't take over home.
 const later = ev(K.RIDE_REQUEST, attacker, { ...trip, status: "requested", time: new Date(Date.now() + 5 * 3600000).toISOString() }, [["d", "ride-sched"]], now());
@@ -63,30 +61,30 @@ const soonRide = ev(K.RIDE_REQUEST, attacker, { ...trip, status: "requested", ti
 let all = latestVersions(relay.query({ kinds: [K.RIDE_REQUEST] }));
 assert.equal(T.activeRideFor(all, attacker).id, soonRide.id, "a ride within 30 min is active");
 assert.deepEqual(T.upcomingRidesFor(all, attacker).map((r) => r.id), [later.id], "a far-off ride is upcoming");
-ev(K.RIDE_CANCEL, attacker, {}, [["e", soonRide.id]]);
+ev(K.RIDE_FINISH, attacker, {}, [["e", soonRide.id]]);
 all = latestVersions(relay.query({ kinds: [K.RIDE_REQUEST] }));
 assert.equal(T.activeRideFor(all, attacker), null, "a reservation alone leaves home idle");
 assert.equal(T.isOpenRide(later), true);
 
 // ── Offers: valid only, newest per driver, soonest ETA first ──
 const q1 = ev(K.RIDE_REQUEST, rider, { ...trip, status: "requested", time: "ASAP", fareSats: 8000 }, [["d", "ride-4"]], now());
-ev(K.RIDE_OFFER, driver, { priceSats: 8000, upfrontSats: 1600, etaMinutes: 9 }, [["e", q1.id], ["p", rider], ["d", "offer-" + q1.id]], now());
-ev(K.RIDE_OFFER, driver, { priceSats: 8000, upfrontSats: 1600, etaMinutes: 4 }, [["e", q1.id], ["p", rider], ["d", "offer-again"]], now() + 5);
-ev(K.RIDE_OFFER, other, { priceSats: 8000, upfrontSats: 0, etaMinutes: 6 }, [["e", q1.id], ["p", rider], ["d", "offer-" + q1.id]], now());
-ev(K.RIDE_OFFER, attacker, { priceSats: 5, upfrontSats: 99, etaMinutes: 1 }, [["e", q1.id], ["d", "x"]], now()); // deposit > price
-ev(K.RIDE_OFFER, rider, { priceSats: 5, upfrontSats: 0, etaMinutes: 1 }, [["e", q1.id], ["d", "y"]], now()); // the rider's own
+ev(K.RIDE_OFFER, driver, { priceSats: 8000, etaMinutes: 9 }, [["e", q1.id], ["p", rider], ["d", "offer-" + q1.id]], now());
+ev(K.RIDE_OFFER, driver, { priceSats: 8000, etaMinutes: 4 }, [["e", q1.id], ["p", rider], ["d", "offer-again"]], now() + 5);
+ev(K.RIDE_OFFER, other, { priceSats: 8000, etaMinutes: 6 }, [["e", q1.id], ["p", rider], ["d", "offer-" + q1.id]], now());
+ev(K.RIDE_OFFER, attacker, { priceSats: 0, etaMinutes: 1 }, [["e", q1.id], ["d", "x"]], now()); // a price of nothing is not an offer
+ev(K.RIDE_OFFER, rider, { priceSats: 5, etaMinutes: 1 }, [["e", q1.id], ["d", "y"]], now()); // the rider's own
 const offers = T.offersForRide(q1);
 assert.deepEqual(offers.map((o) => [o.pubkey, JSON.parse(o.content).etaMinutes]), [[driver, 4], [other, 6]]);
 assert.equal(T.offerFrom(q1, driver).pubkey, driver); assert.equal(T.offerFrom(q1, attacker), null);
 
 // An offer older than its time to live is no longer shown; a pending offer needs an open ride.
 const q2 = ev(K.RIDE_REQUEST, rider, { ...trip, status: "requested", time: "ASAP" }, [["d", "ride-5"]], now());
-const gone = ev(K.RIDE_OFFER, driver, { priceSats: 100, upfrontSats: 0, etaMinutes: 3 }, [["e", q2.id], ["d", "offer-old"]], now() - 400);
+const gone = ev(K.RIDE_OFFER, driver, { priceSats: 100, etaMinutes: 3 }, [["e", q2.id], ["d", "offer-old"]], now() - 400);
 assert.deepEqual(T.offersForRide(q2), [], "stale offer ignored");
 assert.equal(T.offerFrom(q2, driver).id, gone.id, "but the chosen driver's old offer still gives the fare and plate");
 assert.equal(T.pendingOfferFor(driver).request.id, q1.id, "newest live offer is pending");
-ev(K.RIDE_CANCEL, rider, {}, [["e", q1.id]]);
-assert.equal(T.pendingOfferFor(driver), null, "no pending offer once the ride is cancelled");
+ev(K.RIDE_FINISH, rider, {}, [["e", q1.id]]);
+assert.equal(T.pendingOfferFor(driver), null, "no pending offer once the ride is finished");
 
 // The accept the rider sent to a driver is found by that driver only.
 const acc = ev(K.RIDE_ACCEPT, rider, { paidSats: 5 }, [["e", "x"], ["e", r1.id], ["p", driver], ["d", "accept-1"]]);

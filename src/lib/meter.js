@@ -10,7 +10,7 @@
 //      code: no screen shows it.
 //  The rule: use the DRIVER's distance as long as the rider's is within 5% of
 //  it. If the two differ by more than 5%, use the RIDER's. The same rule
-//  covers the driver's drive to the pickup (for cancellation charges).
+//  covers the driver's drive to the pickup.
 //  One small addition: near zero a percentage means nothing, so a gap of
 //  0.05 mile (about 80 m) or less always counts as "within".
 //
