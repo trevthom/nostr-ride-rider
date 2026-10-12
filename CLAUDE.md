@@ -71,7 +71,7 @@ vite.config.js                    # defines __APP_ROLE__, base "./"
 src/
   index.css  theme.js             # font, animations; few colors (THEME)
   config/
-    app.js                        # APP_ROLE / IS_DRIVER_APP / APP_NAME
+    app.js                        # APP_ROLE / IS_DRIVER_APP / APP_NAME / BUILD_ID (build time + commit, shown in Account)
     settings.js                   # tunables: FARE_RATES (USD, no minimum), FALLBACK_BTC_USD, MIN_OFFER_USD/MAX_OFFER_FACTOR (flat price),
                                   #   RATE_LIMITS, REQUEST_CARD_SECONDS, OFFER_TTL_SECONDS, DEFAULT_REQUEST_RADIUS_MILES,
                                   #   USE_DEMO_DATA (dev only), CONTACT_PLATFORMS
@@ -249,10 +249,10 @@ carries `driverPubkey`. Stage is `enroute` (default) → `arrived` → `riding`.
 - **Blocking** is local (`getSetting("blocked")`, `useApp().blockUser/isBlockedPk`): filter at the data
   boundary (driver `open` list, rider presence and `offersForRide` in ActiveTrip). Don't re-add blocked people anywhere else.
 - **Navigation (rider)**: the bottom `TabBar` is ALWAYS visible in both apps. `RiderContext.plan` has `step` (idle|search|pin|quote) and `from` (where the search page was opened: idle|quote).
-  The search page's back arrow goes to `from` (never loop quote ⇄ search); the X (search, pin, quote) and a tap on the Ride tab call `resetPlan()` (cancel, home). `PinPicker` returns a place shaped like a search result.
+  The search page's back arrow goes to `from` (never loop quote ⇄ search); "Cancel" (search), the X (quote, pin), "Cancel and go home" (quote) and a tap on the Ride tab call `resetPlan()` (cancel, home). `PinPicker` returns a place shaped like a search result.
 - **Connection health** (`nostr/relay.js`, `nostr/reachable.js`, `ui/ConnectionBanner.jsx`): the pool is built with `maxWaitForConnection: 15000` (the 3 s default DROPS a slow relay for good). `relayState` tests a relay with a SEPARATE
   socket (`probeRelay`), never `pool.ensureRelay` with a short timeout (that kills the real connection); only a failed test younger than 15 s counts as "failed". A reachable relay with no live connection is healed (`_heal`, once per 10 s).
-  On `online` or a sleep over 30 s `refreshConnections()` closes and reopens all sockets. The banner's "can't reach any relay" needs 20 s of nothing connected AND every test failed.
+  On `online` or a sleep over 30 s `refreshConnections()` closes and reopens all sockets. The banner's "can't reach any relay" needs 20 s of nothing connected AND every test failed; its "N updates are waiting" needs the oldest to have waited 20 s (`relay.oldestOutboxAge`). A relay has 15 s to answer a publish (`PUBLISH_WAIT_MS`, set on the pool's relay objects in `_send`). A screen warns about ONE event only while it is STILL in the outbox (`useOutboxAge(id)`), never from a remembered one-time failure (the old sticky `sendFailed` did that).
 - **Outbox**: `relay.publish` queues an event no relay accepted (`nostrride_outbox` in localStorage) and
   re-sends it with backoff, on `online`/tab wake (`AppContext` → `relay.flushOutbox()` + `reconnectAll()`),
   and after reload. Ephemeral kinds are never queued. Pools use `enableReconnect`.
@@ -287,8 +287,7 @@ carries `driverPubkey`. Stage is `enroute` (default) → `arrived` → `riding`.
   from `rideTimes(request)` (signed stage markers; they carry earlier times because relays keep only the newest marker). The meter now FEEDS THE TICKS (miles → mile ticks and the final tick).
 - **nostr-tools filters**: `pool.subscribeMany(relays, filter, params)` and `querySync` take ONE filter OBJECT in the installed 2.25 (an array reaches the relay as an
   invalid filter and live subscriptions silently die). `test/pool-api.test.mjs` guards it. Test relays must be strict about this too.
-- **Pickup from GPS**: `PlaceSearch` fills the pickup from `here` on its own unless the rider typed or cleared it; it shows a
-  *Done* button when both places are set.
+- **Pickup is never automatic**: `PlaceSearch` does NOT fill the pickup from GPS; the rider types an address or a business name, pins the spot (`PinPicker`, the "Set pickup on the map" button is always visible), or taps "Your location" (a deliberate tap). `PlanTrip` never passes `here` as a pickup. It shows a *Done* button when both places are set.
 - **Either person finishes the ride** (no cancellations). Both sides get an optional rating
   (under 5 stars needs a reason — `ui/RatingForm.jsx`). Ended rides come back as the
   receipt/summary screen for up to 6 h until dismissed (`riderDone` / `driverDone` in localStorage).

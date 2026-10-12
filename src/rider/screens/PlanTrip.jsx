@@ -44,6 +44,7 @@ export default function PlanTrip() {
         start={start}
         me={myPosition}
         onBack={() => setPlan({ step: "search" })}
+        onExit={resetPlan}
         onConfirm={(place) => setPlan({ pickup: place, step: plan.dropoff ? "quote" : "search" })}
       />
     );
@@ -73,15 +74,15 @@ export default function PlanTrip() {
 }
 
 function Idle() {
-  const { setPlan, plan, here, drivers, myPosition, geoError, gps, recentPlaces, nearestDriverEta } = useRider();
+  const { setPlan, plan, drivers, myPosition, geoError, gps, recentPlaces, nearestDriverEta } = useRider();
   const mapRef = useRef(null);
   const recents = recentPlaces();
   const eta = nearestDriverEta(myPosition);
 
   const openSearch = (dropoff) => {
-    // No address for the rider's position yet? Open the search page: it fills the pickup in when it arrives.
-    const pickup = plan.pickup || here;
-    setPlan({ step: dropoff && pickup ? "quote" : "search", from: "idle", pickup, ...(dropoff ? { dropoff } : {}) });
+    // The pickup is never filled in for the rider: a recent place only sets the destination, and the search page asks for the pickup.
+    const pickup = plan.pickup;
+    setPlan({ step: dropoff && pickup ? "quote" : "search", from: "idle", ...(dropoff ? { dropoff } : {}) });
   };
 
   return (
@@ -119,7 +120,7 @@ function Idle() {
         <p className="text-sm text-neutral-500 mt-3 flex items-center gap-2" role="status">
           <span className={`w-2 h-2 rounded-full ${drivers.length ? "bg-green-600" : "bg-neutral-300"}`} aria-hidden="true" />
           {gps !== "good"
-            ? `${gpsMessage(gps, myPosition, geoError)} You can also search for a pickup.`
+            ? `${gpsMessage(gps, myPosition, geoError)} You can still search for a pickup or pin it on the map.`
             : drivers.length
             ? `${drivers.length} driver${drivers.length === 1 ? "" : "s"} online nearby${eta ? ` · about ${eta} min away` : ""}`
             : "No drivers online nearby right now. You can still request a ride."}
@@ -199,7 +200,7 @@ function Quote() {
       top={
         <>
           <FloatButton icon="chevron-left" label="Back" onClick={() => setPlan({ step: "search" })} />
-          <FloatButton icon="x" label="Cancel and go home" onClick={resetPlan} className="ml-auto" />
+          <FloatButton icon="x" label="Close and go home" onClick={resetPlan} className="ml-auto" />
         </>
       }
     >
@@ -370,6 +371,7 @@ function Quote() {
         <Button className="mt-4" onClick={request} disabled={!quote || (flat && !offerOk)}>
           {!quote ? "Finding route…" : flat ? (offerOk ? <>Request ride · {moneyText(offerSats, btcPrice)} flat</> : "Enter your price") : <>Request ride · about {moneyText(suggestedSats, btcPrice)}</>}
         </Button>
+        <Button variant="secondary" className="mt-2" onClick={resetPlan}>Cancel and go home</Button>
         <p className="text-neutral-500 text-xs text-center mt-2">
           {flat ? "Drivers can accept your price or counter it. " : "Drivers who accept charge their own rates. "}You choose who to ride with, and drivers see only the approximate area until you do.
         </p>

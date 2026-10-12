@@ -21,7 +21,7 @@ const silentUrl = `ws://127.0.0.1:${silent.address().port}`;
 
 try {
   // ── The test connection ──
-  assert.equal(await probeRelay(okUrl, 2000), true, "a relay that answers is reachable");
+  assert.equal(await probeRelay(okUrl, 8000), true, "a relay that answers is reachable");
   assert.equal(await probeRelay(silentUrl, 300), false, "a relay that never answers is not");
   assert.equal(await probeRelay("ws://127.0.0.1:1", 1000), false, "a closed port is not");
   assert.equal(await probeRelay("not a url", 1000), false, "a bad address is not");
@@ -58,6 +58,24 @@ try {
   relay.healedAt = 0;
   await relay._probe(key);
   assert.equal(resubscribed, 1, "a connected relay needs no healing");
+
+  // ── A relay gets 15 s to answer a publish (the library's 4.4 s made slow-but-fine relays "fail") ──
+  const fakeRelay = { publishTimeout: 4400 };
+  relay.pool.relays = new Map([["wss://r.example/", fakeRelay]]);
+  relay.pool.publish = () => [Promise.resolve("ok")];
+  assert.equal(await relay._send({ id: "t1", kind: 30078, tags: [], content: "{}" }), true);
+  assert.ok(fakeRelay.publishTimeout >= 10000, "the relay waits longer for the OK: " + fakeRelay.publishTimeout);
+
+  // ── How long has an event waited in the outbox? (A warning is for events that STAY there, not for one retry.) ──
+  relay.outbox.clear();
+  assert.equal(relay.outboxAge("nope"), 0, "not waiting: 0");
+  assert.equal(relay.oldestOutboxAge(), 0, "empty outbox: 0");
+  relay.outbox.set("a", { event: { id: "a" }, tries: 1, at: Date.now() - 25000 });
+  relay.outbox.set("b", { event: { id: "b" }, tries: 0, at: Date.now() - 2000 });
+  assert.ok(relay.outboxAge("a") >= 25000 && relay.outboxAge("a") < 27000, "age of one event");
+  assert.ok(relay.outboxAge("b") < 4000);
+  assert.ok(relay.oldestOutboxAge() >= 25000, "the oldest one decides when the banner speaks");
+  relay.outbox.clear();
 
   // ── A long sleep or a network change closes the old sockets and connects fresh ──
   let closed = null;

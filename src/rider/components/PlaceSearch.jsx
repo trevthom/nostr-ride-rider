@@ -1,10 +1,10 @@
 // ════════════════════════════════════════════════════════════
 //  PLACE SEARCH — The "Plan your ride" page: pickup and dropoff fields
 //  stacked like Uber, with live address results below (Photon /
-//  OpenStreetMap, lib/geocode.js). The pickup is filled in from the rider's
-//  GPS on its own (as soon as the address is known) unless the rider has
-//  already typed or cleared it. A "Your location" button on the pickup field
-//  fills it again at any time, and it can still be changed afterward. Recent places are suggested for the dropoff.
+//  OpenStreetMap, lib/geocode.js). The pickup is NEVER filled in automatically:
+//  the rider types an address or a business name, or pins the spot on the map
+//  ("Set pickup on the map", always visible), or taps "Your location" on the pickup field
+//  (a deliberate tap that uses the GPS address). Recent places are suggested for the dropoff.
 //  onChange(field, place) is called when a result is chosen.
 //  onBack() is the back arrow (one screen back); onExit() is the X that cancels the planning and goes home;
 //  onPin() opens the map pin picker for the pickup ("Set pickup on the map").
@@ -29,19 +29,9 @@ export default function PlaceSearch({ pickup, dropoff, here, near, recents, onCh
 
   useEffect(() => { inputs[focus].current?.focus(); }, [focus]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Fill the pickup from GPS once the address is known, if the rider has not touched that field.
-  const touched = useRef(!!pickup);
-  useEffect(() => {
-    if (touched.current || pickup || !here) return;
-    touched.current = true;
-    setText((t) => ({ ...t, pickup: here.name }));
-    onChange("pickup", here);
-    setFocus((f) => (f === "pickup" ? "dropoff" : f));
-  }, [here, pickup]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => () => clearTimeout(timer.current), []);
 
   const type = (field, q) => {
-    if (field === "pickup") touched.current = true; // the rider is in charge of this field now
     setText((t) => ({ ...t, [field]: q }));
     onChange(field, null); // typing invalidates the earlier pick
     setError("");
@@ -81,8 +71,8 @@ export default function PlaceSearch({ pickup, dropoff, here, near, recents, onCh
         </button>
         <h1 className="text-xl font-bold">Plan your ride</h1>
         {onExit && (
-          <button type="button" onClick={onExit} aria-label="Cancel and go home" className="ml-auto p-2 -mr-1 rounded-full active:bg-neutral-100">
-            <Icon name="x" size={22} />
+          <button type="button" onClick={onExit} aria-label="Cancel and go home" className="ml-auto px-3 py-2 -mr-1 rounded-full text-[15px] font-semibold active:bg-neutral-100">
+            Cancel
           </button>
         )}
       </header>
@@ -104,7 +94,7 @@ export default function PlaceSearch({ pickup, dropoff, here, near, recents, onCh
                 onFocus={() => { setFocus(field); setResults([]); }}
                 onChange={(e) => type(field, e.target.value)}
                 onKeyDown={(e) => { if (e.key === "Enter" && results.length && focus === field) { e.preventDefault(); choose(field, results[0]); } }}
-                placeholder={field === "pickup" ? "Pickup location" : "Where to?"}
+                placeholder={field === "pickup" ? "Address or business" : "Where to?"}
                 autoComplete="off"
                 className="bg-transparent flex-1 min-w-0 py-3.5 text-[15px] placeholder-neutral-500 focus:outline-none"
               />
@@ -128,6 +118,23 @@ export default function PlaceSearch({ pickup, dropoff, here, near, recents, onCh
         </div>
       </div>
 
+      {onPin && (
+        <div className="px-5 mt-3">
+          <button type="button" onClick={onPin} className="w-full flex items-center gap-3 rounded-xl border border-neutral-300 px-4 py-3 text-left active:bg-neutral-100">
+            <span className="w-9 h-9 rounded-full bg-neutral-100 flex items-center justify-center shrink-0"><Icon name="pin" size={18} /></span>
+            <span className="min-w-0">
+              <span className="block text-[15px] font-semibold">Set pickup on the map</span>
+              <span className="block text-sm text-neutral-500">Drag the map to pin the exact spot</span>
+            </span>
+          </button>
+        </div>
+      )}
+      {!pickup && (
+        <p className="px-5 mt-3 text-sm text-neutral-600" role="note">
+          Not sure of the address? Try entering the name of a business or landmark near you, like a store, a restaurant or a hotel.
+        </p>
+      )}
+
       {pickup && dropoff && onDone && (
         <div className="px-5 mt-4">
           <button type="button" onClick={onDone} className="w-full py-3.5 rounded-xl bg-black text-white font-semibold active:bg-neutral-700">
@@ -137,17 +144,6 @@ export default function PlaceSearch({ pickup, dropoff, here, near, recents, onCh
       )}
 
       <ul className="mt-3 px-2">
-        {focus === "pickup" && onPin && (
-          <li>
-            <button type="button" onClick={onPin} className="w-full flex items-center gap-3 px-3 py-3 rounded-xl active:bg-neutral-100 text-left">
-              <span className="w-10 h-10 rounded-full bg-neutral-100 flex items-center justify-center shrink-0"><Icon name="pin" size={18} /></span>
-              <span className="min-w-0">
-                <span className="block text-[15px] font-medium">Set pickup on the map</span>
-                <span className="block text-sm text-neutral-500">Drag the map to pin the exact spot</span>
-              </span>
-            </button>
-          </li>
-        )}
         {error && <li className="px-3 py-3 text-sm text-red-600">{error}</li>}
         {showResults && !loading && !error && results.length === 0 && <li className="px-3 py-3 text-sm text-neutral-500">No matches. Try a street and city.</li>}
         {(showResults ? results : suggestions).map((place, i) => (

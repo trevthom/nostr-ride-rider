@@ -32,9 +32,12 @@ import FareTerms, { offerRates, RatesLine } from "../components/FareTerms.jsx";
 import DriverInfo from "../components/DriverInfo.jsx";
 import GenderPref from "../components/GenderPref.jsx";
 import OnTrip from "./OnTrip.jsx";
+import { useOutboxAge } from "../../ui/ConnectionBanner.jsx";
 
 const parse = (e) => { try { return JSON.parse(e.content); } catch { return null; } };
 export const whenText = (time) => (time === "ASAP" ? "Now" : new Date(time).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" }));
+
+const STUCK_MS = 15000; // how long the request must have waited before we say so
 
 export default function ActiveTrip({ request }) {
   const { user, liveTick, isBlockedPk } = useApp();
@@ -102,7 +105,9 @@ function TripLines({ trip }) {
 }
 
 function Searching({ request, trip, onCancel, top }) {
-  const { drivers, sendFailed, raiseOffer } = useRider();
+  const { drivers, raiseOffer } = useRider();
+  // The request is "stuck" only while it is STILL waiting in the outbox after several tries (never a one-time failure that a retry fixed).
+  const stuck = useOutboxAge(request.id) >= STUCK_MS;
   const { btcPrice } = useApp();
   const content = parse(request) || {};
   const [editing, setEditing] = useState(false);
@@ -133,9 +138,9 @@ function Searching({ request, trip, onCancel, top }) {
             ? "Still looking. Drivers can take a minute to see new requests."
             : "Your request is on its way to drivers nearby."}
         </p>
-        {sendFailed && (
-          <p className="text-amber-700 text-sm bg-amber-50 rounded-xl px-3 py-2 mt-3" role="alert">
-            No relay accepted your request yet, so drivers may not see it. Check your relays in Account.
+        {stuck && (
+          <p className="text-amber-700 text-sm bg-amber-50 rounded-xl px-3 py-2 mt-3" role="status">
+            Your request is still waiting to be sent. We keep trying, and it goes out as soon as a relay answers. If this stays, check your connection or your relays in Account.
           </p>
         )}
         <div className="mt-4 pt-4 border-t border-neutral-100">

@@ -210,14 +210,12 @@ export function RiderProvider({ children }) {
   }, [ecash, rideRequests.length, liveTick]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Actions ──
-  const [sendFailed, setSendFailed] = useState(false);
 
   // Publish a ride request. Only an approximate area is public; the exact
   // trip is sealed to the rider (and to the driver after they are chosen).
   const requestRide = useCallback(
     ({ pickup, dropoff, when, notes, miles, minutes, fareSats, suggestedSats, fareMode = "standard" }) => {
-      setSendFailed(false);
-      const sent = publish(
+      publish(
         EVENT_KINDS.RIDE_REQUEST,
         {
           pickup: publicPlace(pickup),
@@ -236,7 +234,6 @@ export function RiderProvider({ children }) {
       );
       refreshData();
       resetPlan();
-      sent.then((ok) => setSendFailed(!ok));
       // A reservation doesn't take over the home screen, so say where it went.
       if (when !== "ASAP" && Date.parse(when) - Date.now() > 30 * 60000) {
         pushNotice(`Ride reserved for ${new Date(when).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}. Drivers can accept it from now on.`);
@@ -414,7 +411,7 @@ export function RiderProvider({ children }) {
     share, startShare, stopShare, shareUpdate, shareUrl,
     activeRide, focused: !!focused, focusRide: (r) => setFocusId(r ? r.id : null), upcoming, receipt, dismissReceipt,
     genderPref, setGenderPref,
-    sendFailed, requestRide, raiseOffer, proposePickup, confirmDriver, recordPayment, confirmRide, proposeStop, finishRide, rateDriver, recentPlaces,
+    requestRide, raiseOffer, proposePickup, confirmDriver, recordPayment, confirmRide, proposeStop, finishRide, rateDriver, recentPlaces,
     money, payNow, reportMiles, payTerms, payMint,
     nearestDriverEta: (to) => {
       if (!to || !drivers.length) return null;

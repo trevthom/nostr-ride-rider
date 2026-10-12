@@ -16,7 +16,7 @@ import { reputation } from "../../lib/rides.js";
 import { resizeImage } from "../../lib/image.js";
 import { useRelays, setRelays } from "../../config/relays.js";
 import { CONTACT_PLATFORMS, } from "../../config/settings.js";
-import { APP_NAME, IS_DRIVER_APP } from "../../config/app.js";
+import { APP_NAME, BUILD_ID, IS_DRIVER_APP } from "../../config/app.js";
 import Avatar from "../../ui/Avatar.jsx";
 import { Rating } from "../../ui/Rating.jsx";
 import Icon from "../../ui/Icon.jsx";
@@ -242,6 +242,7 @@ export function LogoutButton() {
       <p className="text-neutral-500 text-xs text-center mt-2">
         Logging out also removes your saved key from this device. Keep a copy of your nsec.
       </p>
+      <p className="text-neutral-400 text-xs text-center mt-4" aria-label="App version">{APP_NAME} · version {BUILD_ID}</p>
       <ConfirmDialog
         open={ask}
         title="Log out of the app?"

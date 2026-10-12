@@ -57,6 +57,8 @@ function isOurs(event) {
   return (event.tags || []).some((t) => t[0] === "t" && t[1] === APP_TAG);
 }
 
+const PUBLISH_WAIT_MS = 15000; // how long a relay may take to answer a publish
+
 class NostrRelay {
   constructor() {
     // enableReconnect: a dropped relay socket reconnects and re-sends its subscriptions.
@@ -219,6 +221,9 @@ class NostrRelay {
 
   // ── Outbox: events no relay has accepted yet ──
   outboxSize() { return this.outbox.size; }
+  // How long (ms) this event has been waiting in the outbox; 0 if it is not waiting (sent, or never failed).
+  outboxAge(id) { const o = this.outbox.get(id); return o ? Date.now() - o.at : 0; }
+  oldestOutboxAge() { let m = 0; for (const o of this.outbox.values()) m = Math.max(m, Date.now() - o.at); return m; }
   onOutbox(fn) { this.outboxListeners.add(fn); return () => this.outboxListeners.delete(fn); }
 
   _enqueue(event) {
@@ -263,8 +268,11 @@ class NostrRelay {
   }
 
   // Send to the relays; resolves true once any accepts, false if none do.
+  // A relay has PUBLISH_WAIT_MS to answer "OK" (the library's own 4.4 s is too short on a slow network: the send
+  // "failed" although the relay was fine, and the app warned about it).
   _send(event) {
     try {
+      this.pool.relays?.forEach?.((r) => { r.publishTimeout = PUBLISH_WAIT_MS; });
       const sends = this.pool.publish(getRelays(), event);
       return new Promise((resolve) => {
         let left = sends.length;

@@ -73,7 +73,7 @@ reverse. The Vite *mode* picks the app (`vite --mode rider|driver`).
 
 ## How a ride works
 1. The driver taps **GO** (needs a good or an *approximate* GPS fix, see [Location and GPS](#location-and-gps)). The app shares an approximate location.
-2. The rider enters a destination. The pickup fills in from GPS, or the rider searches for it, or **pins it on the map** (*Set pickup on the map*: drag the map under the pin). The rider picks a **standard fare** (each driver's own rates) or a **flat price** and taps **Request**.
+2. The rider sets the pickup and the destination. **The app never fills in the pickup by itself.** The rider types an address or the name of a business or landmark (the search page says so), or **pins the spot on the map** (*Set pickup on the map*, always shown: drag the map under the pin), or taps *Your location* on the pickup field. The rider picks a **standard fare** (each driver's own rates) or a **flat price** and taps **Request**.
 3. Nearby drivers get a **request card** with a countdown. A driver **accepts**, or (for a flat price) **counters** with a higher price. The reply carries the driver's rates and ecash mint.
 4. The rider **chooses a driver**. The rider needs enough ecash at the driver's mint for the start (the base rate, two minutes and a mile). There is **no deposit**.
 5. The driver drives to the pickup. The rider sees the car move live (end-to-end encrypted). **Nothing is charged yet.**
@@ -82,8 +82,8 @@ reverse. The Vite *mode* picks the app (`vite --mode rider|driver`).
 8. Either person taps **Finish ride** and confirms. The rider pays what the ride earned, up to that moment. Both rate each other. The driver may waive part of the fare.
 
 **Going back while planning.** The back arrow on *Plan your ride* goes one screen back: to the home screen, or to the fare quote if the rider came from there with *Edit*.
-The back arrow on the quote goes to the search page. The **X** on the search, pin and quote pages (and a tap on the *Ride* tab) cancels the planning and shows the home screen. Nothing is published
-until the rider taps *Request ride*.
+The back arrow on the quote goes to the search page. **Cancel** on the search page, **Cancel and go home** under the *Request ride* button, the **X** on the quote and pin pages, and a tap on the *Ride* tab all cancel the planning and show the home screen.
+Nothing is published until the rider taps *Request ride*. The tab bar is visible on every screen, including the quote and *Finding your driver*.
 
 A reservation more than 30 minutes ahead waits under *Activity → Upcoming*. Everything on screen is **derived from the
 signed events**, so a reload or a second device shows the same screen. Details of the money and the rules are in the next section.
@@ -410,7 +410,8 @@ There is no escrow, so the apps keep a signed trail:
 ## Reliability
 - **Outbox.** An event no relay accepts is kept (in the browser) and re-sent: after 3, 8, 20, 45, 90 and 180 seconds, when the network returns, and after a reload. Live-location events are never queued (they would be stale).
 - **Reconnect.** Relay sockets reconnect by themselves. When the network returns, or the tab wakes up, all subscriptions are re-opened and recent events are fetched again.
-- **Connection banner.** A strip at the top appears when the device is offline, when updates are waiting to send, or when no relay can be reached. The "can't reach any relay" message needs ALL of these: no relay
+- **A request that is slow to send is not an error.** A relay has 15 seconds (not the library's 4.4) to answer a publish. If no relay answers, the event waits in the outbox and is re-sent. *Finding your driver* says the request is still waiting only after it has waited 15 seconds in the outbox, and the message goes away by itself when it is sent. (Before, a first failed send left a "No relay accepted your request" warning on screen for good, even after a retry worked; a reload cleared it.)
+- **Connection banner.** A strip at the top appears when the device is offline, when an update has been waiting 20 seconds or more to send, or when no relay can be reached. The "can't reach any relay" message needs ALL of these: no relay
   connected for 20 seconds, and a separate test connection to every relay failed within the last 15 seconds. A relay that is slow to connect, or reconnecting after a sleep, does not raise it.
 - **Slow or dead connections heal themselves.** The relay pool waits up to 15 s for a connection (the library default of 3 s dropped a slow relay for good). A relay that answers the test but has no live connection is reconnected
   at once. After a network change, or a sleep of more than 30 seconds, all sockets are closed and opened fresh, because a dead socket can look connected for almost a minute.
@@ -511,6 +512,7 @@ To switch, copy `env.example` to `.env`, set `VITE_TILE_URL` (and `VITE_PHOTON_U
   and a cancel rate on profiles.
 
 ## Changelog
+- **Pickup is never automatic; cancel buttons; stale relay warning fixed; version line** — the pickup is no longer filled in from GPS. The search page asks for an address or a business name, always shows *Set pickup on the map*, and keeps *Your location* as a deliberate tap. *Cancel* (search), *Cancel and go home* (quote), and an X (quote, pin) return to the home screen; the pin page has the X too. The tab bar was checked on every rider screen with real styling. The "No relay accepted your request" warning no longer sticks after a retry succeeds: it shows only while the request still waits in the outbox after 15 s. A relay has 15 s to answer a publish, and the outbox banner needs a 20 s wait. Account shows the app version (build time and commit), so a person can tell which build a phone runs.
 - **Rider navigation, pickup pin, approximate driver location, relay banner, no license photo** — the rider can pin the pickup on the map (drag the map under a fixed pin; the address is looked up). The back arrow on *Plan your ride* goes one screen back (it used to loop between the quote and the search page); an X on the search, pin and quote pages, and the *Ride* tab, cancel the planning and show the home screen. The bottom tab bar is always visible in both apps. A driver can go online and be shown on the map with an approximate location (accurate to 25 km or better); marking *I've arrived* still needs a good fix. The false "can't reach any relay" message is fixed: the relay test no longer uses (and breaks) the app's own connection, the pool waits 15 s for a connection, the banner needs a sustained outage that a separate test confirms, and sockets are renewed after a sleep or a network change. The driver's license photo is gone: no upload, no requirement, no event kind 30092.
 - **Pay as you ride with ecash; Finish ride; start codes; local currency** — the rider pays the driver in ecash ticks while the ride runs (the base rate, each mile, each minute, a final
   part) from an ecash wallet filled with Lightning (NWC or any wallet); the driver redeems each tick at the mint and can cash out. **No deposit, no escrow, no cancellations and no cancel fees:**

@@ -7,7 +7,8 @@
 //  The lookup sends the pin's position (rounded to ~10 m) to the geocoder, the same as
 //  "Your location" does. If the lookup fails, the spot is still usable as "Dropped pin".
 //
-//    <PinPicker start={{lat,lng}} me={{lat,lng}|null} onConfirm(place) onBack() />
+//    <PinPicker start={{lat,lng}} me={{lat,lng}|null} onConfirm(place) onBack() onExit() />
+//    onBack = one screen back (the search page); onExit = cancel the planning and go home.
 // ════════════════════════════════════════════════════════════
 
 import { useEffect, useRef, useState } from "react";
@@ -23,7 +24,7 @@ import { FloatButton } from "../../ui/Layout.jsx";
 const ZOOM = 17;
 const LOOKUP_DELAY_MS = 450; // wait for the map to settle, and be kind to the geocoder
 
-export default function PinPicker({ start, me, onConfirm, onBack }) {
+export default function PinPicker({ start, me, onConfirm, onBack, onExit }) {
   const boxRef = useRef(null);
   const mapRef = useRef(null);
   const lookup = useRef(0);
@@ -72,6 +73,7 @@ export default function PinPicker({ start, me, onConfirm, onBack }) {
         <div className="flex items-center gap-3 [&>*]:pointer-events-auto">
           <FloatButton icon="chevron-left" label="Back" onClick={onBack} />
           {me && <FloatButton icon="locate" label="Center on my location" className="ml-auto" onClick={() => mapRef.current?.setView([me.lat, me.lng], ZOOM)} />}
+          {onExit && <FloatButton icon="x" label="Close and go home" className={me ? "" : "ml-auto"} onClick={onExit} />}
         </div>
       </div>
 
