@@ -40,7 +40,7 @@ const RiderContext = createContext(null);
 export const useRider = () => useContext(RiderContext);
 
 const HOUR = 3600000;
-const EMPTY_PLAN = { step: "idle", pickup: null, dropoff: null, when: "ASAP", notes: "", fareMode: "standard", offerSats: null, offerKey: null };
+const EMPTY_PLAN = { step: "idle", from: "idle", pickup: null, dropoff: null, when: "ASAP", notes: "", fareMode: "standard", offerSats: null, offerKey: null };
 const parse = (e) => { try { return JSON.parse(e.content); } catch { return null; } };
 
 export function RiderProvider({ children }) {

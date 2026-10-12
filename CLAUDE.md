@@ -88,6 +88,7 @@ src/
     wallet.js                     # NIP-47 (NWC) client
     ecash.js                      # EcashWallet: Cashu bookkeeping over a "mint adapter" (fund, pay, redeem, cash out, pending/recovery, encrypted save) — no network code, no Cashu import
     cashuMint.js                  # the REAL mint adapter on @cashu/cashu-ts + userWallet(user) — the ONLY file that imports the Cashu library; loaded on demand (own chunk)
+    reachable.js                  # probeRelay(url): a throwaway WebSocket test; never touches the pool's own connections
     link.js                       # remembers when OUR relays were unreachable (never counted as the other person's silence)
     demoData.js                   # dev-only fake riders/requests (driver app only)
   lib/
@@ -108,7 +109,7 @@ src/
     pickup.js     # pickupChange(request): pending|accepted|declined; PICKUP_CHANGE_NOTE (the exact place logic is in privacy.js)
     fare.js       # quoteFare/fareAmount/usdToSats/pickupEta + normalizeRates (incl. currency)/typicalFare/typicalSats/median/satsFromUsd/usdFromSats/offerLimitsSats/offerLevel/replyKind (pure)
     earnings.js   # completedDrives (paid ticks + tips), summarizeEarnings
-    privacy.js    # publicPlace, seal/unseal, exactTrip, sealVehicle/myVehicle/offerPlate, sealLicense/myLicense
+    privacy.js    # publicPlace, seal/unseal, exactTrip, sealVehicle/myVehicle/offerPlate
     contact.js    # contactHref (safe links from untrusted handles)
     evidence.js   # tip records (30086) + proofLevel + driver-side verifyPayment + disputeRecord (ticks, replies, waivers, finishes); rideConfirm is in rides.js
     bolt11.js     # paymentHash / preimageMatches
@@ -116,7 +117,7 @@ src/
     safety.js     # trusted contacts, sms link, trip message
     nativeGeo.js  # background location via Capacitor (run-time lookup; web build has no dependency)
     notify.js     # service worker registration + system notifications
-    gps.js (gpsStatus/gpsMessage: good|weak|stale) useGeolocation.js (pos, error, status) useWakeLock.js
+    gps.js (gpsStatus/gpsMessage: good|weak|stale; canBeOnline/approxNote) useGeolocation.js (pos, error, status) useWakeLock.js
     geo.js geocode.js (search + reverseGeocode) routing.js (OSRM, cached) image.js lnurl.js locations.js profile.js (driveGaps/gapsText/isDriveReady)
   state/AppContext.jsx            # shared state (above)
   ui/                             # shared UI kit
@@ -127,16 +128,16 @@ src/
   features/
     auth/        AuthScreen (role-aware copy) + AuthSteps (unlock, key backup)
     profile/     ProfileParts (useSaveProfile, AccountHeader, ContactMethods, RelaysSection, LogoutButton),
-                 VehicleSection, LicenseSection, TypicalFareSection ("Your rates", locked during a ride), CurrencySection, LightningAddressSection, WalletSection, KeysSection
+                 VehicleSection, TypicalFareSection ("Your rates", locked during a ride), CurrencySection, LightningAddressSection, WalletSection, KeysSection
     ecash/       EcashSection (balance, mint, paste a token, back up, driver cash out), myMint.js
     payments/    PayDriver (a Lightning address: tips), AddFunds (mint invoice → ecash, NWC or any wallet), rideTicks.js (rider: payDue), redeemTicks.js (driver: redeem + reply),
                  redeemWaivers.js (rider: collect refunds), useRideLink.js (quiet phone, sign of life, 10-minute silence)
   rider/
     App.jsx  state/RiderContext.jsx
-    screens/ HomeScreen (dispatch) PlanTrip (idle/search/quote: standard fare | flat price) ActiveTrip (searching/choose/confirm driver)
+    screens/ HomeScreen (dispatch) PlanTrip (idle/search/pin/quote: standard fare | flat price) ActiveTrip (searching/choose/confirm driver)
              OnTrip (enroute/arrived/riding) Receipt  ActivityScreen  AccountScreen
     state/ useRiderMeter (rider's own odometers + the 5% rule)
-    components/ PlaceSearch, GenderPref, ChangePickup, AddStop, FareTerms, TipSheet, DriverInfo (+ Plate, useDriverInfo)
+    components/ PlaceSearch, PinPicker (drag the map under a pin → the pickup), GenderPref, ChangePickup, AddStop, FareTerms, TipSheet, DriverInfo (+ Plate, useDriverInfo)
   driver/
     App.jsx  state/DriverContext.jsx  state/useDriveOdometer.js
     screens/ HomeScreen (dispatch) Onboarding OnlineHome (offline GO / online / incoming card / waiting)
@@ -167,7 +168,6 @@ test/*.test.mjs
 | 30098 | RIDE_ALIVE (addressable) | `e`(request), `p`(other), `d`="alive-<rideKey>-<role>", `t` | `{role, forRole, at}` — "still riding / still driving": a signed sign of life by the rider or the assigned driver, vouching for `forRole` |
 | 30099 | RIDE_STOP_CHANGE (addressable) | `e`(request), `p`(driver), `d`="stop-<rideKey>-<changeId>", `t` | `{changeId, mode: stop\|destination, sealedDriver, sealedSelf}` — the new place NIP-44 to the driver and the rider; only the ride's rider |
 | 30100 | RIDE_STOP_REPLY (addressable) | `e`(request), `p`(rider), `d`="stop-reply-<changeId>", `t` | `{changeId, accepted}` — only the assigned driver |
-| 30092 | DRIVER_LICENSE (addressable) | `d`="license", `t` | `{sealed}` or `{}` (removed) — the license photo (data URL) NIP-44 to the driver's OWN key; never sent to riders |
 | 30091 | TRIP_SHARE (addressable) | `d`="share", `t`, `expiration` | `{sealed}` — signed by a throwaway key; payload encrypted with that key (in the link #fragment) |
 | 30090 | PRESENCE (addressable) | `d`="presence", `t`, `expiration` | `{name, npub, vehicle, rates?, lat, lng, ts}` — public, coarsened location |
 | 21100 | RIDE_LOCATION (ephemeral) | `p`(rider), `expiration` | NIP-44 encrypted `{lat, lng, ts, pm?, tm?}` — exact, to rider only; `pm`/`tm` = the driver's odometer (miles to the pickup / on the trip) |
@@ -203,7 +203,7 @@ carries `driverPubkey`. Stage is `enroute` (default) → `arrived` → `riding`.
   trip sealed to the rider; RIDE_ACCEPT seals it to the chosen driver. Read trips with
   `exactTrip(request, user) || content`. The plate lives sealed in kind-0
   `vehicle.sealedPlate` (open with `myVehicle`) and is sealed to the rider in each offer
-  (`offerPlate`). The driver's license photo is sealed to their own key in its own event (kind 30092, `myLicense`), never in kind 0 (size) and never to a rider. Stage events carry no location. The public request does carry the trip's
+  (`offerPlate`). Stage events carry no location. The public request does carry the trip's
   distance/duration (needed for the fare). Reverse-geocoding the rider's GPS sends it (~10 m)
   to Photon. Old events with clear values still display.
 - **Untrusted text**: React escapes JSX. Never put relay text into HTML strings (Leaflet
@@ -248,6 +248,11 @@ carries `driverPubkey`. Stage is `enroute` (default) → `arrived` → `riding`.
   show sats / wait. Use `formatFiat(x)` (never a literal "$"). The app's own rates and `MIN_OFFER_USD` are dollars (use `usdPrice`).
 - **Blocking** is local (`getSetting("blocked")`, `useApp().blockUser/isBlockedPk`): filter at the data
   boundary (driver `open` list, rider presence and `offersForRide` in ActiveTrip). Don't re-add blocked people anywhere else.
+- **Navigation (rider)**: the bottom `TabBar` is ALWAYS visible in both apps. `RiderContext.plan` has `step` (idle|search|pin|quote) and `from` (where the search page was opened: idle|quote).
+  The search page's back arrow goes to `from` (never loop quote ⇄ search); the X (search, pin, quote) and a tap on the Ride tab call `resetPlan()` (cancel, home). `PinPicker` returns a place shaped like a search result.
+- **Connection health** (`nostr/relay.js`, `nostr/reachable.js`, `ui/ConnectionBanner.jsx`): the pool is built with `maxWaitForConnection: 15000` (the 3 s default DROPS a slow relay for good). `relayState` tests a relay with a SEPARATE
+  socket (`probeRelay`), never `pool.ensureRelay` with a short timeout (that kills the real connection); only a failed test younger than 15 s counts as "failed". A reachable relay with no live connection is healed (`_heal`, once per 10 s).
+  On `online` or a sleep over 30 s `refreshConnections()` closes and reopens all sockets. The banner's "can't reach any relay" needs 20 s of nothing connected AND every test failed.
 - **Outbox**: `relay.publish` queues an event no relay accepted (`nostrride_outbox` in localStorage) and
   re-sends it with backoff, on `online`/tab wake (`AppContext` → `relay.flushOutbox()` + `reconnectAll()`),
   and after reload. Ephemeral kinds are never queued. Pools use `enableReconnect`.
@@ -266,7 +271,7 @@ carries `driverPubkey`. Stage is `enroute` (default) → `arrived` → `riding`.
 - **Gender preference**: drivers MAY set `gender` ("male" | "female") in kind 0 (copied into offers); anything else is ignored.
   A rider's preference (`getSetting("genderPref")`, local only) only reorders the offers via `rankOffers`; never filter or hide a driver by it.
 - **Drive gating**: `isDriveReady(user)` = `driveGaps(user)` is empty (lib/profile.js): face photo + vehicle year/make/model +
-  vehicle photo + plate state/number + driver's license photo (`user.license`) + Lightning address. Gender is optional. Until then the
+  vehicle photo + plate state/number + Lightning address (no driver's license photo). Gender is optional. Until then the
   Drive tab shows Onboarding and GO is unavailable. Every message about what is missing comes from `driveGaps`/`gapsText`
   so it names the exact items; keep it that way when adding a requirement.
 - **Tips**: optional and never required. `TipSheet` (opened from the Receipt's quiet link and from Activity → past trip, any time after the ride)
@@ -290,7 +295,7 @@ carries `driverPubkey`. Stage is `enroute` (default) → `arrived` → `riding`.
 - **Live location**: the driver app broadcasts exact position to the rider (NIP-44, ephemeral) for the
   whole drive and public coarse presence while online and free. Geolocation needs https:// or
   localhost. **GPS quality** (`lib/gps.js`): a fix is `good` (≤ 200 m), `weak` (Wi-Fi/IP/indoors) or
-  `stale` (> 60 s old). A driver can go online, and is advertised, only on a `good` fix; ride location
+  `stale` (> 60 s old). A driver can go online, and is advertised, on a `good` fix OR an APPROXIMATE one (`canBeOnline`: a fresh `weak` fix accurate to 25 km; presence is rounded to ~100 m anyway) — not on a stale, missing or vaguer one; `I've arrived` still needs `good`. Ride location
   is sent unless `stale`; the rider app warns when a pickup came from a weak fix. Browsers pause GPS when
   the tab is hidden, so the driver app holds a screen wake lock while online or driving (`useWakeLock`).
   ETAs use the OSRM road time from the map route (`onRoute`), with a straight-line guess as fallback.

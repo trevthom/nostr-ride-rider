@@ -2,8 +2,8 @@
 //  RIDER APP — The root. Wraps everything in the shared state, shows the
 //  login screen until someone is signed in, then three tabs:
 //    Ride (home) · Activity · Account
-//  The tab bar hides while a ride is being planned or is under way, so
-//  the map and the trip sheet get the whole screen.
+//  The tab bar is always visible. Tapping "Ride" while a ride is being planned
+//  cancels the planning and shows the home screen.
 // ════════════════════════════════════════════════════════════
 
 import { AppProvider, useApp } from "../state/AppContext.jsx";
@@ -27,15 +27,18 @@ const TABS = [
 
 function Shell() {
   const { view, setView } = useApp();
-  const { activeRide, receipt, plan } = useRider();
+  const { activeRide, receipt, plan, resetPlan } = useRider();
   const Screen = SCREENS[view] || HomeScreen;
-  const busy = view === "home" && (activeRide || receipt || plan.step !== "idle");
+  const onTab = (id) => {
+    if (id === "home" && view === "home" && !activeRide && !receipt && plan.step !== "idle") resetPlan();
+    else setView(id);
+  };
   return (
     <AppFrame>
       <ErrorBoundary resetKey={view}>
         <Screen />
       </ErrorBoundary>
-      {!busy && <TabBar items={TABS} active={view} onChange={setView} />}
+      <TabBar items={TABS} active={view} onChange={onTab} />
       <UserModal />
       <ConnectionBanner />
       <NoticeBanner />

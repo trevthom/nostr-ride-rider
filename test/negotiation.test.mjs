@@ -1,4 +1,4 @@
-// Price offers and counter-offers, driver gender ordering, driver profile gaps, license privacy.
+// Price offers and counter-offers, driver gender ordering, driver profile gaps.
 // Run with: npm test
 import assert from "node:assert/strict";
 const R = new URL("../src", import.meta.url).pathname;
@@ -98,29 +98,16 @@ assert.equal(T.offersForRide(raised).length, 3, "offers made at the old price st
 
 // ── What a driver still has to finish ──
 const none = Prof.driveGaps({});
-assert.deepEqual(none.map((g) => g.id), ["photo", "vehicle", "vehiclePhoto", "plate", "license", "lightning"]);
+assert.deepEqual(none.map((g) => g.id), ["photo", "vehicle", "vehiclePhoto", "plate", "lightning"]);
 const partial = Prof.driveGaps({ picture: "p", lud16: "a@b.c", vehicle: { make: "Ford", plateNumber: "ABC", year: "", model: "" } });
-assert.deepEqual(partial.map((g) => [g.id, g.missing]), [["vehicle", ["year", "model"]], ["vehiclePhoto", []], ["plate", ["state"]], ["license", []]]);
-assert.equal(Prof.gapsText(partial), "Vehicle (year, model), Vehicle photo, License plate (state) and Driver's license photo");
+assert.deepEqual(partial.map((g) => [g.id, g.missing]), [["vehicle", ["year", "model"]], ["vehiclePhoto", []], ["plate", ["state"]]]);
+assert.equal(Prof.gapsText(partial), "Vehicle (year, model), Vehicle photo and License plate (state)");
 assert.equal(Prof.gapsText([{ title: "Vehicle photo", missing: [] }]), "Vehicle photo");
-const full = { picture: "p", lud16: "a@b.c", license: "data:image/jpeg;base64,AA", vehicle: { picture: "v", plateState: "KY", plateNumber: "ABC", year: "2020", make: "Ford", model: "Focus" } };
+const full = { picture: "p", lud16: "a@b.c", vehicle: { picture: "v", plateState: "KY", plateNumber: "ABC", year: "2020", make: "Ford", model: "Focus" } };
 assert.equal(Prof.isDriveReady(full), true);
-assert.equal(Prof.isDriveReady({ ...full, license: "" }), false, "the license photo is required");
+assert.equal(Prof.isDriveReady({ ...full, lud16: "" }), false, "a Lightning address is required");
+assert.equal(Prof.isDriveReady({ ...full, license: "" }), true, "a driver's license photo is not required");
 assert.equal(Prof.isDriveReady({ ...full, vehicle: { ...full.vehicle, picture: "" } }), false, "the vehicle photo is required");
 assert.equal(Prof.isDriveReady({ ...full, gender: "" }), true, "gender is optional");
-
-// ── License photo: ciphertext on the relay, readable only by its owner ──
-const photo = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQ";
-const lic = pub(K.DRIVER_LICENSE, P.sealLicense(photo, d1.sk, d1.publicKey), [["d", "license"]], d1);
-assert.ok(!lic.content.includes("4AAQ"), "photo is not in clear");
-assert.equal(P.myLicense(d1.publicKey, d1.sk), photo, "owner reads it");
-assert.equal(P.myLicense(d1.publicKey, d2.sk), "", "another key cannot open it");
-assert.equal(P.myLicense(d2.publicKey, d2.sk), "", "no record -> empty");
-// Removing the photo replaces the record with an empty one.
-pub(K.DRIVER_LICENSE, P.sealLicense("", d1.sk, d1.publicKey), [["d", "license"]], d1);
-assert.equal(P.myLicense(d1.publicKey, d1.sk), "", "removed");
-// Only image data URLs are accepted from the sealed record.
-pub(K.DRIVER_LICENSE, { sealed: P.seal(d2.sk, d2.publicKey, { picture: "javascript:alert(1)" }) }, [["d", "license"]], d2);
-assert.equal(P.myLicense(d2.publicKey, d2.sk), "", "non-image value rejected");
 
 console.log("negotiation ok");

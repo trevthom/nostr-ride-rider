@@ -6,6 +6,8 @@
 //  already typed or cleared it. A "Your location" button on the pickup field
 //  fills it again at any time, and it can still be changed afterward. Recent places are suggested for the dropoff.
 //  onChange(field, place) is called when a result is chosen.
+//  onBack() is the back arrow (one screen back); onExit() is the X that cancels the planning and goes home;
+//  onPin() opens the map pin picker for the pickup ("Set pickup on the map").
 //  onDone() shows a "Done" button once both places are set, so a rider who
 //  tapped Edit by mistake can go straight back to the quote.
 // ════════════════════════════════════════════════════════════
@@ -15,7 +17,7 @@ import { searchAddress } from "../../lib/geocode.js";
 import Icon from "../../ui/Icon.jsx";
 import { Spinner } from "../../ui/Parts.jsx";
 
-export default function PlaceSearch({ pickup, dropoff, here, near, recents, onChange, onBack, onDone }) {
+export default function PlaceSearch({ pickup, dropoff, here, near, recents, onChange, onBack, onExit, onPin, onDone }) {
   const [focus, setFocus] = useState(pickup ? "dropoff" : "pickup");
   const [text, setText] = useState({ pickup: pickup?.name || "", dropoff: dropoff?.name || "" });
   const [results, setResults] = useState([]);
@@ -78,6 +80,11 @@ export default function PlaceSearch({ pickup, dropoff, here, near, recents, onCh
           <Icon name="chevron-left" size={24} />
         </button>
         <h1 className="text-xl font-bold">Plan your ride</h1>
+        {onExit && (
+          <button type="button" onClick={onExit} aria-label="Cancel and go home" className="ml-auto p-2 -mr-1 rounded-full active:bg-neutral-100">
+            <Icon name="x" size={22} />
+          </button>
+        )}
       </header>
 
       {/* The two fields, joined by a line like the Uber trip planner. */}
@@ -130,6 +137,17 @@ export default function PlaceSearch({ pickup, dropoff, here, near, recents, onCh
       )}
 
       <ul className="mt-3 px-2">
+        {focus === "pickup" && onPin && (
+          <li>
+            <button type="button" onClick={onPin} className="w-full flex items-center gap-3 px-3 py-3 rounded-xl active:bg-neutral-100 text-left">
+              <span className="w-10 h-10 rounded-full bg-neutral-100 flex items-center justify-center shrink-0"><Icon name="pin" size={18} /></span>
+              <span className="min-w-0">
+                <span className="block text-[15px] font-medium">Set pickup on the map</span>
+                <span className="block text-sm text-neutral-500">Drag the map to pin the exact spot</span>
+              </span>
+            </button>
+          </li>
+        )}
         {error && <li className="px-3 py-3 text-sm text-red-600">{error}</li>}
         {showResults && !loading && !error && results.length === 0 && <li className="px-3 py-3 text-sm text-neutral-500">No matches. Try a street and city.</li>}
         {(showResults ? results : suggestions).map((place, i) => (

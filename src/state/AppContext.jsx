@@ -19,9 +19,9 @@ import { buildSignedEvent } from "../nostr/events.js";
 import { latestVersions } from "../nostr/replaceable.js";
 import { emptyWalletState } from "../nostr/wallet.js";
 import { getProfile } from "../nostr/profiles.js";
-import { myVehicle, myLicense } from "../lib/privacy.js";
+import { myVehicle } from "../lib/privacy.js";
 import { forgetKey } from "../nostr/keystore.js";
-import { APP_NAME, IS_DRIVER_APP } from "../config/app.js";
+import { APP_NAME } from "../config/app.js";
 import { getSetting, setSetting, reconnectAll } from "../config/relays.js";
 import { addBlock, removeBlock, isBlocked } from "../lib/blocks.js";
 import { showSystemNotification } from "../lib/notify.js";
@@ -225,18 +225,25 @@ export function AppProvider({ initialView, children }) {
     return () => { unsub(); clearTimeout(timer); };
   }, [refreshData]);
 
-  // The network came back, or the tab woke up: re-open every relay subscription,
-  // send what is waiting in the outbox, and catch up on what we missed.
+  // The network came back, or the tab woke up: reconnect, send what is waiting in the
+  // outbox, and catch up on what we missed. After the network changed or a long sleep the old
+  // sockets may be dead without saying so, so they are closed and opened fresh (not just re-used).
   useEffect(() => {
-    const wake = () => {
-      if (document.visibilityState === "hidden") return;
-      reconnectAll();
+    let hiddenAt = 0;
+    const wake = (force) => {
+      if (document.visibilityState === "hidden") { hiddenAt = hiddenAt || Date.now(); return; }
+      const slept = hiddenAt && Date.now() - hiddenAt > 30000;
+      hiddenAt = 0;
+      if (force === true || slept) relay.refreshConnections();
+      else reconnectAll();
       relay.flushOutbox();
       pullRecent();
     };
-    window.addEventListener("online", wake);
-    document.addEventListener("visibilitychange", wake);
-    return () => { window.removeEventListener("online", wake); document.removeEventListener("visibilitychange", wake); };
+    const onOnline = () => wake(true);
+    const onVisible = () => wake(false);
+    window.addEventListener("online", onOnline);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => { window.removeEventListener("online", onOnline); document.removeEventListener("visibilitychange", onVisible); };
   }, [pullRecent]);
 
   // Best-effort: ask for system-notification permission once logged in.
@@ -274,7 +281,7 @@ export function AppProvider({ initialView, children }) {
     if (!user?.publicKey) return;
     let alive = true;
     (async () => {
-      await relay.fetchProfile(user.publicKey, { license: IS_DRIVER_APP });
+      await relay.fetchProfile(user.publicKey);
       const p = getProfile(user.publicKey);
       if (alive && p && (p.picture || p.vehicle || p.lud16 || p.gender || p.rates)) {
         setUser((u) => u && ({
@@ -284,7 +291,6 @@ export function AppProvider({ initialView, children }) {
           vehicle: u.vehicle || myVehicle(u.publicKey, u.sk),
           gender: u.gender ?? p.gender ?? "",
           rates: u.rates ?? p.rates ?? null,
-          license: u.license || myLicense(u.publicKey, u.sk),
         }));
       }
     })();

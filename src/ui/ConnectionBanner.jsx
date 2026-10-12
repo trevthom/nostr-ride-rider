@@ -2,22 +2,26 @@
 //  CONNECTION BANNER — A thin strip at the top when something is wrong
 //  with the connection, so the app never looks fine while it is not:
 //    • the device is offline
-//    • no relay is reachable (after a short grace period)
+//    • no relay is reachable: shown only after EVERY relay has been disconnected for 20 s
+//      and a separate test connection to each one has also failed. A relay that is merely
+//      slow to connect, or reconnecting after a sleep, never raises the alarm (it used to,
+//      and a reload then showed that the relays were fine)
 //    • updates are waiting in the outbox to be sent
 //  It hides itself when all is well.
 // ════════════════════════════════════════════════════════════
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { relay } from "../nostr/relay.js";
 import { getRelays } from "../config/relays.js";
 
-const GRACE_MS = 8000; // relays need a moment to connect after the page opens
+export const DOWN_AFTER_MS = 20000; // how long ALL relays must be disconnected before we say so
 
 export function useConnection() {
   const [online, setOnline] = useState(typeof navigator === "undefined" ? true : navigator.onLine);
   const [, setTick] = useState(0);
   const [outbox, setOutbox] = useState(relay.outboxSize());
-  const [since] = useState(Date.now());
+  const lostSince = useRef(null); // when we last saw zero connected relays, or null while at least one is connected
+  const started = useRef(Date.now());
   useEffect(() => {
     const on = () => setOnline(true), off = () => setOnline(false);
     window.addEventListener("online", on);
@@ -27,15 +31,21 @@ export function useConnection() {
     return () => { window.removeEventListener("online", on); window.removeEventListener("offline", off); clearInterval(id); unsub(); };
   }, []);
   const urls = getRelays();
-  const connected = urls.filter((u) => relay.relayState(u) === "connected").length;
-  return { online, connected, total: urls.length, outbox, settled: Date.now() - since > GRACE_MS };
+  const states = urls.map((u) => relay.relayState(u));
+  const connected = states.filter((s) => s === "connected").length;
+  const now = Date.now();
+  if (connected > 0) lostSince.current = null;
+  else if (lostSince.current == null) lostSince.current = Math.max(now, started.current);
+  // Down = nothing connected for a while AND every test connection failed too.
+  const down = urls.length > 0 && connected === 0 && now - lostSince.current >= DOWN_AFTER_MS && states.every((s) => s === "failed");
+  return { online, connected, total: urls.length, outbox, down };
 }
 
 export default function ConnectionBanner() {
-  const { online, connected, total, outbox, settled } = useConnection();
+  const { online, outbox, down } = useConnection();
   let text = "";
   if (!online) text = "You're offline. We'll send your updates when you're back online.";
-  else if (settled && total > 0 && connected === 0) text = "Can't reach any relay. Check your connection or your relays in Account.";
+  else if (down) text = "Can't reach any relay. Check your connection or your relays in Account.";
   else if (outbox > 0) text = `${outbox} update${outbox === 1 ? " is" : "s are"} waiting to send.`;
   if (!text) return null;
   return (

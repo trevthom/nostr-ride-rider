@@ -1,14 +1,18 @@
 // ════════════════════════════════════════════════════════════
-//  PLAN TRIP — The rider's home when no ride is open. Three steps,
+//  PLAN TRIP — The rider's home when no ride is open. Four steps,
 //  kept in RiderContext.plan so switching tabs doesn't lose them:
 //    idle    map + "Where to?" bar + recent places
 //    search  pickup / dropoff fields with live address results
+//    pin     the pickup set by dragging the map under a pin (components/PinPicker)
 //    quote   route on the map, the typical fares of the drivers nearby (each
 //            driver sets their own rates), a suggested price, and the choice of fare:
 //              Standard fare  every driver's own rates (base, per mile, per minute), paid tick by tick
 //              Flat price     the rider's own price (any amount, in local money or sats): a driver
 //                             accepts it or counters; traffic and detours never raise it
 //            Now/Later, notes → Request.
+//  Going back: the back arrow on the search page returns to where it was opened from (plan.from: the
+//  home screen, or the quote). The close button (X) on the search, pin and quote pages cancels the
+//  planning and returns to the home screen (resetPlan).
 // ════════════════════════════════════════════════════════════
 
 import { useEffect, useRef, useState } from "react";
@@ -25,12 +29,25 @@ import Button from "../../ui/Button.jsx";
 import { MapPage, Sheet, FloatButton } from "../../ui/Layout.jsx";
 import { inputCls } from "../../ui/Parts.jsx";
 import PlaceSearch from "../components/PlaceSearch.jsx";
+import PinPicker from "../components/PinPicker.jsx";
+import { SAMPLE_LOCATIONS } from "../../lib/locations.js";
 import GenderPref from "../components/GenderPref.jsx";
 import { gpsMessage } from "../../lib/gps.js";
 
 export default function PlanTrip() {
-  const { plan, setPlan, here, myPosition, recentPlaces } = useRider();
+  const { plan, setPlan, resetPlan, here, myPosition, recentPlaces } = useRider();
 
+  if (plan.step === "pin") {
+    const start = plan.pickup || myPosition || here || SAMPLE_LOCATIONS[0];
+    return (
+      <PinPicker
+        start={start}
+        me={myPosition}
+        onBack={() => setPlan({ step: "search" })}
+        onConfirm={(place) => setPlan({ pickup: place, step: plan.dropoff ? "quote" : "search" })}
+      />
+    );
+  }
   if (plan.step === "search") {
     return (
       <PlaceSearch
@@ -39,7 +56,9 @@ export default function PlanTrip() {
         here={here}
         near={myPosition}
         recents={recentPlaces()}
-        onBack={() => setPlan({ step: plan.pickup && plan.dropoff ? "quote" : "idle" })}
+        onBack={() => setPlan({ step: plan.from === "quote" && plan.pickup && plan.dropoff ? "quote" : "idle" })}
+        onExit={resetPlan}
+        onPin={() => setPlan({ step: "pin" })}
         onDone={() => setPlan({ step: "quote" })}
         onChange={(field, place) => {
           const next = { [field]: place };
@@ -62,7 +81,7 @@ function Idle() {
   const openSearch = (dropoff) => {
     // No address for the rider's position yet? Open the search page: it fills the pickup in when it arrives.
     const pickup = plan.pickup || here;
-    setPlan({ step: dropoff && pickup ? "quote" : "search", pickup, ...(dropoff ? { dropoff } : {}) });
+    setPlan({ step: dropoff && pickup ? "quote" : "search", from: "idle", pickup, ...(dropoff ? { dropoff } : {}) });
   };
 
   return (
@@ -112,7 +131,7 @@ function Idle() {
 
 function Quote() {
   const { btcPrice, usdPrice, prices, currency } = useApp();
-  const { plan, setPlan, drivers, requestRide, nearestDriverEta, gps, myPosition, geoError } = useRider();
+  const { plan, setPlan, resetPlan, drivers, requestRide, nearestDriverEta, gps, myPosition, geoError } = useRider();
   const { pickup, dropoff } = plan;
   const [route, setRoute] = useState(null); // { miles, minutes, straight }
   const [error, setError] = useState("");
@@ -177,7 +196,12 @@ function Quote() {
           onRoute={setRoute}
         />
       }
-      top={<FloatButton icon="chevron-left" label="Edit trip" onClick={() => setPlan({ step: "search" })} />}
+      top={
+        <>
+          <FloatButton icon="chevron-left" label="Back" onClick={() => setPlan({ step: "search" })} />
+          <FloatButton icon="x" label="Cancel and go home" onClick={resetPlan} className="ml-auto" />
+        </>
+      }
     >
       <Sheet label="Choose your ride">
         <div className="flex items-start gap-3 mb-4">
@@ -190,7 +214,7 @@ function Quote() {
             <p className="text-[15px] font-medium truncate">{pickup.name}</p>
             <p className="text-[15px] font-medium truncate">{dropoff.name}</p>
           </div>
-          <button type="button" onClick={() => setPlan({ step: "search" })} className="text-sm font-semibold underline">Edit</button>
+          <button type="button" onClick={() => setPlan({ step: "search", from: "quote" })} className="text-sm font-semibold underline">Edit</button>
         </div>
 
         {/* The ride (one type for now) */}

@@ -60,25 +60,30 @@ Needs internet for Tailwind (CDN), fonts, the map, and the relays. Location need
 | | Rider app (repo nostr-ride-rider) | Driver app (repo nostr-ride-driver) |
 |---|---|---|
 | Tabs | Ride · Activity · Account | Drive · Earnings · Account |
+| Tab bar | Always visible, on every screen | Always visible, on every screen |
 | Home | "Where to?" → standard fare or flat price → request | GO button → request cards (accept; counter a flat price) |
 | During a trip | Live car, ETA, fare so far, start code, contact, **Finish ride**, add a stop | Route, arrived (within 50 m) / start code / **Finish ride**, fare and payments so far |
 | After a trip | Receipt (anything still owed), rate, tip | Summary, waive part of the fare, rate the rider |
 | Money | An ecash wallet (fill it with Lightning) | An ecash wallet (cash out to Lightning) |
-| Needs | Ecash in the wallet before the ride starts | Face photo, vehicle and vehicle photo, plate, driver's license photo, Lightning address |
+| Needs | Ecash in the wallet before the ride starts | Face photo, vehicle and vehicle photo, plate, Lightning address |
 
 Both apps share one code base for Nostr, maps, payments, profiles and UI (`src/nostr`, `src/lib`,
 `src/ui`, `src/features`, `src/state`). The rider app must never import from `src/driver`, and the
 reverse. The Vite *mode* picks the app (`vite --mode rider|driver`).
 
 ## How a ride works
-1. The driver taps **GO** (needs a good GPS fix). The app shares an approximate location.
-2. The rider enters a destination. The pickup fills in from GPS. The rider picks a **standard fare** (each driver's own rates) or a **flat price** and taps **Request**.
+1. The driver taps **GO** (needs a good or an *approximate* GPS fix, see [Location and GPS](#location-and-gps)). The app shares an approximate location.
+2. The rider enters a destination. The pickup fills in from GPS, or the rider searches for it, or **pins it on the map** (*Set pickup on the map*: drag the map under the pin). The rider picks a **standard fare** (each driver's own rates) or a **flat price** and taps **Request**.
 3. Nearby drivers get a **request card** with a countdown. A driver **accepts**, or (for a flat price) **counters** with a higher price. The reply carries the driver's rates and ecash mint.
 4. The rider **chooses a driver**. The rider needs enough ecash at the driver's mint for the start (the base rate, two minutes and a mile). There is **no deposit**.
 5. The driver drives to the pickup. The rider sees the car move live (end-to-end encrypted). **Nothing is charged yet.**
 6. The driver taps **I've arrived** (only within 50 m of the pickup). The rider checks the car. Then each person types the **2-digit code** shown on the other person's phone, and the driver taps **Start trip**.
 7. **The ride runs and the rider pays as it goes:** the base rate at the start, then each mile and each minute (ecash "ticks").
 8. Either person taps **Finish ride** and confirms. The rider pays what the ride earned, up to that moment. Both rate each other. The driver may waive part of the fare.
+
+**Going back while planning.** The back arrow on *Plan your ride* goes one screen back: to the home screen, or to the fare quote if the rider came from there with *Edit*.
+The back arrow on the quote goes to the search page. The **X** on the search, pin and quote pages (and a tap on the *Ride* tab) cancels the planning and shows the home screen. Nothing is published
+until the rider taps *Request ride*.
 
 A reservation more than 30 minutes ahead waits under *Activity → Upcoming*. Everything on screen is **derived from the
 signed events**, so a reload or a second device shows the same screen. Details of the money and the rules are in the next section.
@@ -292,10 +297,9 @@ only what the ride has earned so far, and most of it is already paid.
 
 ## Driver requirements
 To go online a driver needs: face photo, vehicle year/make/model, **vehicle photo**, plate state and number,
-**driver's license photo** and a Lightning address (`driveGaps` in `src/lib/profile.js`).
+and a Lightning address (`driveGaps` in `src/lib/profile.js`). No driver's license photo is asked for or stored.
 The Account page and the checklist name each missing item (for example *Vehicle (year, model)*, *Vehicle photo*). After
 *Save vehicle info* the app lists everything that is still needed.
-The license photo is encrypted to the driver's own key and stored as its own event (kind 30092). Relays hold only ciphertext, and riders never see it.
 
 ## Architecture
 ```
@@ -334,7 +338,6 @@ More detail for contributors is in `CLAUDE.md` (the file map and every invariant
 | 30098 | Sign of life | rider or assigned driver | "Still riding" / "Still driving": a signed sign that the other person is there |
 | 30099 | Stop change | rider | Add a stop or change the destination; the new place sealed to the driver and the rider |
 | 30100 | Stop change answer | assigned driver | Accept the extra stop (the driver's other choice is to finish the ride) |
-| 30092 | Driver license | driver | License photo, encrypted to the driver's own key; never shown to riders |
 | 30091 | Trip share | throwaway key | Live trip state for a "Share my trip" link, encrypted with a key in the link |
 | 30090 | Presence | driver | Online, coarse location, the driver's rates, short expiry |
 | 21100 | Ride location | driver | Exact location and the driver's odometer, encrypted to the rider, ephemeral |
@@ -346,7 +349,6 @@ Every event carries the app tag `["t","nostrride"]` because kind numbers like 30
 - Public relays see only an **approximate area** (about 1 km) for pickup and dropoff. The exact trip is
   encrypted (NIP-44) first to the rider, then to the chosen driver.
 - The **license plate** is sealed to the rider who receives the offer.
-- The **driver's license photo** is encrypted to the driver's own key (kind 30092). Relays store ciphertext; no rider sees it.
 - A rider's **gender preference** never leaves the device.
 - The **ecash token** in a tick is sealed to the driver; the **start codes** are never sent (each phone works out both from a shared secret); a **refund token** is sealed to the rider.
   The tick **amounts** are public, like tips. The ecash wallet is saved on the device encrypted to the user's own key.
@@ -367,7 +369,9 @@ Payments are **peer to peer, with no escrow and no deposit.** The full rules are
 
 ## Location and GPS
 - A fix is **good** (accurate to 200 m or better), **weak**, or **stale** (older than 60 seconds).
-- A driver can go online, and is shown to riders, only with a good fix.
+- A driver can go online, and is shown to riders, with a **good** fix or an **approximate** one: a weak fix accurate to 25 km or better, like the *approximate location* a phone can give an app.
+  A stale, missing or vaguer fix (for example a laptop's IP guess) cannot go online. The public position is rounded to about 100 m in any case. The driver sees a note with the accuracy and how to allow precise location.
+- **Pickup pin.** The rider's pin picker sends the pin's position (rounded to about 10 m) to the geocoder to name the spot, like *Your location* does.
 - During a drive the exact position is sent unless it is stale.
 - The driver app keeps the screen awake while online or driving (browsers stop GPS when the screen sleeps).
 - ETAs use the road time from the router, with a straight-line guess as a fallback.
@@ -406,7 +410,10 @@ There is no escrow, so the apps keep a signed trail:
 ## Reliability
 - **Outbox.** An event no relay accepts is kept (in the browser) and re-sent: after 3, 8, 20, 45, 90 and 180 seconds, when the network returns, and after a reload. Live-location events are never queued (they would be stale).
 - **Reconnect.** Relay sockets reconnect by themselves. When the network returns, or the tab wakes up, all subscriptions are re-opened and recent events are fetched again.
-- **Connection banner.** A strip at the top appears when the device is offline, when no relay can be reached, or when updates are waiting to send.
+- **Connection banner.** A strip at the top appears when the device is offline, when updates are waiting to send, or when no relay can be reached. The "can't reach any relay" message needs ALL of these: no relay
+  connected for 20 seconds, and a separate test connection to every relay failed within the last 15 seconds. A relay that is slow to connect, or reconnecting after a sleep, does not raise it.
+- **Slow or dead connections heal themselves.** The relay pool waits up to 15 s for a connection (the library default of 3 s dropped a slow relay for good). A relay that answers the test but has no live connection is reconnected
+  at once. After a network change, or a sleep of more than 30 seconds, all sockets are closed and opened fresh, because a dead socket can look connected for almost a minute.
 - **Installable app and offline start.** Each app has a manifest, icons and a service worker (production builds only). The app opens offline after one earlier visit. Maps, relays and payments still need the network.
 - **Notifications.** While the app is open (even in a background tab) alerts also show as system notifications, through the service worker, which works on phones. **No push when the app is closed:** that needs a push server (self-hosted ntfy or UnifiedPush, or Firebase in the native app). Not built yet.
 
@@ -430,7 +437,7 @@ A web page cannot read the location with the screen off. `native/` wraps the **d
 `npm test` runs `test/*.test.mjs` with Node's built-in runner: trust rules, ride stages, finishing a ride (who may finish, earliest finish wins, the silence cut-off), fares, trips,
 earnings, privacy, history, Lightning invoices, geocoding, publishing and the outbox, event ordering, contact links, GPS, payment evidence, blocking, trip sharing, native location, tips,
 pickup changes, the odometer (and the GPS-gap rule) and the 5% distance rule, stage times, relay subscription calls, flat offers and counters, driver rates and currencies, exact amounts, gender
-ordering, driver requirements, license privacy, **the tick schedule (standard and flat), missed payments, the final tick, the start code, the 50 m arrival rule, silence and sign-of-life
+ordering, driver requirements, **the tick schedule (standard and flat), missed payments, the final tick, the start code, the 50 m arrival rule, silence and sign-of-life
 rules, waivers, extra stops and frozen rates, the ecash wallet (funding, paying, redeeming, crash recovery, cash out, encrypted saving), a whole ride's money between a rider and a
 driver, and the real `@cashu/cashu-ts` client against a local test mint that does the real blind-signature maths**.
 
@@ -504,6 +511,7 @@ To switch, copy `env.example` to `.env`, set `VITE_TILE_URL` (and `VITE_PHOTON_U
   and a cancel rate on profiles.
 
 ## Changelog
+- **Rider navigation, pickup pin, approximate driver location, relay banner, no license photo** — the rider can pin the pickup on the map (drag the map under a fixed pin; the address is looked up). The back arrow on *Plan your ride* goes one screen back (it used to loop between the quote and the search page); an X on the search, pin and quote pages, and the *Ride* tab, cancel the planning and show the home screen. The bottom tab bar is always visible in both apps. A driver can go online and be shown on the map with an approximate location (accurate to 25 km or better); marking *I've arrived* still needs a good fix. The false "can't reach any relay" message is fixed: the relay test no longer uses (and breaks) the app's own connection, the pool waits 15 s for a connection, the banner needs a sustained outage that a separate test confirms, and sockets are renewed after a sleep or a network change. The driver's license photo is gone: no upload, no requirement, no event kind 30092.
 - **Pay as you ride with ecash; Finish ride; start codes; local currency** — the rider pays the driver in ecash ticks while the ride runs (the base rate, each mile, each minute, a final
   part) from an ecash wallet filled with Lightning (NWC or any wallet); the driver redeems each tick at the mint and can cash out. **No deposit, no escrow, no cancellations and no cancel fees:**
   either person taps *Finish ride* (confirmed), and the rider pays what the ride earned. After two missed payments the driver may finish; the rider can refill and pay what is missed, also later.

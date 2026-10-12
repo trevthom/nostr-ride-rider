@@ -1,7 +1,7 @@
 // ════════════════════════════════════════════════════════════
 //  VEHICLE SECTION — Vehicle photo, plate state/number, and
-//  year/make/model. All are required to drive (with a face photo, a
-//  license photo and a Lightning address). Saving keeps what was entered
+//  year/make/model. All are required to drive (with a face photo
+//  and a Lightning address). Saving keeps what was entered
 //  and, if anything is still missing, names each missing section.
 //  The form follows the SAVED vehicle until the user edits it, so a
 //  profile that loads after the screen opens can't be overwritten by an

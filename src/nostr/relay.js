@@ -21,6 +21,7 @@
 // ════════════════════════════════════════════════════════════
 
 import { SimplePool } from "nostr-tools/pool";
+import { probeRelay } from "./reachable.js";
 import { normalizeURL } from "nostr-tools/utils";
 import { EVENT_KINDS, APP_TAG } from "./eventKinds.js";
 import { getRelays, onRelaysChange } from "../config/relays.js";
@@ -59,7 +60,9 @@ function isOurs(event) {
 class NostrRelay {
   constructor() {
     // enableReconnect: a dropped relay socket reconnects and re-sends its subscriptions.
-    this.pool = new SimplePool({ enablePing: true, enableReconnect: true });
+    // maxWaitForConnection: the library's default (3 s) gives up on a slow start (a phone on a weak
+    // network) and DROPS the relay from the pool for good, so the app looked disconnected until a reload.
+    this.pool = new SimplePool({ enablePing: true, enableReconnect: true, maxWaitForConnection: 15000 });
     this.outbox = new Map(); // event id -> { event, tries, at } for events no relay accepted yet
     this.retryDelays = [3000, 8000, 20000, 45000, 90000, 180000]; // ms, by number of tries
     this.outboxListeners = new Set();
@@ -109,13 +112,10 @@ class NostrRelay {
 
   // Pull one user's profile (kind 0) from relays into the cache, so we
   // can show their display name (we don't sync the global kind-0 firehose).
-  // { license: true } also pulls the user's own sealed license photo (only for
-  // the logged-in driver; nobody else needs it).
-  async fetchProfile(pubkey, { license = false } = {}) {
+  async fetchProfile(pubkey) {
     if (!pubkey) return;
     try {
-      const kinds = license ? [EVENT_KINDS.METADATA, EVENT_KINDS.DRIVER_LICENSE] : [EVENT_KINDS.METADATA];
-      const events = await this.pool.querySync(getRelays(), { kinds, authors: [pubkey] });
+      const events = await this.pool.querySync(getRelays(), { kinds: [EVENT_KINDS.METADATA], authors: [pubkey] });
       events.forEach((e) => this._ingest(e)); // METADATA is exempt from the app-tag check
     } catch {
       /* ignore */
@@ -316,15 +316,17 @@ class NostrRelay {
   }
 
   // Connection state of one relay: "connected" | "failed" | "connecting".
-  // The pool forgets relays that fail to connect, so we probe them
-  // ourselves (at most every 15 s) and remember the result.
+  // The pool forgets relays that fail to connect, so we test them ourselves (at most every 15 s,
+  // with a separate socket, see nostr/reachable.js). Only a RECENT failed test counts as "failed":
+  // an old one is out of date, so the answer stays "connecting" while a new test runs.
   relayState(url) {
     let key;
     try { key = normalizeURL(url); } catch { return "failed"; }
     if (this.pool.listConnectionStatus().get(key)) return "connected";
     const h = this.health.get(key);
-    if (!h || Date.now() - h.at > 15000) this._probe(key);
-    return h && !h.ok ? "failed" : "connecting";
+    const age = h ? Date.now() - h.at : Infinity;
+    if (age > 15000) this._probe(key);
+    return h && !h.ok && age <= 15000 ? "failed" : "connecting";
   }
 
   // Is at least one relay connected right now? (Used to leave relay outages out of the silence clock.)
@@ -339,13 +341,32 @@ class NostrRelay {
     if (this.probing.has(key)) return;
     this.probing.add(key);
     try {
-      await this.pool.ensureRelay(key, { connectionTimeout: 5000 });
-      this.health.set(key, { ok: true, at: Date.now() });
-    } catch {
-      this.health.set(key, { ok: false, at: Date.now() });
+      const ok = await probeRelay(key, 10000);
+      this.health.set(key, { ok, at: Date.now() });
+      // The relay answers, but our own connection to it is gone (a slow start, a sleep, a network change):
+      // connect again now instead of waiting for the library's slow retries.
+      if (ok && !this.pool.listConnectionStatus().get(key)) this._heal();
     } finally {
       this.probing.delete(key);
     }
+  }
+
+  // Open the live subscription again (at most once every 10 s).
+  _heal() {
+    const now = Date.now();
+    if (!this.syncing || now - (this.healedAt || 0) < 10000) return;
+    this.healedAt = now;
+    this._resubscribe();
+  }
+
+  // After a long sleep or a network change the sockets can be dead without telling us (the library
+  // notices only after a ping times out, up to ~50 s). Close them all and connect fresh.
+  refreshConnections() {
+    if (!this.syncing) return;
+    try { this.pool.close(getRelays()); } catch { /* nothing to close */ }
+    this.health.clear();
+    this.healedAt = Date.now();
+    this._resubscribe();
   }
 
   onEvent(fn) {
