@@ -18,7 +18,7 @@ import { EVENT_KINDS, APP_TAG } from "./eventKinds.js";
 import { buildSignedEvent } from "./events.js";
 import { getRelays } from "../config/relays.js";
 
-const pool = new SimplePool({ enablePing: true, enableReconnect: true });
+const pool = new SimplePool({ enablePing: true, enableReconnect: true, maxWaitForConnection: 15000 });
 const TTL_SECONDS = 7200;
 const HEX64 = /^[0-9a-f]{64}$/;
 

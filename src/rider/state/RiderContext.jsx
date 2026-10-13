@@ -8,7 +8,7 @@
 //    • the CURRENT ride, derived from signed events (so a reload or
 //      another device shows the same screen) and the receipt to show
 //      after a trip
-//    • actions: requestRide, raiseOffer, proposePickup, confirmDriver, finishRide, rateDriver
+//    • actions: requestRide, raiseOffer, proposePickup, confirmDriver, declineOffer, finishRide, rateDriver
 //    • the ride's MONEY: while a ride runs (and after it ended, until it is paid) the rider's app pays
 //      the driver in ecash ticks (features/payments/rideTicks.js) and reports `money` to the screens
 //  Banners: offers arriving, driver arrived, trip done, driver finished the ride, waived fares.
@@ -27,7 +27,9 @@ import { publicPlace, seal, exactTrip } from "../../lib/privacy.js";
 import { PICKUP_CHANGE_NOTE } from "../../lib/pickup.js";
 import { stopRequestEvent, STOP_NOTE_FLAT } from "../../lib/stops.js";
 import { activeRideFor, isOpenRide, upcomingRidesFor } from "../../lib/trips.js";
-import { rideDriver, rideEnding, rideKey, rideStatus, rideVersions, rideTimes } from "../../lib/rides.js";
+import { rideDriver, rideEnding, rideKey, rideStatus, rideVersions, rideTimes, rideExpiryMs, isRideExpired } from "../../lib/rides.js";
+import { hideList } from "../../lib/blocks.js";
+import { declineEvent } from "../../lib/trips.js";
 import { rideTerms, rideMint } from "../../lib/terms.js";
 import { ledgerSummary } from "../../lib/ridemoney.js";
 import { payDue } from "../../features/payments/rideTicks.js";
@@ -44,7 +46,7 @@ const EMPTY_PLAN = { step: "idle", from: "idle", pickup: null, dropoff: null, wh
 const parse = (e) => { try { return JSON.parse(e.content); } catch { return null; } };
 
 export function RiderProvider({ children }) {
-  const { user, rideRequests, publish, refreshData, pullRecent, pushNotice, liveTick, setView, isBlockedPk, ecash, priceFor, btcPrice } = useApp();
+  const { user, rideRequests, publish, refreshData, pullRecent, pushNotice, liveTick, setView, isBlockedPk, blocked, onLogout, ecash, priceFor, btcPrice } = useApp();
   const me = user.publicKey;
   const { pos: myPosition, error: geoError, status: gps } = useGeolocation(true);
 
@@ -67,7 +69,7 @@ export function RiderProvider({ children }) {
 
   // ── Online drivers nearby (public, coarsened presence) ──
   const [allDrivers, setAllDrivers] = useState([]);
-  useEffect(() => subscribePresence(setAllDrivers, { excludePubkey: me }), [me]);
+  useEffect(() => subscribePresence(setAllDrivers, { excludePubkey: me, viewerPubkey: me }), [me]);
   const drivers = (myPosition
     ? allDrivers.filter((d) => haversineDistance(myPosition.lat, myPosition.lng, d.lat, d.lng) <= 25)
     : allDrivers).filter((d) => !isBlockedPk(d.pubkey));
@@ -223,6 +225,7 @@ export function RiderProvider({ children }) {
           time: when,
           notes,
           status: "requested",
+          hide: hideList(me, blocked), // drivers I blocked never see this request (lib/blocks.js)
           fareMode: fareMode === "flat" ? "flat" : "standard", // "standard": each driver's own rates · "flat": the rider's price
           fareSats, // flat: the rider's offer (drivers accept or counter) · standard: the estimate
           suggestedSats, // what the app suggested (so a driver can see how far off the offer is)
@@ -240,7 +243,7 @@ export function RiderProvider({ children }) {
         setView("activity");
       }
     },
-    [publish, refreshData, resetPlan, user.sk, me, pushNotice, setView]
+    [publish, refreshData, resetPlan, user.sk, me, pushNotice, setView, blocked]
   );
 
   // Change the offer on a request no driver has been chosen for. The request is
@@ -363,20 +366,81 @@ export function RiderProvider({ children }) {
       const driver = rideDriver(latest);
       const times = rideTimes(latest);
       const when = at ?? Date.now();
-      publish(
+      const sent = [publish(
         EVENT_KINDS.RIDE_FINISH,
         {
           requestId: latest.id, reason, role: "rider", at: when,
           ...(times.startedAt ? { miles: Math.round((miles ?? 0) * 100) / 100, minutes: Math.round((Math.max(0, when - times.startedAt) / 60000) * 100) / 100 } : {}),
         },
         [["e", latest.id], ...(driver ? [["p", driver]] : []), ["d", "finish-" + latest.id], ["t", "ride-finish"]]
-      );
+      )];
       // An open request is also re-published as closed so other clients drop it.
-      if (!driver) publish(EVENT_KINDS.RIDE_REQUEST, { ...parse(latest), status: "closed" }, latest.tags);
+      if (!driver) sent.push(publish(EVENT_KINDS.RIDE_REQUEST, { ...parse(latest), status: "closed" }, latest.tags));
+      refreshData();
+      return Promise.all(sent);
+    },
+    [publish, refreshData]
+  );
+
+  // "Not this driver": turn down ONE driver's offer. The request stays open, so other drivers can still accept it,
+  // and that driver's app is told (it stops waiting and does not show this request again).
+  const declineOffer = useCallback(
+    (request, offer) => {
+      const ev = declineEvent(request, offer);
+      publish(ev.kind, ev.content, ev.tags);
       refreshData();
     },
     [publish, refreshData]
   );
+
+  // Logging out closes the requests still waiting for a driver (reservations too): the app will not be here to
+  // choose a driver or pay, so nobody should be left waiting for it. A ride that is already under way is not touched.
+  const reqsRef = useRef(rideRequests);
+  reqsRef.current = rideRequests;
+  useEffect(
+    () =>
+      onLogout(() => {
+        const seen = new Set();
+        const waiting = reqsRef.current.filter((r) => r.pubkey === me && rideStatus(r) === "requested" && isOpenRide(r) && !seen.has(rideKey(r)) && seen.add(rideKey(r)));
+        return Promise.all(waiting.map((r) => finishRide(r)));
+      }),
+    [onLogout, me, finishRide]
+  );
+
+  // Blocking a driver while a request is open: publish the request again with the new hide list, so that driver's app stops showing it.
+  const hideNow = hideList(me, blocked).join(",");
+  useEffect(() => {
+    const want = hideList(me, blocked);
+    const seen = new Set();
+    reqsRef.current
+      .filter((r) => r.pubkey === me && rideStatus(r) === "requested" && isOpenRide(r) && !seen.has(rideKey(r)) && seen.add(rideKey(r)))
+      .forEach((r) => {
+        const latest = rideVersions(r)[0] || r;
+        const c = parse(latest);
+        if (c && (c.hide || []).join(",") !== want.join(",")) publish(EVENT_KINDS.RIDE_REQUEST, { ...c, hide: want }, latest.tags);
+      });
+  }, [hideNow]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // A request nobody took before it expired is gone for everyone (rides.js rideExpiryMs). Say so once.
+  useEffect(() => {
+    const check = () => {
+      const noted = getSetting("expiredNoted", []);
+      const gone = reqsRef.current.filter((r) => {
+        if (r.pubkey !== me || rideStatus(r) !== "requested" || noted.includes(rideKey(r))) return false;
+        const c = parse(r);
+        return c && isRideExpired(c, r.created_at) && Date.now() - rideExpiryMs(c, r.created_at) < 24 * HOUR;
+      });
+      if (!gone.length) return;
+      setSetting("expiredNoted", [...noted, ...gone.map(rideKey)].slice(-100));
+      gone.forEach((r) => {
+        const c = parse(r);
+        pushNotice(`Your ride request${c.time && c.time !== "ASAP" ? ` for ${new Date(c.time).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}` : ""} ran out of time: no driver was chosen. It is closed.`);
+      });
+    };
+    check();
+    const id = setInterval(check, 60000);
+    return () => clearInterval(id);
+  }, [me, pushNotice, liveTick]);
 
   const rateDriver = useCallback(
     (request, driverPubkey, rating, review) => {
@@ -411,7 +475,7 @@ export function RiderProvider({ children }) {
     share, startShare, stopShare, shareUpdate, shareUrl,
     activeRide, focused: !!focused, focusRide: (r) => setFocusId(r ? r.id : null), upcoming, receipt, dismissReceipt,
     genderPref, setGenderPref,
-    requestRide, raiseOffer, proposePickup, confirmDriver, recordPayment, confirmRide, proposeStop, finishRide, rateDriver, recentPlaces,
+    requestRide, raiseOffer, proposePickup, confirmDriver, recordPayment, confirmRide, proposeStop, finishRide, declineOffer, rateDriver, recentPlaces,
     money, payNow, reportMiles, payTerms, payMint,
     nearestDriverEta: (to) => {
       if (!to || !drivers.length) return null;

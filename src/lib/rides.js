@@ -32,13 +32,15 @@ function cached(key, fn) {
   return memo.get(key);
 }
 
-// When an OPEN ride request expires (ms epoch):
+// When an OPEN ride request (no driver chosen) expires (ms epoch). Everyone works this out from the signed
+// request, so a request left behind by a closed app disappears for the rider AND the drivers by itself:
 //  • ASAP   → 1 hour after it was created.
-//  • Timed  → 1 hour after the scheduled pick-up time.
+//  • Timed  → RESERVATION_TTL_MS (2 hours) after the scheduled pick-up time.
+export const RESERVATION_TTL_MS = 2 * HOUR;
 export function rideExpiryMs(content, createdAtSec) {
   if (content?.time && content.time !== "ASAP") {
     const t = Date.parse(content.time);
-    if (!isNaN(t)) return t + HOUR;
+    if (!isNaN(t)) return t + RESERVATION_TTL_MS;
   }
   return createdAtSec * 1000 + HOUR;
 }

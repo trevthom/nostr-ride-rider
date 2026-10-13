@@ -246,7 +246,7 @@ export function LogoutButton() {
       <ConfirmDialog
         open={ask}
         title="Log out of the app?"
-        message={`This removes your saved key from this device. You need your nsec (or password) to get back into ${APP_NAME}.${holds > 0 ? ` Your ecash (${holds.toLocaleString()} sats) stays on this device, locked with your key. Without your nsec you cannot open it.` : ""}`}
+        message={`This removes your saved key from this device. You need your nsec (or password) to get back into ${APP_NAME}.${holds > 0 ? ` Your ecash (${holds.toLocaleString()} sats) stays on this device, locked with your key. Without your nsec you cannot open it.` : ""}${!IS_DRIVER_APP ? " Any ride request still waiting for a driver, including a reservation, is closed." : ""}`}
         confirmLabel="Log out"
         cancelLabel="Stay logged in"
         danger

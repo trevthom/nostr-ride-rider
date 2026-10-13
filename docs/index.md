@@ -85,6 +85,14 @@ reverse. The Vite *mode* picks the app (`vite --mode rider|driver`).
 The back arrow on the quote goes to the search page. **Cancel** on the search page, **Cancel and go home** under the *Request ride* button, the **X** on the quote and pin pages, and a tap on the *Ride* tab all cancel the planning and show the home screen.
 Nothing is published until the rider taps *Request ride*. The tab bar is visible on every screen, including the quote and *Finding your driver*.
 
+**Choosing a driver.** Each reply shows the driver's photo, name, rating, car, plate, **gender (when the driver gave one)**, price, rates and mint. The rider taps **Choose**, or
+**No thanks** to turn that driver down. Turning a driver down does **not** end the request: it stays open, other drivers can still accept it, and the declined driver is told (they stop waiting,
+the request leaves their list, and they cannot offer again on it). The confirm screen has *Not this driver* too. The rider can also close the whole request.
+
+**Requests that nobody takes.** A request with no driver chosen closes by itself, and every app reads that from the signed request, so it disappears for the rider and for the drivers even if the
+rider's app is closed: an ASAP request after **1 hour**; a reservation **2 hours after its pick-up time**. The rider's app says so once when it next runs. **Logging out closes every
+request still waiting for a driver** (reservations too), because the app will not be there to choose a driver or pay. A ride that is already under way is never touched.
+
 A reservation more than 30 minutes ahead waits under *Activity → Upcoming*. Everything on screen is **derived from the
 signed events**, so a reload or a second device shows the same screen. Details of the money and the rules are in the next section.
 
@@ -338,6 +346,7 @@ More detail for contributors is in `CLAUDE.md` (the file map and every invariant
 | 30098 | Sign of life | rider or assigned driver | "Still riding" / "Still driving": a signed sign that the other person is there |
 | 30099 | Stop change | rider | Add a stop or change the destination; the new place sealed to the driver and the rider |
 | 30100 | Stop change answer | assigned driver | Accept the extra stop (the driver's other choice is to finish the ride) |
+| 30101 | Offer declined | rider | "No thanks" to ONE driver's offer; the request stays open for everyone else. Only the ride's rider counts |
 | 30091 | Trip share | throwaway key | Live trip state for a "Share my trip" link, encrypted with a key in the link |
 | 30090 | Presence | driver | Online, coarse location, the driver's rates, short expiry |
 | 21100 | Ride location | driver | Exact location and the driver's odometer, encrypted to the rider, ephemeral |
@@ -389,9 +398,12 @@ Rider app, on a trip, behind the **Safety** button:
 - **Trusted contacts** (Account → Trusted contacts) are kept on the device only. The sheet offers a text message with the link for each one.
 
 ## Blocking
-Either side can block. Blocking is **local to the app on this device**; the other person is not told.
-- A blocked **rider's** requests never appear in the driver app.
-- A blocked **driver's** offers and car never appear in the rider app.
+Either side can block. The block list is **local to the app on this device**, and the other person is not told. Blocking works **both ways on the map**:
+- A blocked **rider's** requests never appear in the driver app, and the blocking **driver's car never appears for that rider**.
+- A blocked **driver's** offers and car never appear in the rider app, and the blocking **rider's requests never appear for that driver**.
+- How the other direction works without a server: the blocker's own public events carry short **hide tokens**, one per blocked person (a hash of the blocker's key and the other person's key, so the list names
+  nobody). A rider's request carries the tokens of the drivers the rider blocked; a driver's presence carries the tokens of the riders the driver blocked. Each app checks its own token and hides what hides it.
+  If a rider blocks a driver while a request is open, the request is published again with the new list. This is a courtesy between honest apps, not a lock: someone who changes their app can still read public events.
 - Block from a person's profile (tap their name or photo), or from the receipt or trip summary. Manage the list in Account → Blocked people.
 - Not synced across devices or between the two apps yet.
 
@@ -406,6 +418,13 @@ There is no escrow, so the apps keep a signed trail:
 - **When two signed accounts disagree, the one that costs the rider less wins. No third party decides.** Today the app applies this to two finish events that arrive within 10 seconds of each other; the claimed time of a finish must be close to the time it was signed.
 - **Copy trip record** (driver summary) copies all of this as one JSON bundle for whoever settles a dispute.
 - Not built yet: the arbiter and the ruling flow. See the roadmap.
+
+## Driver: new-request alerts and the nearby list
+- **New request alerts** (Account) decide whether a request **pops up by itself** (the card with the countdown, a notice, a system notification). With alerts **off** nothing pops up.
+- Either way, while online, the **Drive tab shows a count bubble** for the requests inside the driver's request radius, and the Drive screen shows **See nearby requests (N)**.
+- That opens a **list**, closest first. Each row shows: pickup area, dropoff area, the fare (the rider's flat price, or the driver's own estimate for a standard fare), the drive time to the rider,
+  the trip distance, the trip's drive time, the pick-up time for a reservation, and the rider's note. Tapping a row opens the request (Accept / Decline / counter a flat price); closing it returns to the list.
+- A request whose rider blocked this driver, or turned this driver's offer down, never appears.
 
 ## Reliability
 - **Outbox.** An event no relay accepts is kept (in the browser) and re-sent: after 3, 8, 20, 45, 90 and 180 seconds, when the network returns, and after a reload. Live-location events are never queued (they would be stale).
@@ -438,7 +457,7 @@ A web page cannot read the location with the screen off. `native/` wraps the **d
 `npm test` runs `test/*.test.mjs` with Node's built-in runner: trust rules, ride stages, finishing a ride (who may finish, earliest finish wins, the silence cut-off), fares, trips,
 earnings, privacy, history, Lightning invoices, geocoding, publishing and the outbox, event ordering, contact links, GPS, payment evidence, blocking, trip sharing, native location, tips,
 pickup changes, the odometer (and the GPS-gap rule) and the 5% distance rule, stage times, relay subscription calls, flat offers and counters, driver rates and currencies, exact amounts, gender
-ordering, driver requirements, **the tick schedule (standard and flat), missed payments, the final tick, the start code, the 50 m arrival rule, silence and sign-of-life
+ordering, driver requirements, expiry of unmatched requests, blocking both ways, declined offers (`requests`), **the tick schedule (standard and flat), missed payments, the final tick, the start code, the 50 m arrival rule, silence and sign-of-life
 rules, waivers, extra stops and frozen rates, the ecash wallet (funding, paying, redeeming, crash recovery, cash out, encrypted saving), a whole ride's money between a rider and a
 driver, and the real `@cashu/cashu-ts` client against a local test mint that does the real blind-signature maths**.
 
@@ -512,6 +531,7 @@ To switch, copy `env.example` to `.env`, set `VITE_TILE_URL` (and `VITE_PHOTON_U
   and a cancel rate on profiles.
 
 ## Changelog
+- **Reservations expire, blocking both ways, nearby list, gender, "No thanks"** — a reservation nobody takes closes 2 hours after its pick-up time (was 1), and logging out closes every request still waiting for a driver. Blocking hides people from each other on the map (hide tokens in requests and presence). *New request alerts* off now really stops the pop-up; the Drive tab keeps its count bubble and a new *See nearby requests* list shows pickup, dropoff, fare, time to the rider, trip distance, trip time and notes. The rider sees the driver's gender (if given) before choosing, and *No thanks* turns one driver down without closing the request (new kind 30101). Presence and trip-share relay pools wait 15 s for a connection.
 - **Pickup is never automatic; cancel buttons; stale relay warning fixed; version line** — the pickup is no longer filled in from GPS. The search page asks for an address or a business name, always shows *Set pickup on the map*, and keeps *Your location* as a deliberate tap. *Cancel* (search), *Cancel and go home* (quote), and an X (quote, pin) return to the home screen; the pin page has the X too. The tab bar was checked on every rider screen with real styling. The "No relay accepted your request" warning no longer sticks after a retry succeeds: it shows only while the request still waits in the outbox after 15 s. A relay has 15 s to answer a publish, and the outbox banner needs a 20 s wait. Account shows the app version (build time and commit), so a person can tell which build a phone runs.
 - **Rider navigation, pickup pin, approximate driver location, relay banner, no license photo** — the rider can pin the pickup on the map (drag the map under a fixed pin; the address is looked up). The back arrow on *Plan your ride* goes one screen back (it used to loop between the quote and the search page); an X on the search, pin and quote pages, and the *Ride* tab, cancel the planning and show the home screen. The bottom tab bar is always visible in both apps. A driver can go online and be shown on the map with an approximate location (accurate to 25 km or better); marking *I've arrived* still needs a good fix. The false "can't reach any relay" message is fixed: the relay test no longer uses (and breaks) the app's own connection, the pool waits 15 s for a connection, the banner needs a sustained outage that a separate test confirms, and sockets are renewed after a sleep or a network change. The driver's license photo is gone: no upload, no requirement, no event kind 30092.
 - **Pay as you ride with ecash; Finish ride; start codes; local currency** — the rider pays the driver in ecash ticks while the ride runs (the base rate, each mile, each minute, a final

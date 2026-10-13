@@ -70,8 +70,32 @@ export function activeDriveFor(requests, me) {
   );
 }
 
-// Every well-formed offer on a ride, newest per driver (no time limit).
+// The drivers whose offer the rider turned down on this ride ("not this driver"). The request stays open for
+// everyone else. Only the ride's own rider can decline: a decline from anyone else counts for nothing.
+export function declinedDrivers(request) {
+  const ids = rideVersions(request).map((e) => e.id);
+  const out = new Set();
+  relay.query({ kinds: [EVENT_KINDS.RIDE_OFFER_DECLINE], "#e": ids }).forEach((e) => {
+    if (e.pubkey !== request.pubkey) return;
+    const p = (e.tags.find((t) => t[0] === "p") || [])[1];
+    if (p) out.add(p);
+  });
+  return out;
+}
+
+// The event that declines one driver's offer: { kind, content, tags } for publish().
+export function declineEvent(request, offer) {
+  const latest = rideVersions(request)[0] || request;
+  return {
+    kind: EVENT_KINDS.RIDE_OFFER_DECLINE,
+    content: { requestId: latest.id, offerId: offer.id },
+    tags: [["e", latest.id], ["e", offer.id], ["p", offer.pubkey], ["d", "decline-" + latest.id.slice(0, 16) + "-" + offer.pubkey.slice(0, 16)], ["t", "offer-decline"]],
+  };
+}
+
+// Every well-formed offer on a ride, newest per driver (no time limit), except from drivers the rider declined.
 function validOffers(request) {
+  const declined = declinedDrivers(request);
   const ids = rideVersions(request).map((e) => e.id);
   const newest = new Map(); // a driver who re-offers replaces their earlier offer
   latestVersions(relay.query({ kinds: [EVENT_KINDS.RIDE_OFFER], "#e": ids })).forEach((o) => {
@@ -82,6 +106,7 @@ function validOffers(request) {
     const c = parse(o);
     return (
       o.pubkey !== request.pubkey &&
+      !declined.has(o.pubkey) &&
       c && Number.isFinite(c.priceSats) && c.priceSats > 0
     );
   });
@@ -133,6 +158,7 @@ export function pendingOfferFor(me) {
     const seen = relay.query({ kinds: [EVENT_KINDS.RIDE_REQUEST], ids: [reqId] })[0];
     if (!seen) continue;
     const request = rideVersions(seen)[0];
+    if (declinedDrivers(request).has(me)) continue; // the rider turned this offer down: nothing left to wait for
     if (rideStatus(request) === "requested" && !isRideExpired(parse(request), request.created_at)) return { offer, request };
   }
   return null;

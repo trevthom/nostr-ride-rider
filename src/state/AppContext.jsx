@@ -12,7 +12,7 @@
 //      const { user, setView, publish } = useApp();
 // ════════════════════════════════════════════════════════════
 
-import { createContext, useContext, useState, useEffect, useCallback } from "react";
+import { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
 import { relay } from "../nostr/relay.js";
 import { EVENT_KINDS, APP_TAG } from "../nostr/eventKinds.js";
 import { buildSignedEvent } from "../nostr/events.js";
@@ -259,7 +259,17 @@ export function AppProvider({ initialView, children }) {
   // Log out: clear the session and return to the login screen. The wallet
   // must go too, or the next person on this device could spend from it,
   // and so does the saved (encrypted) key.
-  const logout = useCallback(() => {
+  // A role can ask for a moment before the session ends (the rider app closes the requests still waiting for a
+  // driver). Each hook may return a promise; logging out never waits longer than 3 seconds for them.
+  const logoutHooks = useRef(new Set());
+  const onLogout = useCallback((fn) => { logoutHooks.current.add(fn); return () => logoutHooks.current.delete(fn); }, []);
+  const logout = useCallback(async () => {
+    try {
+      await Promise.race([
+        Promise.allSettled([...logoutHooks.current].map((fn) => Promise.resolve().then(fn))),
+        new Promise((r) => setTimeout(r, 3000)),
+      ]);
+    } catch { /* log out anyway */ }
     forgetKey();
     setUser(null);
     setProfileModalPubkey(null);
@@ -305,6 +315,7 @@ export function AppProvider({ initialView, children }) {
     user,
     setUser,
     logout,
+    onLogout,
     openProfile,
     closeProfile,
     profileModalPubkey,

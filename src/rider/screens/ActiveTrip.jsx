@@ -41,7 +41,7 @@ const STUCK_MS = 15000; // how long the request must have waited before we say s
 
 export default function ActiveTrip({ request }) {
   const { user, liveTick, isBlockedPk } = useApp();
-  const { finishRide, focused, focusRide, genderPref } = useRider();
+  const { finishRide, focused, focusRide, genderPref, declineOffer } = useRider();
   const [picked, setPicked] = useState(null); // offer id being confirmed
   const [asking, setAsking] = useState(false);
   void liveTick;
@@ -70,12 +70,12 @@ export default function ActiveTrip({ request }) {
   );
 
   if (chosen) {
-    return <ConfirmDriver request={request} trip={trip} offer={chosen} onBack={() => setPicked(null)} />;
+    return <ConfirmDriver request={request} trip={trip} offer={chosen} onBack={() => setPicked(null)} onDecline={() => { setPicked(null); declineOffer(request, chosen); }} />;
   }
   if (offers.length) {
     return (
       <>
-        <ChooseDriver request={request} trip={trip} offers={offers} onPick={(o) => setPicked(o.id)} onCancel={() => setAsking(true)} top={back} />
+        <ChooseDriver request={request} trip={trip} offers={offers} onPick={(o) => setPicked(o.id)} onDecline={(o) => declineOffer(request, o)} onCancel={() => setAsking(true)} top={back} />
         {closeDialog}
       </>
     );
@@ -177,7 +177,7 @@ function Searching({ request, trip, onCancel, top }) {
   );
 }
 
-function ChooseDriver({ request, trip, offers, onPick, onCancel, top }) {
+function ChooseDriver({ request, trip, offers, onPick, onDecline, onCancel, top }) {
   const { drivers, genderPref } = useRider();
   const { btcPrice } = useApp();
   const content = parse(request) || {};
@@ -194,7 +194,7 @@ function ChooseDriver({ request, trip, offers, onPick, onCancel, top }) {
           {flat
             ? <>Your flat price: <span className="font-semibold">{moneyText(content.fareSats, btcPrice)}</span>. Some drivers may ask for more. </>
             : <>You pay each driver's own rates as you ride. </>}
-          Pick one to continue. Nothing is paid until the ride starts.
+          Pick one to continue, or tap "No thanks" to turn a driver down: your request stays open for other drivers. Nothing is paid until the ride starts.
         </p>
         <GenderPref className="mb-2" />
         <ul className="divide-y divide-neutral-100">
@@ -228,6 +228,7 @@ function ChooseDriver({ request, trip, offers, onPick, onCancel, top }) {
                       </p>
                     )}
                   </div>
+                  <Button size="sm" variant="secondary" full={false} onClick={() => onDecline(o)} aria-label="Turn down this driver">No thanks</Button>
                   <Button size="sm" full={false} onClick={() => onPick(o)}>Choose</Button>
                 </div>
               </li>
@@ -249,7 +250,7 @@ function startFunds(c, btcPrice) {
   return per ? per.base + 2 * per.minute + per.mile : null;
 }
 
-function ConfirmDriver({ request, trip, offer, onBack }) {
+function ConfirmDriver({ request, trip, offer, onBack, onDecline }) {
   const { liveTick, ecash, prices, priceFor, btcPrice } = useApp();
   const { confirmDriver, drivers } = useRider();
   const c = parse(offer);
@@ -303,6 +304,8 @@ function ConfirmDriver({ request, trip, offer, onBack }) {
             <Button onClick={() => setAdding(true)} disabled={!ecash}><Icon name="zap" size={18} /> Add {moneyText(short, btcPrice)} to your wallet</Button>
           )}
           <Button variant="go" onClick={go} loading={done} disabled={!ready}>Confirm driver</Button>
+          {!done && <Button variant="secondary" onClick={onDecline}>Not this driver</Button>}
+          {!done && <p className="text-neutral-500 text-xs text-center">Your request stays open. Other drivers can still accept it.</p>}
         </div>
         {adding && mint && <AddFunds mint={mint} needSats={short} onClose={() => setAdding(false)} />}
       </Sheet>

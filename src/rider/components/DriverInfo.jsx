@@ -11,6 +11,7 @@ import { getProfile } from "../../nostr/profiles.js";
 import { shortNpub } from "../../nostr/keys.js";
 import { reputation } from "../../lib/rides.js";
 import { offerPlate } from "../../lib/privacy.js";
+import { offerGender } from "../../lib/trips.js";
 import Avatar from "../../ui/Avatar.jsx";
 import { Rating } from "../../ui/Rating.jsx";
 
@@ -49,12 +50,15 @@ export default function DriverInfo({ pubkey, offerEvent, compact = false }) {
   const plate = offerPlate(offerEvent, user);
   const name = profile?.name || shortNpub(pubkey);
   const car = carText(profile?.vehicle);
+  // Self-declared and optional: shown only when the driver gave it (in the offer, else in their profile).
+  const gender = offerEvent ? offerGender(offerEvent) : profile?.gender === "male" || profile?.gender === "female" ? profile.gender : "";
   return (
     <div className="flex items-center gap-3">
       <Avatar src={profile?.picture} name={name} size={compact ? 44 : 56} onClick={() => openProfile(pubkey)} />
       <div className="flex-1 min-w-0">
         <p className="font-semibold truncate">{name}</p>
         <Rating avg={rating.avg} count={rating.count} />
+        {gender && <p className="text-sm text-neutral-600">{gender === "female" ? "Female driver" : "Male driver"}</p>}
         {car && <p className="text-sm text-neutral-600 truncate">{car}</p>}
       </div>
       {plate && <Plate plate={plate} />}

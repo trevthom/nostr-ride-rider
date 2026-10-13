@@ -23,8 +23,10 @@ import { SimplePool } from "nostr-tools/pool";
 import { finalizeEvent, nip44 } from "nostr-tools";
 import { EVENT_KINDS, APP_TAG } from "./eventKinds.js";
 import { getRelays, onRelaysChange } from "../config/relays.js";
+import { hidesMe } from "../lib/blocks.js";
 
-const pool = new SimplePool({ enablePing: true, enableReconnect: true });
+// maxWaitForConnection: the library's 3 s default DROPS a slow relay for good (see nostr/relay.js).
+const pool = new SimplePool({ enablePing: true, enableReconnect: true, maxWaitForConnection: 15000 });
 
 const PRESENCE_TTL_MS = 45000; // a driver is "gone" if silent this long
 const nowSec = () => Math.floor(Date.now() / 1000);
@@ -37,12 +39,13 @@ const coarse = (n) => Math.round(n * 1000) / 1000;
 // Publish one presence beat. Call this on an interval while online.
 // Addressable (d-tag "presence") so each driver has exactly one current
 // presence on the relay, with a short expiration.
-export async function publishPresence(user, { lat, lng, vehicle, rates }) {
+export async function publishPresence(user, { lat, lng, vehicle, rates, hide }) {
   const content = JSON.stringify({
     name: user.name,
     npub: user.npub,
     vehicle: vehicle || "",
     ...(rates && { rates }), // the driver's own typical-fare rates (public, like the rest of presence)
+    ...(hide?.length && { hide }), // tokens of the riders this driver blocked: their apps do not show this car (lib/blocks.js)
     lat: coarse(lat),
     lng: coarse(lng),
     ts: Date.now(),
@@ -67,7 +70,7 @@ export async function publishPresence(user, { lat, lng, vehicle, rates }) {
 // Pulls the current set first (querySync) THEN subscribes live, so a
 // newly-opened device sees drivers who are already online. Stale drivers
 // drop after TTL. Returns an unsubscribe function.
-export function subscribePresence(onDrivers, { excludePubkey } = {}) {
+export function subscribePresence(onDrivers, { excludePubkey, viewerPubkey } = {}) {
   const drivers = new Map();
   let sub = null;
   let closed = false;
@@ -83,6 +86,7 @@ export function subscribePresence(onDrivers, { excludePubkey } = {}) {
     try {
       const d = JSON.parse(ev.content);
       if (typeof d.lat !== "number" || typeof d.lng !== "number") return;
+      if (hidesMe(d.hide, ev.pubkey, viewerPubkey)) return; // this driver blocked me: they do not show up for me
       const prev = drivers.get(ev.pubkey);
       const ts = d.ts || Date.now();
       if (prev && prev.ts > ts) return; // keep the freshest
