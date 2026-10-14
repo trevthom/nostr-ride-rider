@@ -28,6 +28,9 @@ import Button from "../../ui/Button.jsx";
 import { MapPage, Sheet, FloatButton } from "../../ui/Layout.jsx";
 import { ConfirmDialog } from "../../ui/Parts.jsx";
 import AddFunds from "../../features/payments/AddFunds.jsx";
+import CurrencyChoice from "../../features/payments/CurrencyChoice.jsx";
+import { strikeOffer, strikeCanPay } from "../../lib/strikerail.js";
+import { balanceText } from "../../lib/strike.js";
 import FareTerms, { offerRates, RatesLine } from "../components/FareTerms.jsx";
 import DriverInfo from "../components/DriverInfo.jsx";
 import GenderPref from "../components/GenderPref.jsx";
@@ -212,6 +215,7 @@ function ChooseDriver({ request, trip, offers, onPick, onDecline, onCancel, top 
                       {fastest != null && c.etaMinutes === fastest && <span className="ml-2 text-[11px] bg-black text-white rounded-full px-2 py-0.5 align-middle">Fastest</span>}
                       {cheapest != null && c.priceSats === cheapest && <span className="ml-1.5 text-[11px] bg-[#e6f4ec] text-[#05683a] rounded-full px-2 py-0.5 align-middle">Lowest price</span>}
                       {preferred && <span className="ml-1.5 text-[11px] bg-neutral-100 text-neutral-700 rounded-full px-2 py-0.5 align-middle">Your preference</span>}
+                      {strikeOffer(c) && <span className="ml-1.5 text-[11px] bg-neutral-100 text-neutral-700 rounded-full px-2 py-0.5 align-middle">Takes Strike</span>}
                     </p>
                     <p className="text-sm">
                       {!(c.mode === "flat") && <span className="text-neutral-500 text-xs mr-1">about</span>}
@@ -251,7 +255,7 @@ function startFunds(c, btcPrice) {
 }
 
 function ConfirmDriver({ request, trip, offer, onBack, onDecline }) {
-  const { liveTick, ecash, prices, priceFor, btcPrice } = useApp();
+  const { liveTick, ecash, strike, prices, priceFor, usdPrice, btcPrice } = useApp();
   const { confirmDriver, drivers } = useRider();
   const c = parse(offer);
   const [done, setDone] = useState(false);
@@ -264,14 +268,21 @@ function ConfirmDriver({ request, trip, offer, onBack, onDecline }) {
   const need = c.mode === "flat" ? startFunds(c, null) : startFunds(c, price);
   const have = ecash && mint ? ecash.balance(mint) : 0;
   const short = need != null ? Math.max(0, need - have) : 0;
-  const ready = !!rates && !!mint && need != null && short === 0;
+  // The driver may be paid straight in Strike (their offer says so). The rider with Strike linked pays from there by default, or picks ecash.
+  const driverStrike = strikeOffer(c);
+  const canStrike = !!driverStrike && strike.connected && strike.direct;
+  const [rail, setRail] = useState(canStrike || (!mint && !!driverStrike) ? "strike" : "ecash");
+  const viaStrike = rail === "strike" && canStrike;
+  useEffect(() => { if (viaStrike) strike.refresh().catch(() => {}); }, [viaStrike]); // eslint-disable-line react-hooks/exhaustive-deps
+  const strikeOk = viaStrike && need != null ? strikeCanPay(strike.balances, strike.source, need, usdPrice) : null;
+  const ready = viaStrike ? !!rates && need != null && strikeOk !== false : !!rates && !!mint && need != null && short === 0;
   void prices;
 
   const go = () => {
     if (busy.current || !ready) return;
     busy.current = true;
     setDone(true);
-    confirmDriver(request, offer);
+    confirmDriver(request, offer, viaStrike ? "strike" : "ecash");
   };
 
   return (
@@ -286,24 +297,41 @@ function ConfirmDriver({ request, trip, offer, onBack, onDecline }) {
             <div className="text-xs text-neutral-600"><RatesLine rates={rates} /></div>
           )}
           {need != null && <div className="flex justify-between"><dt className="text-neutral-600">Needed to start</dt><dd><Money sats={need} /></dd></div>}
-          {mint && <div className="flex justify-between"><dt className="text-neutral-600">Your ecash here</dt><dd><Money sats={have} className={short ? "text-amber-700 font-semibold" : ""} /></dd></div>}
+          {!viaStrike && mint && <div className="flex justify-between"><dt className="text-neutral-600">Your ecash here</dt><dd><Money sats={have} className={short ? "text-amber-700 font-semibold" : ""} /></dd></div>}
+          {viaStrike && <div className="flex justify-between"><dt className="text-neutral-600">Paid from</dt><dd className="font-semibold">Your Strike account</dd></div>}
+          {viaStrike && strike.balances?.[strike.source] != null && (
+            <div className="flex justify-between"><dt className="text-neutral-600">Your {strike.source === "USD" ? "dollars" : "bitcoin"} in Strike</dt><dd className={strikeOk === false ? "text-amber-700 font-semibold" : ""}>{balanceText(strike.source, strike.balances[strike.source])}</dd></div>
+          )}
         </dl>
+        {viaStrike && (
+          <div className="mt-3">
+            <p className="text-xs text-neutral-500 mb-1">Pay from</p>
+            <CurrencyChoice value={strike.source} onChange={strike.setSource} label="Pay from" balances={strike.balances} />
+            <p className="text-xs text-neutral-500 mt-2">Strike pays your driver straight from your account, each mile and each minute. No ecash is needed.</p>
+          </div>
+        )}
         <p className="text-neutral-500 text-xs mt-2">
           {c.mode === "flat"
             ? "You pay the flat price tick by tick as you ride, and never more, even in traffic. Adding a stop or changing the destination turns it into the driver's normal fare, counted from the start."
             : "You pay as you ride: the base rate when the ride starts, then each mile and each minute. You can finish the ride at any time and pay only for what you used."}
           {" "}If you miss two payments in a row, the driver may finish the ride. There is no deposit.
         </p>
-        {!rates || !mint ? (
+        {!rates || (!mint && !viaStrike) ? (
           <p className="text-amber-700 text-sm mt-3" role="alert">This driver's reply is missing its rates or its ecash mint, so it cannot be used. Choose another driver.</p>
         ) : need == null ? (
           <p className="text-amber-700 text-sm mt-3" role="alert">The bitcoin price for {rates.currency} is not available yet. Try again in a moment.</p>
+        ) : strikeOk === false ? (
+          <p className="text-amber-700 text-sm mt-3" role="alert">Your Strike balance is too low to start this ride. Add money in Strike, pay from your other balance{mint ? ", or pay with ecash" : ""}.</p>
         ) : null}
+        {driverStrike && !strike.connected && <p className="text-neutral-500 text-xs mt-2">This driver can also be paid straight from Strike. Link your Strike account in Account to do that.</p>}
         <div className="mt-4 space-y-2">
-          {short > 0 && mint && (
+          {!viaStrike && short > 0 && mint && (
             <Button onClick={() => setAdding(true)} disabled={!ecash}><Icon name="zap" size={18} /> Add {moneyText(short, btcPrice)} to your wallet</Button>
           )}
           <Button variant="go" onClick={go} loading={done} disabled={!ready}>Confirm driver</Button>
+          {!done && canStrike && mint && (
+            <button type="button" onClick={() => setRail(viaStrike ? "ecash" : "strike")} className="w-full text-center text-sm font-semibold underline">{viaStrike ? "Pay with ecash instead" : "Pay from Strike instead"}</button>
+          )}
           {!done && <Button variant="secondary" onClick={onDecline}>Not this driver</Button>}
           {!done && <p className="text-neutral-500 text-xs text-center">Your request stays open. Other drivers can still accept it.</p>}
         </div>

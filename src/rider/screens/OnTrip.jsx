@@ -56,7 +56,7 @@ const miles = (a, b) => haversineDistance(a.lat, a.lng, b.lat, b.lng);
 
 export default function OnTrip({ request, trip }) {
   const { user, pushNotice, btcPrice } = useApp();
-  const { finishRide, myPosition, share, shareUpdate, confirmRide, money, reportMiles, payMint } = useRider();
+  const { finishRide, myPosition, share, shareUpdate, confirmRide, money, reportMiles, payMint, payRail } = useRider();
   const driverPubkey = rideDriver(request);
   const stage = rideStage(request);
   const offer = offerFrom(request, driverPubkey);
@@ -240,13 +240,13 @@ export default function OnTrip({ request, trip }) {
               <Money sats={money?.paid || 0} />
             </div>
             <p className="text-xs text-neutral-500 mt-2">
-              You pay as you ride: the base rate at the start, then each mile and each minute{money?.status === "paid" ? ". A payment just went out." : "."}
+              You pay as you ride{payRail === "strike" ? ", straight from your Strike account" : ""}: the base rate at the start, then each mile and each minute{money?.status === "paid" ? (payRail === "strike" ? ". A payment was just requested." : ". A payment just went out.") : "."}
             </p>
             {money?.status === "short" && (
               <div className="mt-2 rounded-xl bg-amber-50 text-amber-800 px-3 py-2" role="alert">
-                <p className="text-sm font-semibold">Your ecash wallet is short by {moneyText(Math.max(1, money.shortSats || money.due), btcPrice)}.</p>
-                <p className="text-xs mt-0.5">If two payments are missed, your driver may finish the ride. Add funds and everything missed is paid at once.</p>
-                <Button size="md" className="mt-2" onClick={() => setAdding(true)}><Icon name="zap" size={16} /> Add funds</Button>
+                <p className="text-sm font-semibold">Your {payRail === "strike" ? "Strike balance" : "ecash wallet"} is short by {moneyText(Math.max(1, money.shortSats || money.due), btcPrice)}.</p>
+                <p className="text-xs mt-0.5">If two payments are missed, your driver may finish the ride. {payRail === "strike" ? "Add money in Strike (or switch balance in Account) and everything missed is paid at once." : "Add funds and everything missed is paid at once."}</p>
+                {payMint && <Button size="md" className="mt-2" onClick={() => setAdding(true)}><Icon name="zap" size={16} /> Add funds</Button>}
               </div>
             )}
             {money?.status === "error" && <p className="mt-2 text-xs text-red-700" role="alert">A payment did not go through: {money.message}</p>}

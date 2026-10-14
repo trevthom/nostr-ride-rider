@@ -33,6 +33,8 @@ import { declineEvent } from "../../lib/trips.js";
 import { rideTerms, rideMint } from "../../lib/terms.js";
 import { ledgerSummary } from "../../lib/ridemoney.js";
 import { payDue } from "../../features/payments/rideTicks.js";
+import { payRideStrike } from "../../features/payments/strikeTicks.js";
+import { rideRail } from "../../lib/strikerail.js";
 import { redeemWaiversFor } from "../../features/payments/redeemWaivers.js";
 import { moneyText } from "../../ui/Money.jsx";
 import { getSetting, setSetting } from "../../config/relays.js";
@@ -46,7 +48,7 @@ const EMPTY_PLAN = { step: "idle", from: "idle", pickup: null, dropoff: null, wh
 const parse = (e) => { try { return JSON.parse(e.content); } catch { return null; } };
 
 export function RiderProvider({ children }) {
-  const { user, rideRequests, publish, refreshData, pullRecent, pushNotice, liveTick, setView, isBlockedPk, blocked, onLogout, ecash, priceFor, btcPrice } = useApp();
+  const { user, rideRequests, publish, refreshData, pullRecent, pushNotice, liveTick, setView, isBlockedPk, blocked, onLogout, ecash, strike, priceFor, usdPrice, btcPrice } = useApp();
   const me = user.publicKey;
   const { pos: myPosition, error: geoError, status: gps } = useGeolocation(true);
 
@@ -176,14 +178,18 @@ export function RiderProvider({ children }) {
   const reportMiles = useCallback((m) => { milesRef.current = m; }, []);
   const [money, setMoney] = useState(null);
   const payTerms = payRide ? rideTerms(payRide) : null;
-  const payMint = payRide ? rideMint(payRide) : null;
+  const payRail = payRide ? rideRail(payRide) : "ecash"; // how this ride is paid: "ecash" | "strike"
+  const payMint = payRide && payRail === "ecash" ? rideMint(payRide) : null; // the mint to add funds at (none when Strike pays)
   const payKey = payRide ? rideKey(payRide) : null;
   const run = useCallback(async (request) => {
     const terms = rideTerms(request);
     if (!terms || !rideTimes(request).startedAt) return null;
+    if (rideRail(request) === "strike") {
+      return payRideStrike({ request, user, strike, publish, terms, price: priceFor(terms.currency), usdPrice, nowMs: Date.now(), miles: milesRef.current });
+    }
     const res = await payDue({ request, user, ecash, publish, terms, mint: rideMint(request), price: priceFor(terms.currency), nowMs: Date.now(), miles: milesRef.current });
     return res;
-  }, [user, ecash, publish, priceFor]);
+  }, [user, ecash, strike, publish, priceFor, usdPrice]);
   useEffect(() => { setMoney(null); }, [payKey]);
   useEffect(() => {
     if (!payRide || !payTerms) return;
@@ -199,7 +205,7 @@ export function RiderProvider({ children }) {
     tick();
     const id = setInterval(tick, 3000);
     return () => { alive = false; clearInterval(id); };
-  }, [payKey, !!ecash, !!payTerms, run]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [payKey, !!ecash, !!strike.client, !!payTerms, run]); // eslint-disable-line react-hooks/exhaustive-deps
   // Pay now, outside the timer (after adding funds): resolves to the result.
   const payNow = useCallback(async (request) => run(request || payRide), [run, payRide]);
 
@@ -296,8 +302,10 @@ export function RiderProvider({ children }) {
 
   // The rider picked a driver: accept the offer (its rates and mint are now frozen for the ride) and hand the
   // driver the exact trip. There is no deposit: the rider pays tick by tick once the ride starts.
+  // `rail`: "ecash" (the default: ecash ticks at the driver's mint) or "strike" (paid straight from the rider's Strike account; only
+  // if the driver's offer carries it). It is frozen with the offer: it cannot change for a ride that has started.
   const confirmDriver = useCallback(
-    (request, offerEvent) => {
+    (request, offerEvent, rail = "ecash") => {
       const driver = offerEvent.pubkey;
       const trip = exactTrip(request, user);
       publish(
@@ -305,6 +313,7 @@ export function RiderProvider({ children }) {
         {
           offerId: offerEvent.id,
           requestId: request.id,
+          ...(rail === "strike" && { rail: "strike" }),
           ...(trip && { sealed: seal(user.sk, driver, trip) }),
         },
         [["e", offerEvent.id], ["e", request.id], ["p", driver], ["d", "accept-" + request.id], ["t", "ride-accept"]]
@@ -476,7 +485,7 @@ export function RiderProvider({ children }) {
     activeRide, focused: !!focused, focusRide: (r) => setFocusId(r ? r.id : null), upcoming, receipt, dismissReceipt,
     genderPref, setGenderPref,
     requestRide, raiseOffer, proposePickup, confirmDriver, recordPayment, confirmRide, proposeStop, finishRide, declineOffer, rateDriver, recentPlaces,
-    money, payNow, reportMiles, payTerms, payMint,
+    money, payNow, reportMiles, payTerms, payMint, payRail,
     nearestDriverEta: (to) => {
       if (!to || !drivers.length) return null;
       const miles = Math.min(...drivers.map((d) => haversineDistance(to.lat, to.lng, d.lat, d.lng)));

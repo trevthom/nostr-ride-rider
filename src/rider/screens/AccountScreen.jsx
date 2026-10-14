@@ -1,12 +1,13 @@
 // ════════════════════════════════════════════════════════════
 //  ACCOUNT (rider) — Profile, currency, the ecash wallet (rides are paid from it),
-//  the Lightning wallet (to add funds in one tap), safety, contact methods, relays, keys, log out.
+//  Strike and the Lightning wallet (to add funds in one tap), safety, contact methods, relays, keys, log out.
 // ════════════════════════════════════════════════════════════
 
 import { useApp } from "../../state/AppContext.jsx";
 import { Screen } from "../../ui/Layout.jsx";
 import { AccountHeader, ContactMethods, RelaysSection, BlockedSection, LogoutButton } from "../../features/profile/ProfileParts.jsx";
 import WalletSection from "../../features/profile/WalletSection.jsx";
+import StrikeSection from "../../features/profile/StrikeSection.jsx";
 import EcashSection from "../../features/ecash/EcashSection.jsx";
 import CurrencySection from "../../features/profile/CurrencySection.jsx";
 import SafetySection from "../components/SafetySection.jsx";
@@ -20,6 +21,7 @@ export default function AccountScreen() {
         <AccountHeader />
         <CurrencySection />
         <EcashSection />
+        <StrikeSection />
         <WalletSection />
         <SafetySection />
         <ContactMethods />

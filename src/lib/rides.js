@@ -75,7 +75,7 @@ function rideParties(request) {
 
 // What each person's app signs during a ride (kinds that prove they were there). Used for the silence rule.
 export const RIDER_SIGNAL_KINDS = [EVENT_KINDS.RIDE_TICK, EVENT_KINDS.RIDE_CONFIRM, EVENT_KINDS.RIDE_ALIVE, EVENT_KINDS.RIDE_STOP_CHANGE, EVENT_KINDS.RIDE_PICKUP_CHANGE];
-export const DRIVER_SIGNAL_KINDS = [EVENT_KINDS.RIDE_STAGE, EVENT_KINDS.RIDE_TICK_REPLY, EVENT_KINDS.RIDE_ALIVE, EVENT_KINDS.RIDE_WAIVER, EVENT_KINDS.RIDE_PICKUP_REPLY, EVENT_KINDS.RIDE_STOP_REPLY];
+export const DRIVER_SIGNAL_KINDS = [EVENT_KINDS.RIDE_STAGE, EVENT_KINDS.RIDE_TICK_REPLY, EVENT_KINDS.RIDE_INVOICE, EVENT_KINDS.RIDE_ALIVE, EVENT_KINDS.RIDE_WAIVER, EVENT_KINDS.RIDE_PICKUP_REPLY, EVENT_KINDS.RIDE_STOP_REPLY];
 
 // The newest signed sign of life (ms) from either person before `finish` was signed; 0 if none.
 function lastSignalMs({ ids, rider, driver }, finish) {

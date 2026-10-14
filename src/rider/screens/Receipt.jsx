@@ -34,7 +34,7 @@ const parse = (e) => { try { return JSON.parse(e.content); } catch { return null
 
 export default function Receipt({ request }) {
   const { user, liveTick, btcPrice, priceFor } = useApp();
-  const { dismissReceipt, rateDriver, confirmRide, money, payNow, payMint } = useRider();
+  const { dismissReceipt, rateDriver, confirmRide, money, payNow, payMint, payRail } = useRider();
   void liveTick;
   const key = rideKey(request);
   const driverPubkey = rideDriver(request);
@@ -107,14 +107,14 @@ export default function Receipt({ request }) {
           {owes && <div className="flex justify-between"><dt className="font-semibold text-amber-700">Still to pay</dt><dd><Money sats={sum.outstanding} className="font-bold" /></dd></div>}
         </dl>
         {waived > 0 && <p className="text-[#05944f] text-sm font-medium mt-2">Your driver waived part of the fare{waiversOf(request).some((w) => w.refundSats > 0) ? " and sent money back to your wallet" : ""}.</p>}
-        <p className="text-neutral-500 text-xs mt-2">The fare is the base rate, each mile and each minute of the ride. It was paid in ecash while you rode.</p>
+        <p className="text-neutral-500 text-xs mt-2">The fare is the base rate, each mile and each minute of the ride. It was paid {payRail === "strike" ? "from your Strike account" : "in ecash"} while you rode.</p>
 
         {owes && (
           <div className="mt-4 rounded-2xl bg-amber-50 text-amber-900 px-4 py-3" role="alert">
             <p className="font-semibold">You still owe {moneyText(sum.outstanding, btcPrice)}.</p>
-            <p className="text-sm mt-0.5">Your wallet was short during the ride. Add funds and the app pays it at once. You can also pay later from Activity.</p>
+            <p className="text-sm mt-0.5">{payRail === "strike" ? "Your Strike balance was short during the ride. Add money in Strike, then tap Pay now." : "Your wallet was short during the ride. Add funds and the app pays it at once."} You can also pay later from Activity.</p>
             <div className="flex gap-2 mt-2">
-              <Button size="md" onClick={() => setAdding(true)}><Icon name="zap" size={16} /> Add funds</Button>
+              {payMint && <Button size="md" onClick={() => setAdding(true)}><Icon name="zap" size={16} /> Add funds</Button>}
               <Button size="md" variant="secondary" onClick={() => payNow(request)}>Pay now</Button>
             </div>
             {money?.status === "error" && <p className="text-xs text-red-700 mt-2">{money.message}</p>}
