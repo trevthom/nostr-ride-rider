@@ -34,6 +34,10 @@ export const REQUEST_CARD_SECONDS = 45;
 // accept again, so nobody gets picked on a stale promise.
 export const OFFER_TTL_SECONDS = 300;
 
+// How often a live position is sent, in milliseconds: the driver's exact position to the rider during a ride, and the rider's
+// own position to the people following a shared trip (the same pace, so a friend sees the rider as fresh as the rider sees the car).
+export const LOCATION_PING_MS = 6000;
+
 // Safety sheet: the number the "Call emergency services" button dials.
 export const EMERGENCY_NUMBER = "911";
 

@@ -26,6 +26,38 @@ assert.ok(ev2.created_at > ev.created_at);
 assert.equal(S.parseShareHash("#k=zz"), null); assert.equal(S.parseShareHash(""), null);
 assert.deepEqual(S.parseShareHash(`#k=${token}&r=javascript:alert(1),http://x,wss://ok.example`).relays, ["wss://ok.example"]);
 
+// ── The shared position is the RIDER's own phone, not the car's, and goes out as often as the driver's pings ──
+const fs = await import("node:fs");
+const { LOCATION_PING_MS } = await import("../src/config/settings.js");
+assert.equal(LOCATION_PING_MS, 6000);
+// (Each exported app repository holds only its own app, so a file that is not there is skipped.)
+const source = (rel) => { const u = new URL("../src/" + rel, import.meta.url); return fs.existsSync(u) ? fs.readFileSync(u, "utf8") : null; };
+const driverSrc = source("driver/state/DriverContext.jsx"), riderSrc = source("rider/screens/OnTrip.jsx");
+if (driverSrc) assert.ok(/const LOCATION_EVERY_MS = LOCATION_PING_MS/.test(driverSrc), "the driver's pings use the same constant");
+if (riderSrc) assert.ok(/setInterval\(\(\) => send\(false\), LOCATION_PING_MS\)/.test(riderSrc), "and so does the shared trip");
+const rider = { lat: 38.0406, lng: -84.5037, accuracy: 7.4 }, carAt = { lat: 38.05, lng: -84.51 };
+const base = { name: "Rae", driver: "Dina", car: "2020 Toyota Prius", plate: "KY ABC123", from: { name: "A", lat: 1, lng: 2 }, to: { name: "B", lat: 3, lng: 4 }, eta: 4 };
+const coming = Safety.sharePayload({ ...base, stage: "enroute", riderPos: rider, gps: "good", carLoc: carAt, now: 1000 });
+assert.equal(coming.lat, rider.lat); assert.equal(coming.lng, rider.lng); assert.equal(coming.who, "rider");
+assert.deepEqual(coming.carPos, carAt, "until the ride starts the car rides along");
+assert.equal(coming.locTs, 1000); assert.equal(coming.acc, 7);
+assert.notEqual(coming.lat, carAt.lat, "the position is the rider's, never the car's");
+const riding = Safety.sharePayload({ ...base, stage: "riding", riderPos: rider, gps: "weak", carLoc: carAt, now: 2000 });
+assert.equal(riding.carPos, undefined, "once they are in the car there is one position, the rider's");
+assert.equal(riding.lat, rider.lat, "a weak fix still counts");
+const stale = Safety.sharePayload({ ...base, stage: "riding", riderPos: rider, gps: "stale", carLoc: carAt, now: 3000 });
+assert.equal(stale.lat, undefined, "a stale fix is not sent as if it were now"); assert.equal(stale.locTs, undefined);
+assert.equal(Safety.sharePayload({ ...base, stage: "enroute", riderPos: null, gps: "searching", carLoc: null }).lat, undefined);
+assert.equal(Safety.sharePayload({ ...base, stage: "enroute", riderPos: { lat: NaN, lng: 1 }, gps: "good" }).lat, undefined, "a broken position is not sent");
+// Through the real encryption, to the viewer.
+const sent = S.openShare(token, JSON.parse(S.buildShareEvent(token, coming).content).sealed);
+assert.deepEqual(Safety.sharedPositions(sent), { rider: { lat: rider.lat, lng: rider.lng }, car: carAt });
+assert.deepEqual(Safety.sharedPositions(riding), { rider: { lat: rider.lat, lng: rider.lng }, car: null });
+assert.deepEqual(Safety.sharedPositions(stale), { rider: null, car: null }, "no position yet: the page says so");
+assert.deepEqual(Safety.sharedPositions({ lat: 38.1, lng: -84.6, stage: "riding" }), { rider: null, car: { lat: 38.1, lng: -84.6 } }, "an update from an older app is the car, as before");
+assert.deepEqual(Safety.sharedPositions({ ended: true, who: "rider", lat: 1, lng: 2 }), { rider: null, car: null });
+assert.deepEqual(Safety.sharedPositions(null), { rider: null, car: null });
+
 // Contacts and messages.
 let c = [];
 c = Safety.addContact(c, "Mom", "+1 (555) 014-2222");

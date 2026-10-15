@@ -25,6 +25,29 @@ export function smsHref(phone, text) {
   return digits ? `sms:${digits}?&body=${encodeURIComponent(text)}` : null;
 }
 
+// What the rider's phone sends to the people following a shared trip. The position is the RIDER's own (their phone), not the car's;
+// the car, when it is not the same place yet (the driver is still coming), rides along as `car`. `who: "rider"` tells a viewer which it
+// is (an older app put the car's position in lat/lng). A stale fix is left out: a friend must not see a position that is minutes old
+// as if it were now. Needs { riderPos, gps: "good" | "weak" | "stale", carLoc, ... } — see rider/screens/OnTrip.jsx.
+export function sharePayload({ name, driver, car, plate, stage, riderPos, gps, carLoc, eta, from, to, now = Date.now() }) {
+  const here = riderPos && gps !== "stale" && Number.isFinite(riderPos.lat) && Number.isFinite(riderPos.lng) ? riderPos : null;
+  const coach = carLoc && stage !== "riding" && Number.isFinite(carLoc.lat) && Number.isFinite(carLoc.lng) ? { lat: carLoc.lat, lng: carLoc.lng } : null;
+  return {
+    name, driver, car, plate, stage, eta,
+    who: "rider",
+    ...(here && { lat: here.lat, lng: here.lng, acc: Number.isFinite(here.accuracy) ? Math.round(here.accuracy) : undefined, locTs: now }),
+    ...(coach && { carPos: coach }),
+    from, to,
+  };
+}
+// What a viewer draws from a shared update: { rider, car } (each { lat, lng } or null).
+export function sharedPositions(p) {
+  const pt = (x) => (x && Number.isFinite(x.lat) && Number.isFinite(x.lng) ? { lat: x.lat, lng: x.lng } : null);
+  if (!p || p.ended) return { rider: null, car: null };
+  if (p.who === "rider") return { rider: pt(p), car: pt(p.carPos) };
+  return { rider: null, car: pt(p) }; // an older app: lat/lng was the car
+}
+
 export function tripMessage({ name, destination, link, sos = false }) {
   return sos
     ? `SOS from ${name}: I need help. Follow my trip live: ${link}`

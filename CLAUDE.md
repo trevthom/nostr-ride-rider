@@ -264,8 +264,9 @@ carries `driverPubkey`. Stage is `enroute` (default) → `arrived` → `riding`.
   re-sends it with backoff, on `online`/tab wake (`AppContext` → `relay.flushOutbox()` + `reconnectAll()`),
   and after reload. Ephemeral kinds are never queued. Pools use `enableReconnect`.
 - **Safety / share**: `RiderContext` holds the share state (`share`, `startShare`, `stopShare`, `shareUpdate`);
-  `OnTrip` pushes updates; `src/rider/Track.jsx` (`track.html`, built with this app) is the
-  viewer. The share key is only ever in the URL fragment.
+  `OnTrip` pushes updates every `LOCATION_PING_MS` (6 s, config/settings.js: the SAME constant as the driver's location pings) with `sharePayload` (lib/safety.js): the RIDER's own phone position (`who:"rider"`,
+  left out when the fix is stale) and the car (`carPos`) only until the ride starts; `sharedPositions` is what `src/rider/Track.jsx` (apps/rider/track.html, built with the rider app, the viewer) draws (an older app's
+  lat/lng is the car). The share key is only ever in the URL fragment.
 - **Service worker** (`public/sw.js`, production only): caches the shell and hashed assets; never touches
   relays, tiles or APIs. It cannot receive push while the app is closed. Native shell (`native/`) skips it.
 - **Fares** (`lib/fare.js`): the rider chooses `fareMode` `"standard"` (each driver's own rates; the request's `fareSats` is only an estimate; the driver cannot counter) or `"flat"` (the RIDER

@@ -3,9 +3,11 @@
 //  a map, with no account and no server.
 //
 //  How it works: the rider's app makes a THROWAWAY key for the trip. Every
-//  few seconds it publishes an addressable event (kind 30091, replaced each
-//  time, expires in 2 h) signed by that key, with the payload (car position,
-//  driver, plate, destination, stage) encrypted to the key itself (NIP-44).
+//  few seconds (every LOCATION_PING_MS, the same pace as the driver's pings) it
+//  publishes an addressable event (kind 30091, replaced each time, expires in
+//  2 h) signed by that key, with the payload (the RIDER's own phone position,
+//  the car while it is still coming, driver, plate, destination, stage)
+//  encrypted to the key itself (NIP-44). See lib/safety.js sharePayload.
 //  The link carries the key in its #fragment — a browser never sends the
 //  fragment to a server — plus a few relays. Whoever has the link can read
 //  the trip; nobody else can. Stopping the share just stops the updates.

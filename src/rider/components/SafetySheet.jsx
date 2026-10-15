@@ -45,7 +45,7 @@ export default function SafetySheet({ open, onClose, request, destination }) {
         <SectionLabel>Share my trip</SectionLabel>
         {!share ? (
           <>
-            <p className="text-sm text-neutral-600 mb-3">A friend can follow your car live on a map. No account needed. Only people with the link can see it.</p>
+            <p className="text-sm text-neutral-600 mb-3">A friend can follow you live on a map: your own phone's position, updated every few seconds. No account needed. Only people with the link can see it.</p>
             <Button size="md" onClick={() => begin(false)}>Start sharing</Button>
           </>
         ) : (

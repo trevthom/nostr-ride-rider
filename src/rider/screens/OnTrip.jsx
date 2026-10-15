@@ -20,7 +20,8 @@ import { arrivalMismatch } from "../../lib/arrival.js";
 import { fullTrip, nextStop, stopChanges, readStop } from "../../lib/stops.js";
 import { milesAtTime } from "../../lib/ridemoney.js";
 import { rideKey } from "../../lib/rides.js";
-import { ARRIVE_RADIUS_METERS } from "../../config/settings.js";
+import { ARRIVE_RADIUS_METERS, LOCATION_PING_MS } from "../../config/settings.js";
+import { sharePayload } from "../../lib/safety.js";
 import { getSetting, setSetting } from "../../config/relays.js";
 import { useRideLink } from "../../features/payments/useRideLink.js";
 import AddFunds from "../../features/payments/AddFunds.jsx";
@@ -56,7 +57,7 @@ const miles = (a, b) => haversineDistance(a.lat, a.lng, b.lat, b.lng);
 
 export default function OnTrip({ request, trip }) {
   const { user, pushNotice, btcPrice } = useApp();
-  const { finishRide, myPosition, share, shareUpdate, confirmRide, money, reportMiles, payMint } = useRider();
+  const { finishRide, myPosition, gps, share, shareUpdate, confirmRide, money, reportMiles, payMint } = useRider();
   const driverPubkey = rideDriver(request);
   const stage = rideStage(request);
   const offer = offerFrom(request, driverPubkey);
@@ -114,20 +115,22 @@ export default function OnTrip({ request, trip }) {
   // Minutes left: the road route from the car when the router answered, else a straight-line guess.
   const toTarget = !loc ? null : routeInfo && !routeInfo.straight ? routeInfo.minutes : pickupEta(miles(loc, target));
 
-  // Keep a shared trip current for the people following the link.
+  // Keep a shared trip current for the people following the link: the RIDER's own phone position, as often as the driver's pings (6 s).
   const plateInfo = offerPlate(offer, user);
   const carName = carText(profile?.vehicle);
+  // The timer reads the latest values through a ref, so it keeps one steady beat (a moving phone must not make it send faster).
+  const shareNow = useRef({});
+  shareNow.current = { name: user.name, driver: profile?.name || "", car: carName, plate: plateInfo ? `${plateInfo.plateState} ${plateInfo.plateNumber}` : "", stage, riderPos: myPosition, gps, carLoc: loc, eta: toTarget, from: pickup, to: dropoff };
   useEffect(() => {
     if (!share) return;
-    const send = (force) => shareUpdate({
-      name: user.name, driver: profile?.name || "", car: carName, plate: plateInfo ? `${plateInfo.plateState} ${plateInfo.plateNumber}` : "",
-      stage, lat: loc?.lat, lng: loc?.lng, locTs: loc?.ts, eta: toTarget,
-      from: { name: pickup.name, lat: pickup.lat, lng: pickup.lng }, to: { name: dropoff.name, lat: dropoff.lat, lng: dropoff.lng },
-    }, { force });
+    const send = (force) => {
+      const v = shareNow.current;
+      shareUpdate(sharePayload({ ...v, from: { name: v.from.name, lat: v.from.lat, lng: v.from.lng }, to: { name: v.to.name, lat: v.to.lat, lng: v.to.lng } }), { force });
+    };
     send(true);
-    const id = setInterval(() => send(false), 15000);
+    const id = setInterval(() => send(false), LOCATION_PING_MS);
     return () => clearInterval(id);
-  }, [share?.token, share?.sos, stage, loc?.lat, loc?.lng, toTarget]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [share?.token, share?.sos, stage]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Time and distance so far (the same on the driver's screen). The rider's own GPS figure is used inside
   // the code only (lib/meter.js); it is sent to the driver's app, so both screens agree.
