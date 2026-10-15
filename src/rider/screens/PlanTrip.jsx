@@ -3,7 +3,7 @@
 //  kept in RiderContext.plan so switching tabs doesn't lose them:
 //    idle    map + "Where to?" bar + recent places
 //    search  pickup / dropoff fields with live address results
-//    pin     the pickup set by dragging the map under a pin (components/PinPicker)
+//    pin     the pickup OR the drop-off set by dragging the map under a pin (components/PinPicker; plan.pinField says which)
 //    quote   route on the map, the typical fares of the drivers nearby (each
 //            driver sets their own rates), a suggested price, and the choice of fare:
 //              Standard fare  every driver's own rates (base, per mile, per minute), paid tick by tick
@@ -38,14 +38,19 @@ export default function PlanTrip() {
   const { plan, setPlan, resetPlan, here, myPosition, recentPlaces } = useRider();
 
   if (plan.step === "pin") {
-    const start = plan.pickup || myPosition || here || SAMPLE_LOCATIONS[0];
+    const field = plan.pinField === "dropoff" ? "dropoff" : "pickup";
+    const other = field === "pickup" ? plan.dropoff : plan.pickup;
+    // The pin starts on the place already chosen for this field; a drop-off starts near the pickup (the trip usually stays in the area).
+    const start = (field === "dropoff" ? plan.dropoff || plan.pickup : plan.pickup) || myPosition || here || SAMPLE_LOCATIONS[0];
     return (
       <PinPicker
+        key={field}
+        field={field}
         start={start}
         me={myPosition}
         onBack={() => setPlan({ step: "search" })}
         onExit={resetPlan}
-        onConfirm={(place) => setPlan({ pickup: place, step: plan.dropoff ? "quote" : "search" })}
+        onConfirm={(place) => setPlan({ [field]: place, step: other ? "quote" : "search" })}
       />
     );
   }
@@ -59,7 +64,7 @@ export default function PlanTrip() {
         recents={recentPlaces()}
         onBack={() => setPlan({ step: plan.from === "quote" && plan.pickup && plan.dropoff ? "quote" : "idle" })}
         onExit={resetPlan}
-        onPin={() => setPlan({ step: "pin" })}
+        onPin={(field) => setPlan({ step: "pin", pinField: field })}
         onDone={() => setPlan({ step: "quote" })}
         onChange={(field, place) => {
           const next = { [field]: place };

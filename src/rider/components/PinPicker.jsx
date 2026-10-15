@@ -1,13 +1,14 @@
 // ════════════════════════════════════════════════════════════
-//  PIN PICKER — "Set pickup on the map". A full-screen map with a fixed pin in the
+//  PIN PICKER — "Set pickup on the map" and "Set drop-off on the map". A full-screen map with a fixed pin in the
 //  middle. The rider drags the map until the pin is on the spot, and the address for
 //  that spot is looked up (Photon reverse geocoding, lib/geocode.js) and shown below.
-//  "Confirm pickup" returns a place { name, fullName, area, lat, lng } like a search result.
+//  "Confirm pickup" / "Confirm drop-off" returns a place { name, fullName, area, lat, lng } like a search result.
+//  `field` says which of the two places is being set ("pickup" by default); only the words differ.
 //
 //  The lookup sends the pin's position (rounded to ~10 m) to the geocoder, the same as
 //  "Your location" does. If the lookup fails, the spot is still usable as "Dropped pin".
 //
-//    <PinPicker start={{lat,lng}} me={{lat,lng}|null} onConfirm(place) onBack() onExit() />
+//    <PinPicker field="pickup"|"dropoff" start={{lat,lng}} me={{lat,lng}|null} onConfirm(place) onBack() onExit() />
 //    onBack = one screen back (the search page); onExit = cancel the planning and go home.
 // ════════════════════════════════════════════════════════════
 
@@ -22,9 +23,14 @@ import { Spinner } from "../../ui/Parts.jsx";
 import { FloatButton } from "../../ui/Layout.jsx";
 
 const ZOOM = 17;
+const WORDS = {
+  pickup: { section: "Set pickup on the map", spot: "Pickup spot", confirm: "Confirm pickup" },
+  dropoff: { section: "Set drop-off on the map", spot: "Drop-off spot", confirm: "Confirm drop-off" },
+};
 const LOOKUP_DELAY_MS = 450; // wait for the map to settle, and be kind to the geocoder
 
-export default function PinPicker({ start, me, onConfirm, onBack, onExit }) {
+export default function PinPicker({ field = "pickup", start, me, onConfirm, onBack, onExit }) {
+  const words = WORDS[field] || WORDS.pickup;
   const boxRef = useRef(null);
   const mapRef = useRef(null);
   const lookup = useRef(0);
@@ -77,8 +83,8 @@ export default function PinPicker({ start, me, onConfirm, onBack, onExit }) {
         </div>
       </div>
 
-      <section aria-label="Set pickup on the map" className="absolute bottom-0 inset-x-0 z-[600] bg-white rounded-t-3xl shadow-[0_-6px_28px_rgba(0,0,0,0.16)] px-5 pt-4 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
-        <p className="text-neutral-500 text-xs uppercase tracking-wider font-semibold">Pickup spot</p>
+      <section aria-label={words.section} className="absolute bottom-0 inset-x-0 z-[600] bg-white rounded-t-3xl shadow-[0_-6px_28px_rgba(0,0,0,0.16)] px-5 pt-4 pb-[max(1.25rem,env(safe-area-inset-bottom))]">
+        <p className="text-neutral-500 text-xs uppercase tracking-wider font-semibold">{words.spot}</p>
         <div className="flex items-center gap-2 min-h-[48px] mt-1">
           {place ? (
             <div className="min-w-0">
@@ -89,7 +95,7 @@ export default function PinPicker({ start, me, onConfirm, onBack, onExit }) {
             <p className="text-neutral-500 text-[15px] flex items-center gap-2"><Spinner size={16} /> Finding the address…</p>
           )}
         </div>
-        <Button className="mt-3" disabled={!place} onClick={() => place && onConfirm(place)}>Confirm pickup</Button>
+        <Button className="mt-3" disabled={!place} onClick={() => place && onConfirm(place)}>{words.confirm}</Button>
         <p className="text-neutral-400 text-xs mt-2">Drag the map to move the pin. Drivers see only the approximate area until you confirm a ride.</p>
       </section>
     </div>

@@ -1,0 +1,188 @@
+// ════════════════════════════════════════════════════════════
+//  RECOVERY — The Account part for the 12-word recovery phrase of the ecash wallet (nostr/ecashRecovery.js, lib/recovery.js).
+//  The ecash is kept on this device. If the phone is lost, the 12 words bring the money back on a new one. The words ARE the money:
+//  they are shown only on request, are never sent anywhere, and the app never asks for them except on this screen.
+//
+//    <RecoveryFold />     the Account section (a Fold): write the words down, show them again, restore, "I lost my phone"
+//    <RecoveryNotice />   a short warning at the top of Account while there is ecash and the words are not written down yet
+//
+//  Writing down: the 12 words are shown once in a numbered list; the person then types three of them back (asked by number) before
+//  the app counts the phrase as safe (ecash.recovery.confirmBackup()), which also moves any older ecash under the phrase.
+// ════════════════════════════════════════════════════════════
+
+import { useEffect, useState } from "react";
+import { useApp } from "../../state/AppContext.jsx";
+import Fold, { openFold } from "../../ui/Fold.jsx";
+import { ConfirmDialog, Modal, inputCls } from "../../ui/Parts.jsx";
+import Button from "../../ui/Button.jsx";
+import Icon from "../../ui/Icon.jsx";
+import { pickCheckPositions, checkAnswers } from "../../lib/recovery.js";
+import { mintLabel } from "../../lib/mints.js";
+import RestorePanel from "./RestorePanel.jsx";
+
+const EVENT = "nostrride-recovery";
+const SHOW_MS = 30000; // the words hide themselves after this long
+
+export function startRecoverySetup() {
+  openFold("recovery");
+  window.dispatchEvent(new CustomEvent(EVENT, { detail: "setup" }));
+}
+
+export function RecoveryNotice() {
+  const { ecash } = useApp();
+  const rec = ecash?.recovery;
+  if (!rec || rec.backedUp() || ecash.total() <= 0) return null;
+  return (
+    <div className="rounded-2xl bg-amber-50 text-amber-900 px-4 py-3 flex items-center gap-3" role="status">
+      <Icon name="alert" size={20} />
+      <p className="flex-1 text-sm font-semibold">Your ecash is not protected yet. If you lose this phone, it is gone.</p>
+      <button type="button" onClick={startRecoverySetup} className="text-sm font-semibold underline shrink-0">Write down 12 words</button>
+    </div>
+  );
+}
+
+// The 12 words, numbered.
+function Words({ phrase }) {
+  return (
+    <ol className="grid grid-cols-2 gap-x-4 gap-y-2 bg-neutral-100 rounded-2xl p-4 select-none" aria-label="Your 12 recovery words" onCopy={(e) => e.preventDefault()}>
+      {phrase.split(" ").map((w, i) => (
+        <li key={i} className="flex items-baseline gap-2">
+          <span className="text-xs text-neutral-400 w-5 text-right tabular-nums">{i + 1}</span>
+          <span className="font-mono font-semibold text-[15px]">{w}</span>
+        </li>
+      ))}
+    </ol>
+  );
+}
+
+function SetupModal({ recovery, onClose }) {
+  const [step, setStep] = useState("write"); // write → check
+  const [places] = useState(() => pickCheckPositions(3));
+  const [answers, setAnswers] = useState(["", "", ""]);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const confirm = async () => {
+    if (!checkAnswers(recovery.phrase(), places, answers)) return setError("These words do not match. Look at your paper and try again.");
+    setBusy(true);
+    try { await recovery.confirmBackup(); } catch { /* old coins are moved later */ }
+    setBusy(false);
+    onClose(true);
+  };
+  return (
+    <Modal open title={step === "write" ? "Write down 12 words" : "Check your words"} onClose={() => onClose(false)}>
+      {step === "write" ? (
+        <>
+          <p className="text-sm text-neutral-600 mb-3">
+            Write these 12 words on paper, in this order. They bring your ecash back on a new phone.
+          </p>
+          <Words phrase={recovery.phrase()} />
+          <ul className="text-xs text-red-700 mt-3 mb-4 space-y-1 list-disc pl-4">
+            <li>Anyone who has these words can take your ecash.</li>
+            <li>Do not take a photo or a screenshot. Do not save them in a note, an email or a cloud.</li>
+            <li>NostrRide will never ask you for them anywhere else.</li>
+          </ul>
+          <Button onClick={() => setStep("check")}>I wrote them down</Button>
+        </>
+      ) : (
+        <>
+          <p className="text-sm text-neutral-600 mb-3">Type these three words from your paper.</p>
+          <div className="space-y-3">
+            {places.map((p, i) => (
+              <label key={p} className="block">
+                <span className="text-xs font-semibold uppercase tracking-wider text-neutral-500 mb-1 block">Word {p + 1}</span>
+                <input aria-label={`Word ${p + 1}`} value={answers[i]} autoComplete="off" autoCapitalize="none" spellCheck={false}
+                  onChange={(e) => { setAnswers(answers.map((a, j) => (j === i ? e.target.value : a))); setError(""); }} className={inputCls} />
+              </label>
+            ))}
+          </div>
+          {error && <p className="text-red-600 text-sm mt-3" role="alert">{error}</p>}
+          <div className="mt-4 space-y-2">
+            <Button onClick={confirm} loading={busy} disabled={answers.some((a) => !a.trim())}>Check and finish</Button>
+            <Button variant="secondary" onClick={() => { setStep("write"); setError(""); }}>Show the words again</Button>
+          </div>
+        </>
+      )}
+    </Modal>
+  );
+}
+
+function Panel() {
+  const { ecash, pushNotice } = useApp();
+  const recovery = ecash?.recovery;
+  const [setup, setSetup] = useState(false);
+  const [shown, setShown] = useState(false);
+  const [ask, setAsk] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+  useEffect(() => {
+    const on = (e) => { if (e.detail === "setup") setSetup(true); };
+    window.addEventListener(EVENT, on);
+    return () => window.removeEventListener(EVENT, on);
+  }, []);
+  useEffect(() => {
+    if (!shown) return undefined;
+    const id = setTimeout(() => setShown(false), SHOW_MS);
+    return () => clearTimeout(id);
+  }, [shown]);
+  if (!recovery) return <p className="text-sm text-neutral-500" role="status">Loading your wallet…</p>;
+
+  const safe = recovery.backedUp();
+  const rotate = async () => {
+    setAsk(false); setBusy(true); setMsg("");
+    const rows = await recovery.rotateAll();
+    setBusy(false);
+    const bad = rows.filter((r) => r.error);
+    setMsg(bad.length ? `Could not swap the ecash at ${bad.map((r) => mintLabel(r.mint)).join(", ")}. Try again when the mint answers.` : rows.length ? "Done. Every coin is new. Copies of the old coins are worth nothing." : "There is no ecash to swap.");
+    if (!bad.length) pushNotice("Your ecash was swapped for new coins.");
+  };
+
+  return (
+    <>
+      <p className="text-sm text-neutral-500 mb-3">
+        Your ecash is saved on this device. If you lose the phone, 12 words on paper bring it back on a new one.
+      </p>
+      {recovery.volatile() && (
+        <p className="text-sm text-red-700 bg-red-50 rounded-xl px-3 py-2 mb-3" role="alert">
+          This browser cannot save data, so nothing can be recovered. Do not add ecash here.
+        </p>
+      )}
+      {safe ? (
+        <div className="flex items-center gap-2 text-sm font-semibold text-[#05683a] bg-[#e6f4ec] rounded-xl px-3 py-2 mb-3" role="status">
+          <Icon name="check" size={18} /> You wrote down your 12 words.
+        </div>
+      ) : (
+        <Button onClick={() => setSetup(true)} className="mb-3">Write down 12 words</Button>
+      )}
+      {safe && (
+        <div className="space-y-2 mb-3">
+          {shown ? (
+            <div>
+              <Words phrase={recovery.phrase()} />
+              <p className="text-xs text-neutral-500 mt-2">These hide again in 30 seconds. Keep them secret.</p>
+              <button type="button" onClick={() => setShown(false)} className="text-sm font-semibold underline mt-1">Hide</button>
+            </div>
+          ) : (
+            <Button variant="secondary" size="md" onClick={() => setShown(true)}>Show my 12 words</Button>
+          )}
+          <Button variant="secondary" size="md" onClick={() => setAsk(true)} loading={busy}>I lost a phone: swap my coins</Button>
+          <p className="text-xs text-neutral-500">Swapping makes every old copy of your coins worth nothing. It costs the mint’s small swap fee.</p>
+        </div>
+      )}
+      {msg && <p className="text-sm text-neutral-700 mb-3" role="status">{msg}</p>}
+
+      <RestorePanel recovery={recovery} ecash={ecash} />
+
+      {setup && <SetupModal recovery={recovery} onClose={(done) => { setSetup(false); if (done) pushNotice("Your ecash is protected. Keep the paper safe."); }} />}
+      <ConfirmDialog open={ask} title="Swap all your coins?" confirmLabel="Swap them" cancelLabel="Not now"
+        message="Every coin in this wallet is swapped for a new one. Anyone who copied the old ones, for example from a lost phone, ends up with nothing."
+        onConfirm={rotate} onCancel={() => setAsk(false)} />
+    </>
+  );
+}
+
+export function RecoveryFold() {
+  const { ecash } = useApp();
+  const rec = ecash?.recovery;
+  const status = !rec ? null : rec.backedUp() ? { text: "Written down", tone: "ok" } : ecash.total() > 0 ? { text: "Not written down", tone: "warn" } : null;
+  return <Fold id="recovery" title="Recovery phrase" status={status}><Panel /></Fold>;
+}

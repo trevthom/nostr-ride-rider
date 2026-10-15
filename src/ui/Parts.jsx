@@ -6,6 +6,7 @@
 import { useEffect } from "react";
 import Icon from "./Icon.jsx";
 import Button from "./Button.jsx";
+import { useInFold } from "./Fold.jsx";
 
 export function Spinner({ size = 20, className = "" }) {
   return (
@@ -19,6 +20,8 @@ export function Spinner({ size = 20, className = "" }) {
 }
 
 export function SectionLabel({ children, className = "" }) {
+  const inFold = useInFold(); // a Fold's header already shows the title
+  if (inFold) return null;
   return <h2 className={`text-xs font-semibold uppercase tracking-wider text-neutral-500 mb-2 ${className}`}>{children}</h2>;
 }
 

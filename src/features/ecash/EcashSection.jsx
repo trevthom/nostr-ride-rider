@@ -6,6 +6,7 @@
 //    • the mint:  a driver is paid at it; a rider starts "Add funds" there
 //    • paste an ecash token to add it to the wallet
 //    • back up the wallet as tokens (ecash is cash: whoever holds a token owns it)
+//    (the 12-word recovery phrase that brings the ecash back on a new phone is its own Account part: RecoverySection.jsx)
 //    • driver: cash out to their Lightning address
 //  The ecash is saved on this device, encrypted to your key. Logging out keeps it.
 // ════════════════════════════════════════════════════════════
@@ -141,7 +142,7 @@ export default function EcashSection({ locked = false }) {
           )}
           {msg && <p className="text-sm text-neutral-700 mt-3" role="status">{msg}</p>}
           <p className="text-xs text-neutral-500 mt-3">
-            Your ecash is saved on this device, encrypted with your key. Keep a copy of your nsec and back up large amounts. Logging out keeps it here.
+            Your ecash is saved on this device, encrypted with your key. If you lose the phone, your 12 recovery words bring it back (see Recovery phrase). Logging out keeps it here.
           </p>
         </>
       )}

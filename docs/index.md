@@ -4,7 +4,7 @@
 
 > This repository is the **rider** app. The **driver** app is in its own repository, **nostr-ride-driver**. They share no server: they find each other through Nostr relays, so both use the same event formats (see [Nostr events](#nostr-events)).
 
-Last updated with: **vouches ("I know and trust this person") in place of star ratings, pay-as-you-ride ecash payments, Finish ride (no cancellations), start codes, local currency** (see the [changelog](#changelog)).
+Last updated with: **a 12-word recovery phrase for the ecash wallet, collapsible Account sections, vouches ("I know and trust this person") in place of star ratings, pay-as-you-ride ecash payments, Finish ride (no cancellations), start codes, local currency** (see the [changelog](#changelog)).
 
 NostrRide is a decentralized ridesharing system. It is **two web apps** — a rider app and a driver
 app — that find each other through **Nostr relays**. There is no company server and no database.
@@ -61,6 +61,7 @@ Needs internet for Tailwind (CDN), fonts, the map, and the relays. Location need
 | | Rider app (repo nostr-ride-rider) | Driver app (repo nostr-ride-driver) |
 |---|---|---|
 | Tabs | Ride · Activity · Account | Drive · Earnings · Account |
+| Account | Every setting is a section that opens and closes (closed at first; what you opened is remembered on the device) | The same |
 | Tab bar | Always visible, on every screen | Always visible, on every screen |
 | Home | "Where to?" → standard fare or flat price → request | GO button → request cards (accept; counter a flat price) |
 | During a trip | Live car, ETA, fare so far, start code, contact, **Finish ride**, add a stop | Route, arrived (within 50 m) / start code / **Finish ride**, fare and payments so far |
@@ -74,7 +75,7 @@ reverse. The Vite *mode* picks the app (`vite --mode rider|driver`).
 
 ## How a ride works
 1. The driver taps **GO** (needs a good or an *approximate* GPS fix, see [Location and GPS](#location-and-gps)). The app shares an approximate location.
-2. The rider sets the pickup and the destination. **The app never fills in the pickup by itself.** The rider types an address or the name of a business or landmark (the search page says so), or **pins the spot on the map** (*Set pickup on the map*, always shown: drag the map under the pin), or taps *Your location* on the pickup field. The rider picks a **standard fare** (each driver's own rates) or a **flat price** and taps **Request**.
+2. The rider sets the pickup and the destination. **The app never fills in the pickup by itself.** The rider types an address or the name of a business or landmark (the search page says so), or **pins the spot on the map** (*Set pickup on the map*, always shown: drag the map under the pin), or taps *Your location* on the pickup field. **The drop-off can be pinned the same way** (*Set drop-off on the map*, also always shown); with both places set the quote opens. The rider picks a **standard fare** (each driver's own rates) or a **flat price** and taps **Request**.
 3. Nearby drivers get a **request card** with a countdown. A driver **accepts**, or (for a flat price) **counters** with a higher price. The reply carries the driver's rates and ecash mint.
 4. The rider **chooses a driver**. The rider needs enough ecash at the driver's mint for the start (the base rate, two minutes and a mile). There is **no deposit**.
 5. The driver drives to the pickup. The rider sees the car move live (end-to-end encrypted). **Nothing is charged yet.**
@@ -191,7 +192,7 @@ only what the ride has earned so far, and most of it is already paid.
 - The sanity limits on a driver's rates (`RATE_LIMITS`, in dollars) are scaled for other currencies.
 
 ### Ecash, the mint and the wallets
-- **Ecash** is Cashu (NUT-00 to NUT-07). A **mint** holds the money behind the tokens and signs them blindly, so it cannot link a payment to a person.
+- **Ecash** is Cashu (NUT-00 to NUT-09, and NUT-13 for the recovery phrase). A **mint** holds the money behind the tokens and signs them blindly, so it cannot link a payment to a person.
   **A mint is a trusted third party:** if it disappears, the ecash is lost. Use a mint you trust, keep little in the wallet, and cash out often.
   Set the default with `VITE_DEFAULT_MINT`. The built-in default is the Macadamia mint, `https://macadamia.cash` (not yet run against: if that address is not a mint, set `VITE_DEFAULT_MINT`).
 - The **driver is paid at their mint** (*Account → Ecash wallet*). It is in every offer. The **rider pays at the mint of the driver they choose**. Before the ride
@@ -202,8 +203,36 @@ only what the ride has earned so far, and most of it is already paid.
 - **Safety of the wallet.** The proofs are saved on the device, encrypted (NIP-44) to the user's own key, in pieces. A token being sent waits in a *pending* list until the
   event carrying it is published or queued; after a crash it returns to the wallet if the mint still calls it unspent. One money move runs at a time. A token cannot be
   redeemed twice. The user can back up the wallet as tokens (*Back up my ecash*). Logging out keeps the ecash on the device; without the nsec it cannot be opened.
+- **The ecash is kept on the device, so the app also gives a way back if the device is lost: see *Recovering the ecash (12 words)* below.**
 - The mint charges a fee for spending proofs (`input_fee_ppk`). The **sender** adds it on top of each tick, so the driver gets the full tick.
 - The Lightning wallet (NWC) is used to **add funds** and for **tips**. Tips are still paid over Lightning to the driver's Lightning address.
+
+### Recovering the ecash (12 words)
+The proofs live only on the device. A lost phone would mean lost money, so every coin the wallet makes for itself gets its secret from a **recipe**: a 12-word
+**recovery phrase** + the mint's keyset + a counter (Cashu NUT-13). The same 12 words on a new device ask the mint which coins it signed for them and
+still calls unspent (NUT-09), and the money is back. No server, no account, no relay is involved.
+- **The phrase is not the Nostr key.** People paste an nsec into many Nostr apps; if the money came from it, one leak anywhere could drain the wallet. The phrase is a standard
+  BIP39 phrase made on the device from the browser's secure random source, the first time the wallet is opened (before any coin exists, so every coin is under it). Other Cashu wallets
+  that follow NUT-13 can restore from it too.
+- **Where it is kept.** On the device, encrypted (NIP-44) under its own key, made from the user's secret key with its own label (so it is a different key from the one that
+  encrypts the proofs). It is never put in an event, never sent to a relay or the mint, and never logged. The app asks for the words only on the Recovery screen.
+- **Writing it down** (*Account → Recovery phrase*, or the warning at the top of Account while there is ecash and the words are not written down): the 12 words are shown in a numbered list;
+  the person types three of them back (asked by number) before the app counts the phrase as safe. The words can be shown again (they hide after 30 seconds). Ecash made before
+  the phrase existed (random secrets) is swapped once for coins under the phrase when the phrase is confirmed.
+- **Counters** (one per mint keyset) are saved with the wallet **before** the mint is asked, so a number is never used twice. A coin the mint signed but the wallet never saved
+  (a crash, a closed tab) is found again by a restore.
+- **Coins sent to someone else use random secrets.** A restore therefore never brings back a token that was already handed to a driver, and the driver can still redeem it.
+- **Restore** (*Recovery phrase → Restore ecash from 12 words*): the person types the words and names the mints to look in (the ones the app knows are listed already). For each mint the app
+  scans every keyset, keeps the coins the mint calls unspent, and **swaps them all for fresh coins**, so a copy on the lost phone is worth nothing. A new device with an empty wallet takes the
+  typed phrase as its own, but **only if coins are found**; words that find nothing change nothing. A wallet that already holds ecash takes the other phrase's coins in and keeps its own phrase.
+- **"I lost a phone: swap my coins"** (shown once the words are written down) does the same swap from the device that still has the wallet.
+- **Two devices with the same phrase** at the same time can pick the same counter. The mint then refuses ("already signed"); the app looks where the mint's records end, moves its counters past them
+  and tries again. It does not take the other device's coins until the person runs Restore.
+- **Limits.** The mint must support restore (NUT-09) and must still exist. A top-up invoice paid but not yet collected when the phone was lost is not covered. The list of payments is not restored.
+  Whoever has the 12 words can take the ecash, so they belong on paper, not in a photo, a note or a cloud.
+- Tests: `test/recovery.test.mjs` (words, the NUT-13 specification vector, the encrypted box), `test/restore.test.mjs` (the real Cashu client against a local mint that remembers what it signed:
+  wipe and restore, a sent token not brought back, old copies spent, a crash between "signed" and "saved", counters, two devices, old coins moved, no phrase on the wire),
+  `scripts/e2e/recovery.mjs` (the screens, a fresh browser, no phrase on any relay).
 
 ### What is built and what is not
 - Built and tested: ticks, flat and standard fares, missed-payment counting, the final tick, Finish ride with confirmation, the start code, the 50 m arrival rule, the
@@ -474,7 +503,7 @@ A web page cannot read the location with the screen off. `native/` wraps the **d
 `npm test` runs `test/*.test.mjs` with Node's built-in runner: trust rules, ride stages, finishing a ride (who may finish, earliest finish wins, the silence cut-off), fares, trips,
 earnings, privacy, history, Lightning invoices, geocoding, publishing and the outbox, event ordering, contact links, GPS, payment evidence, blocking, trip sharing, native location, tips,
 pickup changes, the odometer (and the GPS-gap rule) and the 5% distance rule, stage times, relay subscription calls, flat offers and counters, driver rates and currencies, exact amounts, gender
-ordering, driver requirements, expiry of unmatched requests, blocking both ways, declined offers (`requests`), **vouches (reading an npub, the list event, the one-hop badge, its words, the sync)**, **the tick schedule (standard and flat), missed payments, the final tick, the start code, the 50 m arrival rule, silence and sign-of-life
+ordering, driver requirements, expiry of unmatched requests, blocking both ways, declined offers (`requests`), **the recovery phrase and getting the ecash back from it (`recovery`, `restore`)**, **vouches (reading an npub, the list event, the one-hop badge, its words, the sync)**, **the tick schedule (standard and flat), missed payments, the final tick, the start code, the 50 m arrival rule, silence and sign-of-life
 rules, waivers, extra stops and frozen rates, the ecash wallet (funding, paying, redeeming, crash recovery, cash out, encrypted saving), a whole ride's money between a rider and a
 driver, and the real `@cashu/cashu-ts` client against a local test mint that does the real blind-signature maths**.
 
@@ -534,6 +563,7 @@ To switch, copy `env.example` to `.env`, set `VITE_TILE_URL` (and `VITE_PHOTON_U
 
 ## Known limits and roadmap
 - No escrow and no deposit. The driver's risk is the next unpaid tick (about two minutes of fare). The mint is a trusted party for both people.
+- Two devices that share one recovery phrase and spend at the same time can pick the same counter. The app recovers by itself (it skips ahead), but the second device does not see the first device's coins until the person runs Restore.
 - Funds are held per mint. A rider with ecash at another mint must add funds at the driver's mint (no swap between mints yet).
 - No in-app chat; the Contact sheet shows the other person's Signal, Telegram or phone.
 - No push notification when the app is closed (needs a push server).
@@ -549,6 +579,8 @@ To switch, copy `env.example` to `.env`, set `VITE_TILE_URL` (and `VITE_PHOTON_U
   and a cancel rate on profiles.
 
 ## Changelog
+- **Pin the drop-off on the map too** — the search page has a second button, *Set drop-off on the map* (next to *Set pickup on the map*). It opens the same full-screen map with a fixed pin (the pin starts at the drop-off already chosen, else near the pickup); the address of the spot is looked up and shown, and *Confirm drop-off* sets the place. With both places set the quote opens. Back from the pin page keeps what was chosen. `components/PinPicker.jsx` takes a `field`; the plan state has `pinField`. `scripts/e2e/nav.mjs` covers it.
+- **A 12-word recovery phrase for the ecash, and collapsible Account sections** — the ecash lives on the device, so a lost phone used to mean lost money. Now every coin the wallet makes for itself gets its secret from a recipe (a BIP39 phrase + the mint's keyset + a counter, Cashu NUT-13), and the 12 words on a new device find the coins again at the mint (NUT-09) and swap them for fresh ones, so a copy on the lost phone is worth nothing. The phrase is its own secret (not the nsec), kept encrypted on the device and never sent anywhere; the person writes it down and types three words back; a warning shows at the top of Account while there is ecash and the words are not written down. Counters are saved before the mint is asked; coins sent to a driver use random secrets (a restore never brings them back); a second device with the same phrase skips ahead past used counters; old coins are moved under the phrase once it is confirmed; words that find nothing never replace the wallet's own phrase. New: `lib/recovery.js`, `nostr/seedbox.js`, `nostr/ecashRecovery.js`, `features/ecash/RecoverySection.jsx` + `RestorePanel.jsx`, NUT-09 in the local test mint, `test/recovery.test.mjs`, `test/restore.test.mjs`, `scripts/e2e/recovery.mjs`. `@cashu/cashu-ts` is now pinned to an exact version and `@scure/bip39` is a dependency. Every section on both Account screens is now a **fold** (`ui/Fold.jsx`): closed at first, a tap opens it, what you opened is remembered on the device, and a closed section keeps what was typed in it. The vehicle and Lightning address sections of a driver who still needs them start open.
 - **Vouches replace star ratings and reviews** — ratings and reviews are removed from both apps (they are too easy to fake): no stars after a ride, none on profiles, no review text. The only reputation is now a **vouch**, "I know and trust this person". *Account → Your vouches* holds the npubs a person knows and trusts (an nsec is refused; up to 100; the list is public, kind 30102). When someone **you** vouch for also vouches for a driver or a rider, their card shows "N of your vouches know and trust this person" (one hop only; tap for names; "You know and trust this person" when they are in your own list). A vouch is for the person, in either role. Nothing shows for a person nobody you vouch for knows. Trip counts stay as plain facts. Old rating events are ignored; kind 30082 is unused. New: `lib/vouches.js`, `nostr/vouchSync.js`, `ui/VouchBadge.jsx`, `features/profile/VouchesSection.jsx`, `test/vouches.test.mjs`.
 - **Shared trips show the rider, every 6 s** — "Share my trip" now sends the rider's own phone position (it used to send the car's), and sends it every 6 seconds like the driver's pings (one shared `LOCATION_PING_MS`); before, the timer was 15 s and any car update forced a send. The car still shows until the ride starts. A stale fix is not sent. Older trip links keep working: an update from an older app is drawn as the car, as before.
 - **Strike removed; default mint is Macadamia** — the optional Strike link (funding, tips, cash out and whole rides paid Strike to Strike) is taken out of `main` again (two revert commits; the code stays in the history). The ecash mint a new driver starts with is now `https://macadamia.cash`, set in `src/config/services.js`; `VITE_DEFAULT_MINT` still overrides it. The address was given by the owner and could not be checked from the build machine.

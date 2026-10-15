@@ -5,6 +5,7 @@
 // ════════════════════════════════════════════════════════════
 
 import { useState } from "react";
+import { FoldTitle } from "../../ui/Fold.jsx";
 
 export default function KeysSection({ user }) {
   const [showSecret, setShowSecret] = useState(false);
@@ -18,7 +19,7 @@ export default function KeysSection({ user }) {
 
   return (
     <div className="bg-neutral-100 rounded-xl border border-neutral-200 p-4">
-      <p className="text-neutral-500 text-xs uppercase tracking-wider font-semibold mb-3">Your Keys</p>
+      <FoldTitle className="mb-3">Your Keys</FoldTitle>
 
       {/* Public key */}
       <KeyRow

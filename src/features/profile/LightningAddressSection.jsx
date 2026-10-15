@@ -7,6 +7,7 @@
 
 import { useState, useEffect } from "react";
 import { resolveAddress } from "../../lib/lnurl.js";
+import { FoldTitle } from "../../ui/Fold.jsx";
 
 export default function LightningAddressSection({ value, onSave }) {
   const [draft, setDraft] = useState(value);
@@ -30,12 +31,7 @@ export default function LightningAddressSection({ value, onSave }) {
   const error = status && !["checking", "saved"].includes(status) ? status : "";
   return (
     <div className="bg-neutral-100 rounded-xl border border-neutral-200 p-4 space-y-2">
-      <div className="flex items-center justify-between">
-        <p className="text-neutral-500 text-xs uppercase tracking-wider font-semibold">Lightning Address</p>
-        {!value && (
-          <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-700">Required to drive</span>
-        )}
-      </div>
+      <FoldTitle right={!value ? <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-700">Required to drive</span> : null}>Lightning Address</FoldTitle>
       <p className="text-neutral-500 text-xs">Riders pay you here. Most Lightning wallets give you one (name@domain).</p>
       <div className="flex gap-2">
         <input aria-label="Lightning address"

@@ -84,11 +84,13 @@ src/
     relay.js                      # SimplePool + local cache: publish, publishLocal, query, onEvent, startSync, fetchRecent, fetchProfile, fetchHistory
     replaceable.js  profiles.js   # latestVersions(); getProfile/getMetadata
     live.js                       # presence (public, coarse) + ride location (NIP-44, ephemeral)
+    seedbox.js                    # where the ecash recovery phrase is kept on the device: encrypted under its own key (lib/recovery.js boxKey); loadOrCreate
+    ecashRecovery.js              # makeRecovery({box,newAdapter}): the phrase for this device, the mint adapters made with its seed, confirmBackup, restore(text, urls), rotateAll; no Cashu import
     vouchSync.js                  # syncVouches(me): my vouch list, my vouches' lists, their names (3 small relay queries; login + every 5 min + after a change)
     share.js                      # "Share my trip": throwaway-key link, encrypted trip updates (kind 30091)
     wallet.js                     # NIP-47 (NWC) client
     ecash.js                      # EcashWallet: Cashu bookkeeping over a "mint adapter" (fund, pay, redeem, cash out, pending/recovery, encrypted save) — no network code, no Cashu import
-    cashuMint.js                  # the REAL mint adapter on @cashu/cashu-ts + userWallet(user) — the ONLY file that imports the Cashu library; loaded on demand (own chunk)
+    cashuMint.js                  # the REAL mint adapter on @cashu/cashu-ts (+ restore(), seed/counters) + userWallet(user) — the ONLY file that imports the Cashu library; loaded on demand (own chunk)
     reachable.js                  # probeRelay(url): a throwaway WebSocket test; never touches the pool's own connections
     link.js                       # remembers when OUR relays were unreachable (never counted as the other person's silence)
     demoData.js                   # dev-only fake riders/requests (driver app only)
@@ -115,6 +117,7 @@ src/
     evidence.js   # tip records (30086) + proofLevel + driver-side verifyPayment + disputeRecord (ticks, replies, waivers, finishes); rideConfirm is in rides.js
     bolt11.js     # paymentHash / preimageMatches
     blocks.js     # local block list helpers
+    recovery.js   # the 12-word recovery phrase (pure): newPhrase/cleanPhrase/checkPhrase/seedOf/pickCheckPositions/checkAnswers/boxKey (@scure/bip39; HKDF)
     vouches.js    # "I know and trust this person": parsePubkey (npub; an nsec is refused), vouchEvent/vouchList (kind 30102), trustFor(target, me) = {direct, via} (ONE hop, only through people I vouch for), trustHeadline/trustDetail (the badge words)
     safety.js     # trusted contacts, sms link, trip message
     nativeGeo.js  # background location via Capacitor (run-time lookup; web build has no dependency)
@@ -126,12 +129,13 @@ src/
     Layout.jsx    # AppFrame, MapPage (+ measures the Sheet so the map pads for it), Sheet (collapsible with `peek`/openKey/closeKey), FloatButton, Screen, TabBar
     MapView.jsx   # Leaflet + OpenStreetMap tiles; pins, OSRM route, cars, "me" dot, price pills, ref.fit(); trip mode (`navigation` + `follow`)
     Button.jsx Icon.jsx Avatar.jsx Money.jsx Parts.jsx (Row, Toggle, Field, ConfirmDialog, Modal, Spinner)
+    Fold.jsx      # a section that opens and closes (Account); openFold(id); FoldTitle/SectionLabel draw nothing inside a Fold (the header has the title)
     AmountInput.jsx (local currency or sats, unit swap; flat prices, counters, tips, funds)  TripMeter.jsx (time + distance card, peekMeter)  VouchBadge.jsx ContactSheet.jsx UserModal.jsx NoticeBanner.jsx ErrorBoundary.jsx RelayEditor.jsx QRCode.jsx SatsAmount.jsx
   features/
     auth/        AuthScreen (role-aware copy) + AuthSteps (unlock, key backup)
     profile/     ProfileParts (useSaveProfile, AccountHeader, ContactMethods, RelaysSection, LogoutButton),
                  VehicleSection, VouchesSection ("Your vouches": npub in, list out), TypicalFareSection ("Your rates", locked during a ride), CurrencySection, LightningAddressSection, WalletSection, KeysSection
-    ecash/       EcashSection (balance, mint, paste a token, back up, driver cash out), myMint.js
+    ecash/       EcashSection (balance, mint, paste a token, back up, driver cash out), RecoverySection (RecoveryFold + RecoveryNotice: write down 12 words, show again, I-lost-a-phone) + RestorePanel, myMint.js
     payments/    PayDriver (a Lightning address: tips), AddFunds (mint invoice → ecash, NWC or any wallet), rideTicks.js (rider: payDue), redeemTicks.js (driver: redeem + reply),
                  redeemWaivers.js (rider: collect refunds), useRideLink.js (quiet phone, sign of life, 10-minute silence)
   rider/
@@ -139,7 +143,7 @@ src/
     screens/ HomeScreen (dispatch) PlanTrip (idle/search/pin/quote: standard fare | flat price) ActiveTrip (searching/choose/confirm driver)
              OnTrip (enroute/arrived/riding) Receipt  ActivityScreen  AccountScreen
     state/ useRiderMeter (rider's own odometers + the 5% rule)
-    components/ PlaceSearch, PinPicker (drag the map under a pin → the pickup), GenderPref, ChangePickup, AddStop, FareTerms, TipSheet, DriverInfo (+ Plate, useDriverInfo)
+    components/ PlaceSearch, PinPicker (drag the map under a pin → the pickup OR the drop-off: `field`), GenderPref, ChangePickup, AddStop, FareTerms, TipSheet, DriverInfo (+ Plate, useDriverInfo)
   driver/
     App.jsx  state/DriverContext.jsx  state/useDriveOdometer.js
     screens/ HomeScreen (dispatch) Onboarding OnlineHome (offline GO / online / incoming card / waiting) NearbyRequests (the list)
@@ -249,6 +253,14 @@ carries `driverPubkey`. Stage is `enroute` (default) → `arrived` → `riding`.
 - **Local currency** (`lib/currency.js`): each person picks one in Account; `AppContext` exposes `currency`, `prices` (code → BTC price, last good ones kept 24 h), `btcPrice` (the chosen
   currency's), `usdPrice`, `priceFor(code)`. A driver's rates carry their currency (`normalizeRates` adds `currency`, default USD; limits scale with the currency). Never guess a missing price:
   show sats / wait. Use `formatFiat(x)` (never a literal "$"). The app's own rates and `MIN_OFFER_USD` are dollars (use `usdPrice`).
+- **Ecash recovery phrase (lib/recovery.js, nostr/seedbox.js, nostr/ecashRecovery.js, features/ecash/RecoverySection.jsx)**: every coin the wallet MAKES for itself has a deterministic secret (Cashu NUT-13: seed of a 12-word BIP39 phrase + keyset + counter), so the phrase
+  restores the ecash on a new device (NUT-09 `restore`). Rules: (1) the phrase is its OWN secret, never derived from the nsec (a leaked nsec must not drain the wallet); (2) it is made on first open of the wallet, before any coin, and kept ONLY encrypted under `boxKey(sk)` (its own HKDF label);
+  it never goes into an event, to a relay, to a mint, into a log, an error message or a URL; (3) counters live in `wallet.state.counters` and are saved BEFORE the mint is asked (`counterSource()`); (4) coins SENT to someone else use random secrets (`send: {type:"random"}` in `cashuMint.js split`),
+  so a restore never resurrects a token already handed to a driver; a restore skips proofs that are in `pending`; (5) after a restore every coin is swapped for a fresh one (`rotate`), so a copy on a lost phone is spent; (6) a phrase is adopted by an empty wallet ONLY if the scan finds coins;
+  a wallet that holds ecash sweeps the other phrase's coins in and keeps its own phrase; (7) on "Blinded message is already signed" (10002) the adapter skips its counters ahead and retries once (another device used the numbers) and takes no coins; (8) `@cashu/cashu-ts` is pinned EXACTLY (no `^`) and
+  `test/recovery.test.mjs` holds the NUT-13 specification vector: a library change must not alter a derived secret. The phrase counts as safe (`backedUp`) only after the person types three words back. Old random coins (`state.legacy`) are swapped under the phrase when it is confirmed.
+- **Account folds (ui/Fold.jsx)**: every setting on both Account screens is a `<Fold id title>`: closed at first (a driver's vehicle / Lightning address start open while still needed), open state remembered per device (`nostrride_fold_<id>`), content stays mounted while closed (typed text is kept).
+  A section's own `SectionLabel`/`FoldTitle` draws nothing inside a Fold. E2E scripts open a section with `openFold(page, title)` (scripts/e2e/flow.mjs). New settings go in a Fold.
 - **Vouches (lib/vouches.js, nostr/vouchSync.js, ui/VouchBadge.jsx, features/profile/VouchesSection.jsx)**: the ONLY reputation. No stars, no reviews (they are easy to fake): do not add them back. Each person publishes one public list (kind 30102,
   `d`="vouches", a `p` tag per npub, max 100) from Account → Your vouches. A vouch is for the PERSON, in either role. The badge is read for the VIEWER and is ONE hop: `trustFor(target, me)` = the people in MY list who have the target in THEIR list
   ("N of your vouches know and trust this person"; "You know and trust this person" when the target is in my own list). Never count a vouch from a person I did not choose, never go a second hop, and show NOTHING (no "0") when there is none. `syncVouches` asks
@@ -302,6 +314,7 @@ carries `driverPubkey`. Stage is `enroute` (default) → `arrived` → `riding`.
 - **nostr-tools filters**: `pool.subscribeMany(relays, filter, params)` and `querySync` take ONE filter OBJECT in the installed 2.25 (an array reaches the relay as an
   invalid filter and live subscriptions silently die). `test/pool-api.test.mjs` guards it. Test relays must be strict about this too.
 - **Pickup is never automatic**: `PlaceSearch` does NOT fill the pickup from GPS; the rider types an address or a business name, pins the spot (`PinPicker`, the "Set pickup on the map" button is always visible), or taps "Your location" (a deliberate tap). `PlanTrip` never passes `here` as a pickup. It shows a *Done* button when both places are set.
+  The DROP-OFF can be pinned too ("Set drop-off on the map", also always visible): `PlaceSearch onPin(field)` → `plan.pinField` ("pickup" | "dropoff") → `PinPicker field`; confirming sets that place and opens the quote when the other one is set.
 - **Either person finishes the ride** (no cancellations). There are NO star ratings and NO reviews (too easy to fake; see Vouches). Ended rides come back as the
   receipt/summary screen for up to 6 h until dismissed (`riderDone` / `driverDone` in localStorage).
 - **Live location**: the driver app broadcasts exact position to the rider (NIP-44, ephemeral) for the

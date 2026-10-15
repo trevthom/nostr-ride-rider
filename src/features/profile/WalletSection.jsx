@@ -18,6 +18,7 @@ import {
 } from "../../nostr/wallet.js";
 import QRCode from "../../ui/QRCode.jsx";
 import { formatFiat } from "../../lib/currency.js";
+import { FoldTitle } from "../../ui/Fold.jsx";
 
 export default function WalletSection() {
   const { wallet, setWallet, btcPrice } = useApp();
@@ -81,7 +82,7 @@ export default function WalletSection() {
   if (!wallet.connected) {
     return (
       <div>
-        <p className="text-neutral-500 text-xs uppercase tracking-wider font-semibold mb-2">Lightning Wallet (for adding funds)</p>
+        <FoldTitle className="mb-2">Lightning Wallet (for adding funds)</FoldTitle>
         <div className="bg-neutral-100 rounded-xl border border-neutral-200 p-4">
           <p className="text-neutral-500 text-xs mb-3">
             Paste your Nostr Wallet Connect string to pay and get paid in sats. We read your real
@@ -112,7 +113,7 @@ export default function WalletSection() {
   return (
     <div>
       <div className="flex items-center justify-between mb-2">
-        <p className="text-neutral-500 text-xs uppercase tracking-wider font-semibold">Lightning Wallet</p>
+        <FoldTitle>Lightning Wallet</FoldTitle>
         <div className="flex gap-3">
           <button onClick={refresh} className="text-blue-600 text-xs">Refresh</button>
           <button onClick={disconnect} className="text-red-600 text-xs">Disconnect</button>

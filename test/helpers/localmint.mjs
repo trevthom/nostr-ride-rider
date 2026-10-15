@@ -1,4 +1,4 @@
-// A small but REAL Cashu mint for tests: an HTTP server that speaks the Cashu protocol (NUT-00..07, 08)
+// A small but REAL Cashu mint for tests: an HTTP server that speaks the Cashu protocol (NUT-00..09)
 // and does the real blind-signature maths, so the actual @cashu/cashu-ts client (and our adapter in
 // src/nostr/cashuMint.js) can be tested without any network. It is NOT secure and is for tests only.
 //
@@ -6,6 +6,7 @@
 //   mint.url                  http://127.0.0.1:<port>
 //   mint.payQuote(quoteId)    pretend the Lightning invoice of a mint quote was paid
 //   mint.stats                { spent, melted: [sats…] }
+//   mint.signedCount()        how many blinded messages the mint has signed (it remembers them, for restore)
 //   await mint.close()
 import http from "node:http";
 import { randomBytes } from "node:crypto";
@@ -24,6 +25,7 @@ export async function startLocalMint({ feePpk = 0 } = {}) {
   const keys = Object.fromEntries(AMOUNTS.map((a) => [String(a), hex(secp256k1.getPublicKey(priv[a], true))]));
   const id = deriveKeysetId(keys, { unit: "sat", input_fee_ppk: feePpk });
   const spent = new Set(); // hex(Y) of spent proofs
+  const signed = new Map(); // B_ → { amount, id, C_ }: every signature given (NUT-09 restore), and a blinded message is signed only once
   const quotes = new Map(); // mint quotes
   const melts = new Map();
   const stats = { spent, melted: [] };
@@ -31,8 +33,14 @@ export async function startLocalMint({ feePpk = 0 } = {}) {
 
   const fee = (count) => Math.ceil((count * feePpk) / 1000);
   const yOf = (secret) => hashToCurve(new TextEncoder().encode(secret));
-  const sign = (outputs) =>
-    outputs.map((o) => ({ amount: o.amount, id, C_: pointFromHex(o.B_).multiply(bigOf(priv[o.amount])).toHex(true) }));
+  const sign = (outputs) => {
+    if (outputs.some((o, i) => signed.has(o.B_) || outputs.findIndex((x) => x.B_ === o.B_) !== i)) throw httpError(400, 10002, "Blinded message is already signed");
+    return outputs.map((o) => {
+      const sig = { amount: o.amount, id, C_: pointFromHex(o.B_).multiply(bigOf(priv[o.amount])).toHex(true) };
+      signed.set(o.B_, sig);
+      return sig;
+    });
+  };
   const sumOf = (list) => list.reduce((s, x) => s + Number(x.amount), 0);
 
   // Check inputs: right mint key, not spent. Returns the Y values.
@@ -51,7 +59,7 @@ export async function startLocalMint({ feePpk = 0 } = {}) {
   const httpError = (status, code, detail) => Object.assign(new Error(detail), { status, code, detail });
 
   const routes = {
-    "GET /v1/info": () => ({ name: "Local test mint", version: "test/0.1", nuts: { 4: { methods: [{ method: "bolt11", unit: "sat" }], disabled: false }, 5: { methods: [{ method: "bolt11", unit: "sat" }], disabled: false }, 7: { supported: true } } }),
+    "GET /v1/info": () => ({ name: "Local test mint", version: "test/0.1", nuts: { 4: { methods: [{ method: "bolt11", unit: "sat" }], disabled: false }, 5: { methods: [{ method: "bolt11", unit: "sat" }], disabled: false }, 7: { supported: true }, 9: { supported: true } } }),
     "GET /v1/keysets": () => ({ keysets: [{ id, unit: "sat", active: true, input_fee_ppk: feePpk }] }),
     "GET /v1/keys": () => ({ keysets: [{ id, unit: "sat", keys }] }),
     [`GET /v1/keys/${id}`]: () => ({ keysets: [{ id, unit: "sat", keys }] }),
@@ -67,14 +75,25 @@ export async function startLocalMint({ feePpk = 0 } = {}) {
       if (q.state === "ISSUED") throw httpError(400, 20002, "Tokens already issued");
       if (q.state !== "PAID") throw httpError(400, 20001, "Quote not paid");
       if (sumOf(b.outputs) !== q.amount) throw httpError(400, 11002, "Outputs do not match the quote");
+      const signatures = sign(b.outputs); // all or nothing: a refused output must not use up the quote
       q.state = "ISSUED";
-      return { signatures: sign(b.outputs) };
+      return { signatures };
     },
     "POST /v1/swap": (b) => {
       const ys = check(b.inputs);
       if (sumOf(b.inputs) - fee(b.inputs.length) !== sumOf(b.outputs)) throw httpError(400, 11002, `Transaction is not balanced (inputs ${sumOf(b.inputs)}, fee ${fee(b.inputs.length)}, outputs ${sumOf(b.outputs)})`);
+      const signatures = sign(b.outputs); // all or nothing: a refused output must not spend the inputs
       ys.forEach((y) => spent.add(y));
-      return { signatures: sign(b.outputs) };
+      return { signatures };
+    },
+    "POST /v1/restore": (b) => {
+      // NUT-09: give back the signatures for the blinded messages this mint has signed before.
+      const outputs = [], signatures = [];
+      for (const o of b.outputs || []) {
+        const sig = signed.get(o.B_);
+        if (sig) { outputs.push({ amount: sig.amount, id: sig.id, B_: o.B_ }); signatures.push(sig); }
+      }
+      return { outputs, signatures };
     },
     "POST /v1/checkstate": (b) => ({ states: b.Ys.map((Y) => ({ Y, state: spent.has(Y) ? "SPENT" : "UNSPENT", witness: null })) }),
     "POST /v1/melt/quote/bolt11": (b) => {
@@ -139,6 +158,7 @@ export async function startLocalMint({ feePpk = 0 } = {}) {
     stats,
     quotes,
     payQuote: (quote) => { quotes.get(quote).state = "PAID"; },
+    signedCount: () => signed.size,
     close: () => new Promise((r) => { server.closeAllConnections?.(); server.close(r); }),
   };
 }

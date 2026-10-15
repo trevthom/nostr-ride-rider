@@ -13,6 +13,7 @@
 import { useState, useEffect, useRef } from "react";
 import { resizeImage } from "../../lib/image.js";
 import { gapsText } from "../../lib/profile.js";
+import { FoldTitle } from "../../ui/Fold.jsx";
 
 const US_STATES = ["AL","AK","AZ","AR","CA","CO","CT","DE","DC","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY"];
 const CURRENT_YEAR = new Date().getFullYear();
@@ -66,10 +67,7 @@ export default function VehicleSection({ vehicle, ready, onSave, gapsFor }) {
 
   return (
     <div className="bg-neutral-100 rounded-xl border border-neutral-200 p-4 space-y-3">
-      <div className="flex items-center justify-between">
-        <p className="text-neutral-500 text-xs uppercase tracking-wider font-semibold">Vehicle &amp; plate</p>
-        <span className={`text-[11px] px-2 py-0.5 rounded-full ${badge.cls}`}>{badge.text}</span>
-      </div>
+      <FoldTitle right={<span className={`text-[11px] px-2 py-0.5 rounded-full ${badge.cls}`}>{badge.text}</span>}>Vehicle &amp; plate</FoldTitle>
 
       <label className="cursor-pointer block">
         <input ref={fileRef} type="file" accept="image/*" onChange={onPhotoPick} className="sr-only" aria-label="Vehicle photo" />

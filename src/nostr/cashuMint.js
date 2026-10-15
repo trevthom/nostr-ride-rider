@@ -4,6 +4,11 @@
 //  the apps load it on demand (loadEcash), so the code is fetched only when
 //  a person uses ecash.
 //
+//  Recovery: with a `seed` (from the person's recovery phrase, lib/recovery.js) every coin the wallet MAKES for itself gets its
+//  secret from the recipe seed + keyset + counter (NUT-13); the counters come from `counters` (the wallet's own, saved before each
+//  request: ecash.js counterSource). Coins that are SENT to someone else use random secrets, so a restore never brings back a
+//  token that was already handed over. restore() finds the coins again at the mint (NUT-09) after a lost device.
+//
 //  Unit: always "sat". Amounts leave this file as plain numbers.
 //  Proofs leave it as plain JSON objects (so they can be saved and sealed).
 //  Fees: split() includes the mint's input fee in what it sends, so the
@@ -12,21 +17,44 @@
 
 import { Wallet, getEncodedToken, getTokenMetadata } from "@cashu/cashu-ts";
 import { EcashWallet, makeStore } from "./ecash.js";
+import { makeSeedBox } from "./seedbox.js";
+import { makeRecovery } from "./ecashRecovery.js";
 
 const plain = (proofs) => JSON.parse(JSON.stringify(proofs));
 
-export function cashuMint(url) {
+export function cashuMint(url, { seed = null, counters = null } = {}) {
   let wallet = null;
   let loading = null;
   const w = async () => {
     if (wallet) return wallet;
     loading = loading || (async () => {
-      const next = new Wallet(url, { unit: "sat" });
+      const next = new Wallet(url, { unit: "sat", ...(seed ? { bip39seed: seed, secretsPolicy: "deterministic", ...(counters ? { counterSource: counters } : {}) } : {}) });
       await next.loadMint();
       wallet = next;
       return next;
     })().catch((e) => { loading = null; throw e; });
     return loading;
+  };
+  // Another device with the same phrase may have used the numbers we are about to use: the mint then says "Blinded message is
+  // already signed" (code 10002). Look where the mint's records end, move our counters past them (the coins found are NOT taken:
+  // they belong to the other device until the person runs Restore), and try once more.
+  const skipAhead = async () => {
+    const wl = await w();
+    const now = (await counters.snapshot?.()) || {};
+    for (const ks of wl.keyChain.getKeysets()) {
+      try {
+        const r = await wl.batchRestore(100, 100, now[ks.id] || 0, ks.id);
+        if (r.lastCounterWithSignature != null) await counters.advanceToAtLeast(ks.id, r.lastCounterWithSignature + 1);
+      } catch { /* this keyset cannot be read: leave its counter */ }
+    }
+  };
+  const again = async (fn) => {
+    try { return await fn(); }
+    catch (e) {
+      if (!(seed && counters && e?.code === 10002)) throw e;
+      await skipAhead();
+      return fn();
+    }
   };
   return {
     url,
@@ -38,15 +66,18 @@ export function cashuMint(url) {
       return (await (await w()).checkMintQuoteBolt11(id)).state;
     },
     async mint(sats, id) {
-      return plain(await (await w()).mintProofsBolt11(sats, id));
+      return plain(await again(async () => (await w()).mintProofsBolt11(sats, id)));
     },
     async split(proofs, sats) {
-      const r = await (await w()).send(sats, proofs, { includeFees: true });
+      // With a recovery phrase: what we keep is deterministic (restorable); what we send away is random, and a swap is always
+      // made (so a coin we already hold is never handed over as it is).
+      const out = seed ? { send: { type: "random" }, keep: { type: "deterministic", counter: 0 } } : undefined;
+      const r = await again(async () => (await w()).send(sats, proofs, { includeFees: true }, out));
       return { keep: plain(r.keep), send: plain(r.send) };
     },
     async receive(token) {
       try {
-        return plain(await (await w()).receive(token));
+        return plain(await again(async () => (await w()).receive(token)));
       } catch (e) {
         // The mint answered "no" (a 4xx): spent, unknown or malformed. Trying again will not help.
         const status = e?.status ?? e?.response?.status;
@@ -59,11 +90,29 @@ export function cashuMint(url) {
       return { id: q.quote, sats: q.amount.toNumber(), fee: q.fee_reserve.toNumber(), raw: q };
     },
     async melt(quote, proofs) {
-      const r = await (await w()).meltProofsBolt11(quote.raw, proofs);
+      const r = await again(async () => (await w()).meltProofsBolt11(quote.raw, proofs));
       return { paid: r.quote.state === "PAID", change: plain(r.change || []) };
     },
     async states(proofs) {
       return (await (await w()).checkProofsStates(proofs)).map((s) => s.state);
+    },
+    // Find the coins the mint signed for this phrase (NUT-09) and keep those it still calls unspent. Every keyset of the mint is
+    // scanned, active or not. `next[keysetId]` = the first counter that was never used.
+    async restore({ gapLimit = 100, batchSize = 100 } = {}) {
+      if (!seed) throw new Error("There is no recovery phrase to restore from.");
+      const wl = await w();
+      let supported = true;
+      try { supported = wl.getMintInfo().isSupported(9).supported !== false; } catch { /* unknown: try */ }
+      if (!supported) throw new Error("This mint cannot restore ecash.");
+      const found = [], next = {};
+      for (const ks of wl.keyChain.getKeysets()) {
+        const r = await wl.batchRestore(gapLimit, batchSize, 0, ks.id);
+        found.push(...r.proofs);
+        if (r.lastCounterWithSignature != null) next[ks.id] = r.lastCounterWithSignature + 1;
+      }
+      if (!found.length) return { proofs: [], next };
+      const states = await wl.checkProofsStates(found);
+      return { proofs: plain(found.filter((_, i) => states[i]?.state === "UNSPENT")), next };
     },
     encode(proofs) {
       return getEncodedToken({ mint: url, proofs, unit: "sat" });
@@ -84,9 +133,9 @@ const wallets = new WeakMap();
 export function userWallet(user) {
   let ec = wallets.get(user.sk);
   if (!ec) {
-    const mints = new Map();
-    const mintFor = (url) => { if (!mints.has(url)) mints.set(url, cashuMint(url)); return mints.get(url); };
-    ec = new EcashWallet({ store: makeStore(user), mintFor, tokenInfo });
+    const recovery = makeRecovery({ box: makeSeedBox(user), newAdapter: cashuMint });
+    ec = new EcashWallet({ store: makeStore(user), mintFor: recovery.mintFor, tokenInfo });
+    recovery.attach(ec);
     wallets.set(user.sk, ec);
   }
   return ec;

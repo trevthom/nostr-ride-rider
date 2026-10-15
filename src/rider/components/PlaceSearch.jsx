@@ -7,7 +7,7 @@
 //  (a deliberate tap that uses the GPS address). Recent places are suggested for the dropoff.
 //  onChange(field, place) is called when a result is chosen.
 //  onBack() is the back arrow (one screen back); onExit() is the X that cancels the planning and goes home;
-//  onPin() opens the map pin picker for the pickup ("Set pickup on the map").
+//  onPin(field) opens the map pin picker for the pickup or the drop-off ("Set pickup on the map", "Set drop-off on the map"; both always visible).
 //  onDone() shows a "Done" button once both places are set, so a rider who
 //  tapped Edit by mistake can go straight back to the quote.
 // ════════════════════════════════════════════════════════════
@@ -119,14 +119,16 @@ export default function PlaceSearch({ pickup, dropoff, here, near, recents, onCh
       </div>
 
       {onPin && (
-        <div className="px-5 mt-3">
-          <button type="button" onClick={onPin} className="w-full flex items-center gap-3 rounded-xl border border-neutral-300 px-4 py-3 text-left active:bg-neutral-100">
-            <span className="w-9 h-9 rounded-full bg-neutral-100 flex items-center justify-center shrink-0"><Icon name="pin" size={18} /></span>
-            <span className="min-w-0">
-              <span className="block text-[15px] font-semibold">Set pickup on the map</span>
-              <span className="block text-sm text-neutral-500">Drag the map to pin the exact spot</span>
-            </span>
-          </button>
+        <div className="px-5 mt-3 space-y-2">
+          {[["pickup", "Set pickup on the map", "Drag the map to pin the exact spot"], ["dropoff", "Set drop-off on the map", "Drag the map to pin where you are going"]].map(([field, title, hint]) => (
+            <button key={field} type="button" onClick={() => onPin(field)} className="w-full flex items-center gap-3 rounded-xl border border-neutral-300 px-4 py-3 text-left active:bg-neutral-100">
+              <span className="w-9 h-9 rounded-full bg-neutral-100 flex items-center justify-center shrink-0"><Icon name="pin" size={18} /></span>
+              <span className="min-w-0">
+                <span className="block text-[15px] font-semibold">{title}</span>
+                <span className="block text-sm text-neutral-500">{hint}</span>
+              </span>
+            </button>
+          ))}
         </div>
       )}
       {!pickup && (

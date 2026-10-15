@@ -18,7 +18,15 @@
 //      melt(quote, proofs) → { paid, change }          pay it from ecash
 //      states(proofs) → ["UNSPENT" | "SPENT" | "PENDING"]
 //      encode(proofs) → "cashuB…"
+//      restore() → { proofs, next }                    find the coins the mint signed for this recovery phrase and still
+//                                                       calls unspent; next = { keysetId: first unused counter }
 //    }
+//
+//  Recovery (see lib/recovery.js, nostr/ecashRecovery.js): the adapter makes every coin's secret from the person's
+//  recovery phrase and a counter per keyset (Cashu NUT-13). The counters live here, in `state.counters`, and are
+//  SAVED BEFORE the mint is asked (counterSource()), so a crash can never make the wallet reuse a number; a coin the
+//  mint signed but the wallet never saved is found again by restore(). Coins SENT to someone else use random secrets,
+//  so a restore never brings back a token that was already handed to a driver.
 //
 //  Safety rules:
 //    • Proofs are saved on this device ONLY ENCRYPTED to the user's own key (NIP-44), in
@@ -28,7 +36,7 @@
 //      back what the mint still says is unspent.
 //    • A paid funding invoice is remembered (`quotes`) until its ecash is claimed, so a
 //      reload between "paid" and "minted" loses nothing.
-//    • Nobody but the user can read the proofs. Never log them.
+//    • Nobody but the user can read the proofs. Never log them. Never log the recovery phrase either.
 //
 //  The wallet is a plain object so it can be tested without a browser.
 // ════════════════════════════════════════════════════════════
@@ -70,7 +78,7 @@ export function makeStore(user) {
   };
 }
 
-const emptyState = () => ({ v: 1, mints: {}, pending: [], quotes: [], redeemed: [] });
+const emptyState = () => ({ v: 1, mints: {}, pending: [], quotes: [], redeemed: [], counters: {}, legacy: [] });
 
 export class EcashWallet {
   // store: { load, save }   mintFor: (url) => adapter   tokenInfo: (token) => { mint, sats } | null
@@ -281,6 +289,106 @@ export class EcashWallet {
       this.settle("melt-" + q.id);
       return { paidSats: q.sats, feeSats: need - sum(res.change) - q.sats };
     });
+  }
+
+  // ── Recovery: counters, restore, rotate ──
+  // The counter source the Cashu client uses for deterministic coins. Every change is saved (synchronously) BEFORE the
+  // client builds its request to the mint: a number is never used twice, even if the app dies in the middle.
+  counterSource() {
+    if (this._counters) return this._counters;
+    const c = () => (this.state.counters ||= {});
+    const next = (id) => Math.max(0, Math.floor(Number(c()[id]) || 0));
+    this._counters = {
+      reserve: async (id, n) => {
+        const start = next(id);
+        if (n > 0) { c()[id] = start + n; this._save(); }
+        return { start, count: n };
+      },
+      reserveAt: async (id, start, count) => {
+        if (start < next(id)) throw new EcashError("counter", "That counter range was already used.");
+        c()[id] = start + count;
+        this._save();
+        return { start, count };
+      },
+      advanceToAtLeast: async (id, min) => { if (next(id) < min) { c()[id] = min; this._save(); } },
+      snapshot: async () => ({ ...c() }),
+      setNext: async (id, n) => { c()[id] = n; this._save(); },
+    };
+    return this._counters;
+  }
+
+  // Swap every coin held at `url` for fresh ones. Coins that were copied somewhere (a lost phone, a backup) are spent
+  // at the mint by this, so the copies are worth nothing. Returns { sats } held after. Throws EcashError.
+  rotate(url) {
+    return this._exclusive(() => this._rotate(url));
+  }
+  async _rotate(url) {
+    const have = this._proofs(url);
+    if (!have.length) return { sats: 0 };
+    const mint = this.mintFor(url);
+    let fresh;
+    try {
+      fresh = await mint.receive(mint.encode(have));
+    } catch (e) {
+      throw new EcashError("mint", e?.message || "The mint did not answer.", e?.definitive === true);
+    }
+    this._setProofs(url, fresh);
+    this._save();
+    return { sats: sum(fresh) };
+  }
+
+  // Find the ecash that belongs to a recovery phrase at each mint, and make it this wallet's own.
+  //   no `source`  : the wallet's own phrase (a new device that took the person's phrase). The coins found are kept at
+  //                  once, then all of them are swapped for fresh ones.
+  //   `source(url)`: an adapter made from ANOTHER phrase (this wallet already holds ecash under its own phrase). Its
+  //                  coins are swapped into this wallet; the other phrase is not needed afterwards.
+  // Only coins the mint calls UNSPENT are taken. Returns [{ mint, found, added, rotated, error }] per mint.
+  restore(urls, { source = null } = {}) {
+    return this._exclusive(async () => {
+      const rows = [];
+      for (const url of [...new Set(urls)]) {
+        const row = { mint: url, found: 0, added: 0, rotated: false, error: "" };
+        rows.push(row);
+        try {
+          const scan = source ? source(url) : this.mintFor(url);
+          const { proofs, next } = await scan.restore();
+          row.found = sum(proofs);
+          const inFlight = new Set(this.state.pending.flatMap((p) => p.proofs.map((x) => x.secret)));
+          const mine = new Set(this._proofs(url).map((p) => p.secret));
+          const take = proofs.filter((p) => !inFlight.has(p.secret) && !mine.has(p.secret));
+          if (source) {
+            if (take.length) {
+              const fresh = await this.mintFor(url).receive(scan.encode(take));
+              this._setProofs(url, [...this._proofs(url), ...fresh]);
+              this._save();
+              row.added = sum(fresh);
+            }
+            row.rotated = true;
+          } else {
+            for (const [id, n] of Object.entries(next || {})) await this.counterSource().advanceToAtLeast(id, n);
+            this._setProofs(url, [...this._proofs(url), ...take]);
+            this._save();
+            row.added = sum(take);
+            try { await this._rotate(url); row.rotated = true; } catch { /* the coins are kept; rotating can be tried again */ }
+          }
+        } catch (e) {
+          row.error = e?.message || "The mint did not answer.";
+        }
+      }
+      return rows;
+    });
+  }
+
+  // Coins made before the wallet had a recovery phrase (random secrets) are swapped, once, for coins under the phrase.
+  // `state.legacy` lists the mints that still hold old coins. Safe to call again: a mint that fails stays listed.
+  async migrate() {
+    for (const url of [...(this.state.legacy || [])]) {
+      try {
+        await this.rotate(url);
+        this.state.legacy = this.state.legacy.filter((u) => u !== url);
+        this._save();
+      } catch { /* the mint is down: try again next time */ }
+    }
   }
 
   // Everything, as tokens, to keep a backup (one token per mint).
