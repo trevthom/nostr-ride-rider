@@ -20,9 +20,11 @@ assert.ok(s1.created_at <= r2.created_at, "a different d-tag is not pushed forwa
 assert.ok(o1.created_at <= r2.created_at, "another author is not pushed forward");
 
 // Regular events keep the real clock.
-const now = Math.floor(Date.now() / 1000);
+// The clock second may roll over between the two builds, so compare with the seconds read before and after.
+const before = Math.floor(Date.now() / 1000);
 const n1 = buildSignedEvent(1, "hi", [], me.sk);
 const n2 = buildSignedEvent(1, "hi", [], me.sk);
-assert.ok(Math.abs(n1.created_at - now) <= 1 && n2.created_at === n1.created_at, "non-replaceable events are not shifted");
+const after = Math.floor(Date.now() / 1000);
+assert.ok(n1.created_at >= before && n2.created_at <= after && n2.created_at - n1.created_at <= after - before, "non-replaceable events are not shifted");
 console.log("events checks passed");
 process.exit(0);

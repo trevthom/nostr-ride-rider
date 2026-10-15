@@ -139,9 +139,15 @@ export function AppProvider({ initialView, children }) {
   // opened with the user's key, and anything paid but not yet claimed is claimed. `ecashTick` re-renders screens.
   const [ecash, setEcash] = useState(null);
   const [, setEcashTick] = useState(0);
+  // "Disconnected": the person removed the ecash wallet from THIS device (recovery.disconnect). The wallet is not loaded, and a new one
+  // is made only when they connect again. Read from the device each render (it is one small flag per user).
+  const [offTick, setOffTick] = useState(0);
+  const offKey = user?.publicKey ? "ecashOff_" + user.publicKey.slice(0, 16) : null;
+  const ecashOff = offKey ? getSetting(offKey, false) === true : false;
+  void offTick;
   useEffect(() => {
-    if (!user?.sk) { setEcash(null); return; }
-    let alive = true, off = null;
+    if (!user?.sk || ecashOff) { setEcash(null); return undefined; }
+    let alive = true, off = null, timer = null;
     import("../nostr/cashuMint.js").then((m) => {
       if (!alive) return;
       const w = m.userWallet(user);
@@ -149,9 +155,29 @@ export function AppProvider({ initialView, children }) {
       setEcash(w);
       w.claimAll().catch(() => {});
       w.recoverPending().catch(() => {});
+      // Coins that were moved elsewhere (a restore on another device swaps them) are spent: drop them, so this device shows the truth.
+      w.syncSpent().catch(() => {});
+      timer = setInterval(() => w.syncSpent().catch(() => {}), 5 * 60000);
     }).catch(() => {});
-    return () => { alive = false; if (off) off(); };
-  }, [user?.publicKey]); // eslint-disable-line react-hooks/exhaustive-deps
+    return () => { alive = false; if (off) off(); if (timer) clearInterval(timer); };
+  }, [user?.publicKey, ecashOff]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Remove the ecash wallet from this device (swap the coins, then erase them and the phrase here), and the other way round.
+  const disconnectEcash = useCallback(async (opts) => {
+    if (!ecash || !offKey) return { swapped: 0 };
+    const out = await ecash.recovery.disconnect(opts);
+    const m = await import("../nostr/cashuMint.js");
+    m.forgetWallet(user);
+    setSetting(offKey, true);
+    setEcash(null);
+    setOffTick((t) => t + 1);
+    return out;
+  }, [ecash, user, offKey]);
+  const connectEcash = useCallback(() => {
+    if (!offKey) return;
+    setSetting(offKey, false);
+    setOffTick((t) => t + 1);
+  }, [offKey]);
 
   // Vouches (lib/vouches.js): bring in my list and the lists of the people I vouch for, so the badge on a card can say
   // "N of your vouches know and trust this person". At login, every 5 minutes, and after I change my own list.
@@ -347,6 +373,9 @@ export function AppProvider({ initialView, children }) {
     setWallet,
     refreshVouches,
     ecash,
+    ecashOff,
+    disconnectEcash,
+    connectEcash,
     currency,
     setCurrency,
     prices,

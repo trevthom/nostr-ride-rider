@@ -107,7 +107,7 @@ function SetupModal({ recovery, onClose }) {
 }
 
 function Panel() {
-  const { ecash, pushNotice } = useApp();
+  const { ecash, ecashOff, pushNotice } = useApp();
   const recovery = ecash?.recovery;
   const [setup, setSetup] = useState(false);
   const [shown, setShown] = useState(false);
@@ -124,6 +124,7 @@ function Panel() {
     const id = setTimeout(() => setShown(false), SHOW_MS);
     return () => clearTimeout(id);
   }, [shown]);
+  if (ecashOff) return <p className="text-sm text-neutral-500" role="status">The ecash wallet is not connected on this device. Connect it in Ecash wallet first; then you can restore ecash here.</p>;
   if (!recovery) return <p className="text-sm text-neutral-500" role="status">Loading your wallet…</p>;
 
   const safe = recovery.backedUp();
@@ -170,7 +171,7 @@ function Panel() {
       )}
       {msg && <p className="text-sm text-neutral-700 mb-3" role="status">{msg}</p>}
 
-      <RestorePanel recovery={recovery} ecash={ecash} />
+      <RestorePanel recovery={recovery} ecash={ecash} onRestored={(rows) => { if (rows.some((r) => r.added > 0) && !recovery.backedUp()) setSetup(true); }} />
 
       {setup && <SetupModal recovery={recovery} onClose={(done) => { setSetup(false); if (done) pushNotice("Your ecash is protected. Keep the paper safe."); }} />}
       <ConfirmDialog open={ask} title="Swap all your coins?" confirmLabel="Swap them" cancelLabel="Not now"

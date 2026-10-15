@@ -251,7 +251,7 @@ function startFunds(c, btcPrice) {
 }
 
 function ConfirmDriver({ request, trip, offer, onBack, onDecline }) {
-  const { liveTick, ecash, prices, priceFor, btcPrice } = useApp();
+  const { liveTick, ecash, ecashOff, prices, priceFor, btcPrice } = useApp();
   const { confirmDriver, drivers } = useRider();
   const c = parse(offer);
   const [done, setDone] = useState(false);
@@ -264,7 +264,7 @@ function ConfirmDriver({ request, trip, offer, onBack, onDecline }) {
   const need = c.mode === "flat" ? startFunds(c, null) : startFunds(c, price);
   const have = ecash && mint ? ecash.balance(mint) : 0;
   const short = need != null ? Math.max(0, need - have) : 0;
-  const ready = !!rates && !!mint && need != null && short === 0;
+  const ready = !!rates && !!mint && need != null && short === 0 && !ecashOff;
   void prices;
 
   const go = () => {
@@ -296,6 +296,8 @@ function ConfirmDriver({ request, trip, offer, onBack, onDecline }) {
         </p>
         {!rates || !mint ? (
           <p className="text-amber-700 text-sm mt-3" role="alert">This driver's reply is missing its rates or its ecash mint, so it cannot be used. Choose another driver.</p>
+        ) : ecashOff ? (
+          <p className="text-amber-700 text-sm mt-3" role="alert">Your ecash wallet is not connected on this device, so you cannot pay for a ride. Connect it in Account.</p>
         ) : need == null ? (
           <p className="text-amber-700 text-sm mt-3" role="alert">The bitcoin price for {rates.currency} is not available yet. Try again in a moment.</p>
         ) : null}

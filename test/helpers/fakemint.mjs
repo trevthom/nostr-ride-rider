@@ -54,7 +54,7 @@ export const tokenInfo = (t) => {
     return { mint, sats: proofs.reduce((s, p) => s + Number(p.amount), 0) };
   } catch { return null; }
 };
-export const memStore = () => { let saved = null; return { load: () => saved && JSON.parse(saved), save: (s) => { saved = JSON.stringify(s); } }; };
+export const memStore = () => { let saved = null; return { load: () => saved && JSON.parse(saved), save: (s) => { saved = JSON.stringify(s); }, erase: () => { saved = null; } }; };
 export const build = (net, store = memStore()) => new EcashWallet({ store, mintFor: (u) => new FakeMint(u, net), tokenInfo });
 
 // Fill a wallet with `sats` (the fake mint says the invoice is paid at once).

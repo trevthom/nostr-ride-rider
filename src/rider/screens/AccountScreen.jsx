@@ -5,6 +5,7 @@
 // ════════════════════════════════════════════════════════════
 
 import { useApp } from "../../state/AppContext.jsx";
+import { useRider } from "../state/RiderContext.jsx";
 import { Screen } from "../../ui/Layout.jsx";
 import { AccountHeader, ContactMethods, RelaysSection, BlockedSection, LogoutButton } from "../../features/profile/ProfileParts.jsx";
 import WalletSection from "../../features/profile/WalletSection.jsx";
@@ -18,6 +19,7 @@ import { RecoveryFold, RecoveryNotice } from "../../features/ecash/RecoverySecti
 
 export default function AccountScreen() {
   const { user } = useApp();
+  const { activeRide } = useRider();
   return (
     <Screen title="Account">
       <div className="space-y-7">
@@ -25,7 +27,7 @@ export default function AccountScreen() {
         <RecoveryNotice />
         <div>
           <Fold id="currency" title="Currency"><CurrencySection /></Fold>
-          <Fold id="ecash" title="Ecash wallet"><EcashSection /></Fold>
+          <Fold id="ecash" title="Ecash wallet"><EcashSection locked={!!activeRide} /></Fold>
           <RecoveryFold />
           <Fold id="wallet" title="Lightning wallet"><WalletSection /></Fold>
           <Fold id="safety" title="Trusted contacts"><SafetySection /></Fold>

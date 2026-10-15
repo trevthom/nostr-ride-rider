@@ -12,8 +12,9 @@
 //    wallet.recovery.phrase()            the 12 words (show only on request; never log, never send)
 //    wallet.recovery.backedUp()          true after confirmBackup()
 //    wallet.recovery.confirmBackup()     the person has the words on paper; old coins are moved under the phrase
-//    wallet.recovery.restore(text, urls) bring the ecash back from a phrase on a new device → [{ mint, found, added, rotated, error }]
+//    wallet.recovery.restore(text, urls) bring the ecash of a phrase into THIS wallet (swapped under its own phrase) → [{ mint, found, added, rotated, error }]
 //    wallet.recovery.rotateAll()         "I lost my phone": swap every coin for a fresh one so a copy is worth nothing
+//    wallet.recovery.disconnect({force}) remove the wallet from this device (swap, then erase the coins and the phrase here)
 // ════════════════════════════════════════════════════════════
 
 import { EcashError } from "./ecash.js";
@@ -24,7 +25,7 @@ export function makeRecovery({ box, newAdapter }) {
   const had = box.load();
   // If the browser cannot save (a private window), the wallet still works for this visit, but nothing can be recovered.
   let rec = had || loadOrCreate(box) || { v: 1, phrase: newPhrase(), backedUp: false, at: Date.now(), volatile: true };
-  let seed = seedOf(rec.phrase);
+  const seed = seedOf(rec.phrase);
   let wallet = null;
   const mints = new Map();
 
@@ -57,43 +58,41 @@ export function makeRecovery({ box, newAdapter }) {
       return wallet.migrate();
     },
 
+    // Bring the ecash of a phrase into THIS wallet. The coins are swapped for fresh ones under this wallet's OWN phrase, so the phrase that was
+    // typed (and any device that holds it) is left with nothing: a phrase that leaked, or a lost phone that was compromised, cannot take it
+    // again. The person must write down this wallet's phrase (the screen asks). Typing this wallet's own phrase just looks again.
     async restore(text, urls) {
       const c = checkPhrase(text);
       if (c.error) throw new EcashError("phrase", c.error, true);
       const list = [...new Set((urls || []).filter(Boolean))];
       if (!list.length) throw new EcashError("mint", "Add the address of at least one mint to look in.", true);
       if (c.phrase === rec.phrase) return wallet.restore(list);
-      const empty = wallet.total() === 0 && wallet.pendingList().length === 0 && wallet.quotesList().length === 0;
-      if (empty) {
-        // A new device. First LOOK with the typed phrase, and change nothing: a phrase that finds no ecash (a typing slip that
-        // still passes the checksum, someone else's words) must not replace this wallet's own phrase or be marked as written down.
-        const other = seedOf(c.phrase);
-        const probe = [];
-        let any = false;
-        for (const url of list) {
-          try {
-            const r = await newAdapter(url, { seed: other }).restore();
-            const found = r.proofs.reduce((s, p) => s + Number(p.amount), 0);
-            probe.push({ mint: url, found, added: 0, rotated: false, error: "" });
-            if (r.proofs.length) any = true;
-          } catch (e) {
-            probe.push({ mint: url, found: 0, added: 0, rotated: false, error: e?.message || "The mint did not answer." });
-          }
-        }
-        if (!any) return probe;
-        // It found ecash, so these are the person's words: take them as this wallet's own. Nothing is lost, the wallet holds nothing.
-        rec = { v: 1, phrase: c.phrase, backedUp: true, at: Date.now() };
-        box.save(rec);
-        seed = seedOf(rec.phrase);
-        mints.clear();
-        wallet.state.counters = {};
-        wallet.state.legacy = [];
-        wallet._save();
-        return wallet.restore(list);
-      }
-      // This wallet already holds ecash under its own phrase: bring the other phrase's coins in and keep our own phrase.
       const other = seedOf(c.phrase);
       return wallet.restore(list, { source: (url) => newAdapter(url, { seed: other }) });
+    },
+
+    // Remove the wallet from THIS device: the coins are swapped for new ones first (a copy taken earlier is then worth nothing), then the
+    // coins, the counters and the recovery phrase are erased here. The money stays at the mint and comes back with the 12 words.
+    // Refused while a payment is being sent, and refused while there is money and the words were not written down (it would be lost).
+    // `force` goes on even if a mint could not be reached to swap the coins (a copy taken earlier could still be spent).
+    async disconnect({ force = false } = {}) {
+      await wallet.syncSpent().catch(() => {}); // coins that were moved elsewhere (a restore on another device) are not money here any more
+      await wallet.recoverPending().catch(() => {}); // a token made but never published goes back into the wallet
+      if (wallet.pendingList().length) throw new EcashError("busy", "A payment is still being sent. Try again in a minute.");
+      const total = wallet.total();
+      if (total > 0 && !rec.backedUp) throw new EcashError("phrase", "Write down your 12 words first (Recovery phrase). Without them, disconnecting would lose this money.", true);
+      let swapped = 0;
+      if (total > 0) {
+        const failed = [];
+        for (const row of await recovery.rotateAll()) {
+          if (row.error) failed.push(row.mint); else swapped += row.sats || 0;
+        }
+        if (failed.length && !force) throw Object.assign(new EcashError("swap", `Could not swap the coins at ${failed.join(", ")}: the mint did not answer. Try again, or disconnect anyway (a copy of the old coins could still be spent).`), { failed });
+      }
+      wallet.wipe();
+      box.erase?.();
+      mints.clear();
+      return { swapped };
     },
 
     async rotateAll() {

@@ -19,7 +19,7 @@ import { getMyMint } from "./myMint.js";
 
 const known = (ecash) => [...new Set([getMyMint(), DEFAULT_MINT, ...Object.keys(ecash?.state?.mints || {})])];
 
-export default function RestorePanel({ recovery, ecash }) {
+export default function RestorePanel({ recovery, ecash, onRestored }) {
   const { btcPrice, pushNotice } = useApp();
   const [open, setOpen] = useState(false);
   const [text, setText] = useState("");
@@ -44,6 +44,7 @@ export default function RestorePanel({ recovery, ecash }) {
       setText(""); // the words are gone from the screen as soon as the search is over
       const sats = out.reduce((s, r) => s + r.added, 0);
       if (sats > 0) pushNotice(`Found ${moneyText(sats, btcPrice)} of ecash.`);
+      if (onRestored) onRestored(out);
     } catch (e) {
       setError(e.message || "The search failed.");
     }
@@ -54,7 +55,11 @@ export default function RestorePanel({ recovery, ecash }) {
   return (
     <div className="rounded-2xl border border-neutral-200 p-4 space-y-3">
       <p className="font-medium text-[15px]">Restore ecash from 12 words</p>
-      <p className="text-xs text-neutral-500">Type the words you wrote down, in order. Then the app looks for your ecash at each mint below.</p>
+      <p className="text-xs text-neutral-500">
+        Type the words you wrote down, in order. The app looks for your ecash at each mint below and moves it under THIS wallet's own 12 words.
+        The words you typed are then empty: nobody who has them, or a lost phone that still holds them, can take the money again.
+        You will be asked to write down this wallet's new words.
+      </p>
       <textarea aria-label="Your 12 recovery words" value={text} rows={3} autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false}
         onChange={(e) => { setText(e.target.value); setError(""); setRows(null); }} placeholder="word1 word2 word3 …" className={`${inputCls} !text-sm font-mono`} />
       {check?.error && <p className="text-xs text-amber-800" role="status">{check.error}</p>}
@@ -84,7 +89,7 @@ export default function RestorePanel({ recovery, ecash }) {
           {rows.map((r) => (
             <li key={r.mint} className={r.error ? "text-red-700" : "text-neutral-700"}>
               <span className="font-medium">{mintLabel(r.mint)}:</span>{" "}
-              {r.error ? r.error : r.found === 0 ? "nothing found." : `found ${moneyText(r.found, btcPrice)}${r.added < r.found ? `, ${moneyText(r.added, btcPrice)} added` : ", added to your wallet"}.`}
+              {r.error ? r.error : r.found === 0 ? "nothing found." : `found ${moneyText(r.found, btcPrice)}${r.added < r.found ? `, ${moneyText(r.added, btcPrice)} moved here` : ", moved to your wallet"}.`}
             </li>
           ))}
         </ul>

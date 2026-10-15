@@ -8,13 +8,16 @@
 //    • back up the wallet as tokens (ecash is cash: whoever holds a token owns it)
 //    (the 12-word recovery phrase that brings the ecash back on a new phone is its own Account part: RecoverySection.jsx)
 //    • driver: cash out to their Lightning address
+//    • Disconnect ecash from this device: the coins are swapped for new ones (a copy taken earlier is then worth nothing), then the coins
+//      and the recovery phrase are erased HERE; the money stays at the mint and comes back with the 12 words. While disconnected, this part
+//      offers to connect a new, empty wallet.
 //  The ecash is saved on this device, encrypted to your key. Logging out keeps it.
 // ════════════════════════════════════════════════════════════
 
 import { useState } from "react";
 import { useApp } from "../../state/AppContext.jsx";
 import { IS_DRIVER_APP } from "../../config/app.js";
-import { SectionLabel, inputCls } from "../../ui/Parts.jsx";
+import { SectionLabel, ConfirmDialog, inputCls } from "../../ui/Parts.jsx";
 import Button from "../../ui/Button.jsx";
 import Icon from "../../ui/Icon.jsx";
 import Money, { moneyText } from "../../ui/Money.jsx";
@@ -24,7 +27,7 @@ import AddFunds from "../payments/AddFunds.jsx";
 import { getMyMint, setMyMint } from "./myMint.js";
 
 export default function EcashSection({ locked = false }) {
-  const { ecash, user, btcPrice, pushNotice } = useApp();
+  const { ecash, ecashOff, disconnectEcash, connectEcash, user, btcPrice, pushNotice } = useApp();
   const [mint, setMint] = useState(getMyMint());
   const [draft, setDraft] = useState(mint);
   const [adding, setAdding] = useState(false);
@@ -32,6 +35,8 @@ export default function EcashSection({ locked = false }) {
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState("");
   const [backup, setBackup] = useState("");
+  const [askOff, setAskOff] = useState(false);
+  const [swapFailed, setSwapFailed] = useState(false);
   const draftUrl = cleanMintUrl(draft);
   const balances = ecash ? ecash.balances() : {};
   const total = ecash ? ecash.total() : 0;
@@ -79,6 +84,39 @@ export default function EcashSection({ locked = false }) {
     }
     setBusy("");
   };
+
+  // Take the wallet off this device. Refused (with the reason) while a payment is being sent, or while there is money and the 12 words are
+  // not written down. If a mint cannot be reached to swap the coins, the person may go on anyway.
+  const askDisconnect = () => {
+    setMsg(""); setSwapFailed(false);
+    if (total > 0 && !ecash.recovery.backedUp()) return setMsg("Write down your 12 words first (Recovery phrase). Without them, disconnecting would lose this money.");
+    setAskOff(true);
+  };
+  const disconnect = async (force = false) => {
+    setAskOff(false); setBusy("off"); setMsg("");
+    try {
+      await disconnectEcash({ force });
+      pushNotice("Ecash was disconnected from this device.");
+    } catch (e) {
+      setSwapFailed(e.code === "swap");
+      setMsg(e.message || "The wallet could not be disconnected.");
+    }
+    setBusy("");
+  };
+
+  if (ecashOff) {
+    return (
+      <section>
+        <SectionLabel>Ecash wallet</SectionLabel>
+        <p className="text-sm text-neutral-500 mb-3">
+          The ecash wallet is not connected on this device, so there is no ecash here.
+          {IS_DRIVER_APP ? " You cannot go online or be paid until you connect it." : " You cannot choose a driver until you connect it."}
+          {" "}Connecting makes a new, empty wallet with new 12 words. To bring back ecash from an earlier wallet, connect first, then use <em>Restore</em> in Recovery phrase.
+        </p>
+        <Button onClick={connectEcash}>Connect ecash wallet</Button>
+      </section>
+    );
+  }
 
   return (
     <section>
@@ -150,6 +188,13 @@ export default function EcashSection({ locked = false }) {
               )}
             </div>
           )}
+          <div className="mt-4">
+            <button type="button" onClick={askDisconnect} disabled={locked || busy === "off"} className="text-sm font-semibold underline text-red-600 disabled:text-neutral-400">
+              {busy === "off" ? "Disconnecting…" : "Disconnect ecash from this device"}
+            </button>
+            <p className="text-xs text-neutral-500 mt-1">{locked ? "Not while a ride is running." : "Use this on a phone you are about to lose, sell or stop trusting. The money stays at the mint and comes back with your 12 words."}</p>
+            {swapFailed && <Button variant="danger" size="md" className="mt-2" onClick={() => disconnect(true)}>Disconnect anyway</Button>}
+          </div>
           {msg && <p className="text-sm text-neutral-700 mt-3" role="status">{msg}</p>}
           <p className="text-xs text-neutral-500 mt-3">
             Your ecash is saved on this device, encrypted with your key. If you lose the phone, your 12 recovery words bring it back (see Recovery phrase). Logging out keeps it here.
@@ -157,6 +202,9 @@ export default function EcashSection({ locked = false }) {
         </>
       )}
       {adding && <AddFunds mint={mint} onClose={() => setAdding(false)} />}
+      <ConfirmDialog open={askOff} title="Disconnect ecash from this device?" confirmLabel="Swap coins and disconnect" cancelLabel="Keep it"
+        message={`Your coins are swapped for new ones first, so a copy of the old coins is worth nothing. Then the wallet and its 12 words are erased from this device.${total > 0 ? ` ${moneyText(total, btcPrice)} stays at the mint: you get it back with your 12 words.` : ""}`}
+        onConfirm={() => disconnect(false)} onCancel={() => setAskOff(false)} />
     </section>
   );
 }

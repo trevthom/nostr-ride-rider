@@ -153,6 +153,8 @@ export function tokenInfo(token) {
 
 // The wallet of the logged-in user, with real mints. One per user key.
 const wallets = new WeakMap();
+// After the wallet was disconnected from this device: the next userWallet(user) makes a new, empty wallet with a new phrase.
+export function forgetWallet(user) { wallets.delete(user.sk); }
 export function userWallet(user) {
   let ec = wallets.get(user.sk);
   if (!ec) {

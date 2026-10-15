@@ -291,6 +291,39 @@ export class EcashWallet {
     });
   }
 
+  // Drop the coins the mint calls SPENT. Money that was moved elsewhere (a restore on another device swaps every coin, so the copies
+  // on this device are spent) must not stay in this device's balance. The mint is asked WITHOUT holding the money lock (a slow mint must
+  // never hold up a payment); only coins that are still held and reported spent are removed. Returns the sats dropped.
+  async syncSpent() {
+    let dropped = 0;
+    for (const url of Object.keys(this.state.mints)) {
+      const snapshot = this._proofs(url).slice();
+      if (!snapshot.length) continue;
+      let states;
+      try { states = await this.mintFor(url).states(snapshot); } catch { continue; } // the mint is down: try again later
+      if (!Array.isArray(states) || states.length !== snapshot.length) continue;
+      const gone = new Set(snapshot.filter((_, i) => states[i] === "SPENT").map((p) => p.secret));
+      if (!gone.size) continue;
+      await this._exclusive(async () => {
+        const have = this._proofs(url);
+        const keep = have.filter((p) => !gone.has(p.secret));
+        dropped += sum(have) - sum(keep);
+        this._setProofs(url, keep);
+      });
+    }
+    if (dropped) this._save();
+    return dropped;
+  }
+
+  // Forget everything this device holds: the coins, the counters, the pending and unclaimed lists, and the saved copy. Used by
+  // recovery.disconnect() after the coins were swapped; the wallet object is not used again.
+  wipe() {
+    this.state = emptyState();
+    this._counters = null;
+    try { this.store.erase?.(); } catch { /* nothing to erase */ }
+    this.listeners.forEach((fn) => { try { fn(); } catch { /* ignore */ } });
+  }
+
   // Is `url` a working mint? Resolves { name } or throws an EcashError with a short reason (an address that is a website, a mint that
   // does not answer). Used before a mint address is saved.
   async checkMint(url) {
