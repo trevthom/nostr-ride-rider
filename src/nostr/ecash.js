@@ -291,6 +291,15 @@ export class EcashWallet {
     });
   }
 
+  // Is `url` a working mint? Resolves { name } or throws an EcashError with a short reason (an address that is a website, a mint that
+  // does not answer). Used before a mint address is saved.
+  async checkMint(url) {
+    const m = this.mintFor(url);
+    if (typeof m.info !== "function") return { name: "" };
+    try { return await m.info(); }
+    catch (e) { throw new EcashError("mint", e?.message || "The mint did not answer.", e?.definitive === true); }
+  }
+
   // ── Recovery: counters, restore, rotate ──
   // The counter source the Cashu client uses for deterministic coins. Every change is saved (synchronously) BEFORE the
   // client builds its request to the mint: a number is never used twice, even if the app dies in the middle.

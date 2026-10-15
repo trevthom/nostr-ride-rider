@@ -19,6 +19,7 @@ export const PHOTON_URL = clean(env.VITE_PHOTON_URL || "https://photon.komoot.io
 export const OSRM_URL = clean(env.VITE_OSRM_URL || "https://router.project-osrm.org");
 
 // The ecash mint a driver is paid at until they choose another in Account. A mint holds the money behind
-// ecash, so it must be one you trust: set VITE_DEFAULT_MINT before you launch. The default is the Macadamia
-// mint (macadamia.cash). It has not been run against yet: if the address is wrong, set VITE_DEFAULT_MINT.
-export const DEFAULT_MINT = clean(env.VITE_DEFAULT_MINT || "https://macadamia.cash");
+// ecash, so it must be one you trust: set VITE_DEFAULT_MINT before you launch. This public mint (Minibits) is only a
+// starting point for trying the app. (macadamia.cash is the website of an iOS wallet, NOT a mint: it answers every
+// mint request with a web page.)
+export const DEFAULT_MINT = clean(env.VITE_DEFAULT_MINT || "https://mint.minibits.cash/Bitcoin");

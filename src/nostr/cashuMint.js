@@ -22,6 +22,17 @@ import { makeRecovery } from "./ecashRecovery.js";
 
 const plain = (proofs) => JSON.parse(JSON.stringify(proofs));
 
+// An address that is a WEBSITE and not a mint (a typo, a wallet's home page) answers with a web page. The Cashu client puts that page into
+// the error message, which would fill the screen with HTML. A short, plain reason takes its place; status, code and `definitive` are kept.
+function plainError(e, url) {
+  const text = String(e?.message ?? "");
+  if (!/<\s*(!doctype|html|head|body)\b/i.test(text) && text.length <= 300) return e;
+  let host = url;
+  try { host = new URL(url).host; } catch { /* keep the address as typed */ }
+  const err = new Error(`${host} is not a Cashu mint: it answered with a web page. Check the mint address.`);
+  return Object.assign(err, { status: e?.status, code: e?.code, definitive: e?.definitive });
+}
+
 export function cashuMint(url, { seed = null, counters = null } = {}) {
   let wallet = null;
   let loading = null;
@@ -56,8 +67,15 @@ export function cashuMint(url, { seed = null, counters = null } = {}) {
       return fn();
     }
   };
-  return {
+  const adapter = {
     url,
+    // Is this address a working mint? Resolves { name } or throws a short, plain error.
+    async info() {
+      const wl = await w();
+      let name = "";
+      try { name = String(wl.getMintInfo()?.name || ""); } catch { /* the name is only for show */ }
+      return { name };
+    },
     async quoteMint(sats) {
       const q = await (await w()).createMintQuoteBolt11(sats);
       return { id: q.quote, invoice: q.request, expiry: q.expiry ?? null };
@@ -118,6 +136,11 @@ export function cashuMint(url, { seed = null, counters = null } = {}) {
       return getEncodedToken({ mint: url, proofs, unit: "sat" });
     },
   };
+  // Every call that talks to the mint reports a short, plain error (see plainError).
+  for (const [name, fn] of Object.entries(adapter)) {
+    if (typeof fn === "function" && name !== "encode") adapter[name] = async (...args) => { try { return await fn(...args); } catch (e) { throw plainError(e, url); } };
+  }
+  return adapter;
 }
 
 // A token's mint and amount, with no network: { mint, sats } (null if it is not a sat token).

@@ -3,6 +3,7 @@
 // included, redeem it in another wallet, refuse a spent token, check proofs, cash out by a Lightning invoice.
 // Run with: npm test
 import assert from "node:assert/strict";
+import http from "node:http";
 const R = new URL("../src", import.meta.url).pathname;
 const { cashuMint, tokenInfo } = await import(`${R}/nostr/cashuMint.js`);
 const { EcashWallet } = await import(`${R}/nostr/ecash.js`);
@@ -76,6 +77,18 @@ try {
   assert.ok(driver.balance(mint.url) < 40, "only a small change is left: " + driver.balance(mint.url));
   assert.equal(driver.total(), driver.balance(mint.url));
   assert.equal(driver.pendingList().length, 0, "nothing is stuck pending");
+
+  // ── An address that is a WEBSITE, not a mint (macadamia.cash is one): a short, plain error, never the page ──
+  const page = '<!DOCTYPE html><html lang="en"><head><title>404: This page could not be found.</title></head><body><h1>404</h1>' + "x".repeat(3000) + "</body></html>";
+  const site = http.createServer((req, res) => { res.writeHead(404, { "content-type": "text/html" }); res.end(page); });
+  await new Promise((r) => site.listen(0, "127.0.0.1", r));
+  const siteUrl = `http://127.0.0.1:${site.address().port}`;
+  try {
+    for (const [what, run] of [["asking for an invoice", () => rider.fundStart(siteUrl, 100)], ["checking the address", () => rider.checkMint(siteUrl)], ["the adapter itself", () => mintFor(siteUrl).quoteMint(100)]]) {
+      await assert.rejects(run, (e) => /is not a Cashu mint/.test(e.message) && !/<|html/i.test(e.message) && e.message.length < 200, what + " gives a short reason");
+    }
+    assert.deepEqual(Object.keys(await rider.checkMint(mint.url)), ["name"], "a real mint passes the check");
+  } finally { await new Promise((r) => site.close(r)); }
 } finally {
   await mint.close();
 }

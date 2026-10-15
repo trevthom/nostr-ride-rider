@@ -36,9 +36,19 @@ export default function EcashSection({ locked = false }) {
   const balances = ecash ? ecash.balances() : {};
   const total = ecash ? ecash.total() : 0;
 
-  const saveMint = () => {
-    const url = setMyMint(draft);
+  const saveMint = async () => {
+    const url = cleanMintUrl(draft);
     if (!url) return setMsg("That is not a mint address. It must start with https://");
+    setBusy("mint");
+    setMsg("Checking the mint…");
+    try {
+      await ecash.checkMint(url); // a website that is not a mint is refused here, before anyone adds money to it
+    } catch (e) {
+      setBusy("");
+      return setMsg(e.message || "That address did not answer as a mint.");
+    }
+    setBusy("");
+    setMyMint(url);
     setMint(url);
     setDraft(url);
     setMsg(`Saved. ${IS_DRIVER_APP ? "New offers use" : "Add funds starts at"} ${mintLabel(url)}.`);
@@ -111,7 +121,7 @@ export default function EcashSection({ locked = false }) {
             <div className="flex gap-2">
               <input aria-label="Ecash mint address" value={draft} onChange={(e) => { setDraft(e.target.value); setMsg(""); }} disabled={locked}
                 placeholder="https://mint.example.com" spellCheck={false} className={`${inputCls} min-w-0 !text-sm`} />
-              <Button size="md" full={false} className="px-4" onClick={saveMint} disabled={locked || !draftUrl || draftUrl === mint}>Save</Button>
+              <Button size="md" full={false} className="px-4" onClick={saveMint} loading={busy === "mint"} disabled={locked || !draftUrl || draftUrl === mint}>Save</Button>
             </div>
             {locked && <p className="text-xs text-neutral-500 mt-1">Locked while a ride or an offer is open.</p>}
           </div>
