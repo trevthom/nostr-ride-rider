@@ -1,7 +1,8 @@
 // ════════════════════════════════════════════════════════════
 //  USER MODAL — Tapping a person's name or photo opens this. Shows the
-//  photo (tap to expand), name, role-split reputation (always shown, even
-//  at 0), the full npub, and the vehicle if they have one.
+//  photo (tap to expand), name, the vouch badge (one badge: a vouch is for the person,
+//  whether they ride or drive), trip counts by role (always shown, even at 0), the full
+//  npub, and the vehicle if they have one.
 //  Rendered above everything; close with ✕, Escape, or a tap outside.
 // ════════════════════════════════════════════════════════════
 
@@ -10,9 +11,9 @@ import { useApp } from "../state/AppContext.jsx";
 import { relay } from "../nostr/relay.js";
 import { getProfile } from "../nostr/profiles.js";
 import { fullNpub } from "../nostr/keys.js";
-import { reputation } from "../lib/rides.js";
+import { tripCounts } from "../lib/rides.js";
 import Avatar from "./Avatar.jsx";
-import { Rating } from "./Rating.jsx";
+import VouchBadge from "./VouchBadge.jsx";
 import Icon from "./Icon.jsx";
 import BlockButton from "./BlockButton.jsx";
 
@@ -31,7 +32,7 @@ export default function UserModal() {
   useEffect(() => {
     if (profileModalPubkey) {
       relay.fetchProfile(profileModalPubkey);
-      relay.fetchHistory(profileModalPubkey); // reputation beyond the last 24 h
+      relay.fetchHistory(profileModalPubkey); // trip counts beyond the last 24 h
     }
     setZoom(false);
   }, [profileModalPubkey]);
@@ -39,7 +40,7 @@ export default function UserModal() {
   if (!profileModalPubkey) return null;
 
   const p = getProfile(profileModalPubkey);
-  const rep = reputation(profileModalPubkey);
+  const rep = tripCounts(profileModalPubkey);
   const name = p?.name || "Anonymous";
   const veh = p?.vehicle || null;
 
@@ -65,18 +66,17 @@ export default function UserModal() {
           <Avatar src={p?.picture} name={name} size={104} onClick={p?.picture ? () => setZoom(true) : undefined} />
         </div>
         <h2 className="text-2xl font-bold">{name}</h2>
+        <div className="flex justify-center"><VouchBadge pubkey={profileModalPubkey} /></div>
 
         {/* Always show both roles, even at zero. */}
         <div className="flex justify-center gap-8 mt-4 text-sm">
           <div>
             <p className="text-neutral-500 text-[11px] font-semibold uppercase tracking-wider">As rider</p>
             <p className="font-medium">{rep.rides} trip{rep.rides === 1 ? "" : "s"}</p>
-            <Rating avg={rep.riderReviews.avg} count={rep.riderReviews.count} />
           </div>
           <div>
             <p className="text-neutral-500 text-[11px] font-semibold uppercase tracking-wider">As driver</p>
             <p className="font-medium">{rep.drives} trip{rep.drives === 1 ? "" : "s"}</p>
-            <Rating avg={rep.driverReviews.avg} count={rep.driverReviews.count} />
           </div>
         </div>
 

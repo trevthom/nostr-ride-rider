@@ -1,6 +1,6 @@
 // ════════════════════════════════════════════════════════════
 //  PROFILE PARTS — The Account-page pieces both apps share: the
-//  header (photo, name, rating), contact methods, relay list, log out,
+//  header (photo, name, trip count), contact methods, relay list, log out,
 //  and useSaveProfile() which republishes the user's profile (kind 0).
 // ════════════════════════════════════════════════════════════
 
@@ -12,13 +12,12 @@ import { buildSignedEvent } from "../../nostr/events.js";
 import { getMetadata } from "../../nostr/profiles.js";
 import { shortNpub } from "../../nostr/keys.js";
 import { sealVehicle } from "../../lib/privacy.js";
-import { reputation } from "../../lib/rides.js";
+import { tripCounts } from "../../lib/rides.js";
 import { resizeImage } from "../../lib/image.js";
 import { useRelays, setRelays } from "../../config/relays.js";
 import { CONTACT_PLATFORMS, } from "../../config/settings.js";
 import { APP_NAME, BUILD_ID, IS_DRIVER_APP } from "../../config/app.js";
 import Avatar from "../../ui/Avatar.jsx";
-import { Rating } from "../../ui/Rating.jsx";
 import Icon from "../../ui/Icon.jsx";
 import Button from "../../ui/Button.jsx";
 import RelayEditor from "../../ui/RelayEditor.jsx";
@@ -63,11 +62,11 @@ export function useSaveProfile() {
   );
 }
 
-// Photo, name (tap the pencil to edit), and the rating for this app's role.
+// Photo, name (tap the pencil to edit), and the trip count for this app's role.
 export function AccountHeader({ photoRequired = false }) {
   const { user } = useApp();
   const save = useSaveProfile();
-  const rep = reputation(user.publicKey);
+  const rep = tripCounts(user.publicKey);
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(user.name);
   const [lightbox, setLightbox] = useState(false);
@@ -90,7 +89,6 @@ export function AccountHeader({ photoRequired = false }) {
     setEditing(false);
   };
 
-  const role = IS_DRIVER_APP ? rep.driverReviews : rep.riderReviews;
   const trips = IS_DRIVER_APP ? rep.drives : rep.rides;
 
   return (
@@ -128,10 +126,7 @@ export function AccountHeader({ photoRequired = false }) {
             </button>
           </div>
         )}
-        <div className="flex items-center gap-2 text-sm text-neutral-500">
-          <Rating avg={role.avg} count={role.count} />
-          <span>· {trips} trip{trips === 1 ? "" : "s"}</span>
-        </div>
+        <p className="text-sm text-neutral-500">{trips} trip{trips === 1 ? "" : "s"}</p>
         {photoRequired && !user.picture && <p className="text-amber-700 text-xs mt-1">A face photo is required to drive.</p>}
         {err && <p className="text-red-600 text-xs mt-1">{err}</p>}
         {user.picture && (

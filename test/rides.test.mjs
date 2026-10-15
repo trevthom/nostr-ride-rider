@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 const R = new URL("../src", import.meta.url).pathname;
 const { relay } = await import(`${R}/nostr/relay.js`);
-const { rideStatus, rideEnding, reputation, rideVersions } = await import(`${R}/lib/rides.js`);
+const { rideStatus, rideEnding, tripCounts, rideVersions } = await import(`${R}/lib/rides.js`);
 const { getProfile, getMetadata } = await import(`${R}/nostr/profiles.js`);
 const { EVENT_KINDS: K } = await import(`${R}/nostr/eventKinds.js`);
 
@@ -66,16 +66,14 @@ ev(K.RIDE_FINISH, driver, { reason: "driver", role: "driver", miles: 1, minutes:
 ev(K.RIDE_FINISH, rider, { reason: "rider", role: "rider", miles: 0.5, minutes: 1 }, [["e", r6.id]], 2060);
 assert.equal(rideEnding(r6).by, driver, "more than 10 s apart: the earliest signed finish counts");
 
-// Ratings: only the counterparty counts; one per rater per ride (newest).
-ev(K.RATING, attacker, { rating: 1 }, [["p", driver], ["e", r1b.id]]);
-ev(K.RATING, rider, { rating: 3 }, [["p", driver], ["e", r1b.id]]);
-ev(K.RATING, rider, { rating: 5 }, [["p", driver], ["e", r1.id], ["d", "rating-x"]]);
-ev(K.RATING, driver, { rating: 4 }, [["p", rider], ["e", r1b.id]]);
-ev(K.RATING, driver, { rating: 9 }, [["p", rider], ["e", r1b.id]]);
-const dr = reputation(driver), rr = reputation(rider);
-assert.equal(dr.drives, 4, "r1b, r4, r5 and r6 started and ended: a ride finished after it started counts"); assert.equal(dr.driverReviews.count, 1); assert.equal(dr.driverReviews.avg, 5);
-assert.equal(rr.rides, 4); assert.equal(rr.riderReviews.count, 1); assert.equal(rr.riderReviews.avg, 4);
-assert.equal(reputation(attacker).drives, 0, "fake request does not count");
+// Star ratings are gone (too easy to fake): an old rating event left on a relay changes no number. Trips are plain counts.
+ev(K.RATING, rider, { rating: 5 }, [["p", driver], ["e", r1b.id]]);
+ev(K.RATING, driver, { rating: 1 }, [["p", rider], ["e", r1b.id]]);
+const dr = tripCounts(driver), rr = tripCounts(rider);
+assert.equal(dr.drives, 4, "r1b, r4, r5 and r6 started and ended: a ride finished after it started counts");
+assert.equal(rr.rides, 4);
+assert.deepEqual(Object.keys(dr).sort(), ["drives", "rides"], "no rating or review figures are kept");
+assert.equal(tripCounts(attacker).drives, 0, "fake request does not count");
 
 // Profiles: newest kind-0 wins; hostile field types are coerced.
 ev(K.METADATA, driver, { name: "Old" }, []);

@@ -31,9 +31,10 @@ export const EVENT_KINDS = {
   RIDE_WAIVER: 30097, // Driver -> rider: part of the fare is waived (the unpaid part, and/or ecash sent back)
   RIDE_ALIVE: 30098, // "Still riding" / "Still driving": a signed sign of life for the ride
   RIDE_STOP_CHANGE: 30099, // Rider asks to add a stop or change the destination mid-ride (place sealed)
+  VOUCH_LIST: 30102, // "Your vouches": the people this person knows and trusts (public, replaceable, one p tag each)
   RIDE_OFFER_DECLINE: 30101, // The rider turns down ONE driver's offer; the request stays open for everyone else
   RIDE_STOP_REPLY: 30100, // The assigned driver accepts the extra stop (or finishes the ride instead)
-  RATING: 30082, // A star rating + review
+  RATING: 30082, // UNUSED: star ratings and reviews were removed (too easy to fake); see VOUCH_LIST
   DRIVER_ROUTE: 30083, // (removed feature; kept for back-compat)
 
   // Driver presence: addressable (replaceable per driver via d-tag), with a

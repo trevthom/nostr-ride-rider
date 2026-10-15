@@ -57,7 +57,7 @@ Each screen is wrapped in an `ErrorBoundary`.
 | 5 | car moves live, "arriving in N min" | RIDE_LOCATION 21100 every 6 s (NIP-44 to rider) | **I've arrived** works only within 50 m (good fix) → RIDE_STAGE 30085 `arrived` (+`distM`) |
 | 6 | "Your driver has arrived", checks the car (RIDE_CONFIRM `boarded`), types the driver's 2-digit code (RIDE_CONFIRM `code`) | | types the rider's code → **Start trip** → RIDE_STAGE `riding` (+`codes`) |
 | 7 | "On the way to …"; the rider's app pays ticks: base, each mile, each minute | RIDE_TICK 30095 (token sealed to driver) | redeems each tick at the mint, answers RIDE_TICK_REPLY 30096; sees fare so far, missed payments |
-| 8 | **Finish ride** (confirm) → pays the final tick; receipt; rates | RIDE_FINISH 30081 (either person; time + meter), RATING 30082 | **Finish ride** (confirm) or after 2 missed payments; summary; may waive (RIDE_WAIVER 30097); rates the rider |
+| 8 | **Finish ride** (confirm) → pays the final tick; receipt | RIDE_FINISH 30081 (either person; time + meter) | **Finish ride** (confirm) or after 2 missed payments; summary; may waive (RIDE_WAIVER 30097) |
 **There are no cancellations and no cancel fees.** Either person finishes the ride (RIDE_FINISH 30081). Before the ride
 starts nothing is owed (status `closed`); after it started the rider owes what it earned (status `completed`). A driver with no
 offer taken just sees the ride leave `requested` ("That ride is no longer available").
@@ -84,6 +84,7 @@ src/
     relay.js                      # SimplePool + local cache: publish, publishLocal, query, onEvent, startSync, fetchRecent, fetchProfile, fetchHistory
     replaceable.js  profiles.js   # latestVersions(); getProfile/getMetadata
     live.js                       # presence (public, coarse) + ride location (NIP-44, ephemeral)
+    vouchSync.js                  # syncVouches(me): my vouch list, my vouches' lists, their names (3 small relay queries; login + every 5 min + after a change)
     share.js                      # "Share my trip": throwaway-key link, encrypted trip updates (kind 30091)
     wallet.js                     # NIP-47 (NWC) client
     ecash.js                      # EcashWallet: Cashu bookkeeping over a "mint adapter" (fund, pay, redeem, cash out, pending/recovery, encrypted save) — no network code, no Cashu import
@@ -92,7 +93,7 @@ src/
     link.js                       # remembers when OUR relays were unreachable (never counted as the other person's silence)
     demoData.js                   # dev-only fake riders/requests (driver app only)
   lib/
-    rides.js      # trust rules: rideVersions/rideStatus (requested→in_progress→completed|closed)/rideEnding (earliest finish; silence cut-off clamped)/rideStage/rideTimes/rideConfirm/rideDriver/rideKey/reputation
+    rides.js      # trust rules: rideVersions/rideStatus (requested→in_progress→completed|closed)/rideEnding (earliest finish; silence cut-off clamped)/rideStage/rideTimes/rideConfirm/rideDriver/rideKey/tripCounts (plain counts, no stars)
     ticks.js      # PURE tick maths: unitSats, newLedger/advanceLedger (base, mile, minute), missedTicks, settle (final tick), convertToMetered (flat→normal fare), milesAt
     ridemoney.js  # currentLedger(request,…): the saved ledger of a ride, advanced or settled; ledgerSummary; milesAtTime
     payments.js   # tick/reply/waiver/alive event builders and readers (ticksOf, tickReplies, paidSats, sentSats, waiversOf, signalTimes, outstandingSats)
@@ -114,6 +115,7 @@ src/
     evidence.js   # tip records (30086) + proofLevel + driver-side verifyPayment + disputeRecord (ticks, replies, waivers, finishes); rideConfirm is in rides.js
     bolt11.js     # paymentHash / preimageMatches
     blocks.js     # local block list helpers
+    vouches.js    # "I know and trust this person": parsePubkey (npub; an nsec is refused), vouchEvent/vouchList (kind 30102), trustFor(target, me) = {direct, via} (ONE hop, only through people I vouch for), trustHeadline/trustDetail (the badge words)
     safety.js     # trusted contacts, sms link, trip message
     nativeGeo.js  # background location via Capacitor (run-time lookup; web build has no dependency)
     notify.js     # service worker registration + system notifications
@@ -123,12 +125,12 @@ src/
   ui/                             # shared UI kit
     Layout.jsx    # AppFrame, MapPage (+ measures the Sheet so the map pads for it), Sheet (collapsible with `peek`/openKey/closeKey), FloatButton, Screen, TabBar
     MapView.jsx   # Leaflet + OpenStreetMap tiles; pins, OSRM route, cars, "me" dot, price pills, ref.fit(); trip mode (`navigation` + `follow`)
-    Button.jsx Icon.jsx Avatar.jsx Rating.jsx Money.jsx Parts.jsx (Row, Toggle, Field, ConfirmDialog, Modal, Spinner)
-    AmountInput.jsx (local currency or sats, unit swap; flat prices, counters, tips, funds)  TripMeter.jsx (time + distance card, peekMeter)  RatingForm.jsx ContactSheet.jsx UserModal.jsx NoticeBanner.jsx ErrorBoundary.jsx RelayEditor.jsx QRCode.jsx SatsAmount.jsx
+    Button.jsx Icon.jsx Avatar.jsx Money.jsx Parts.jsx (Row, Toggle, Field, ConfirmDialog, Modal, Spinner)
+    AmountInput.jsx (local currency or sats, unit swap; flat prices, counters, tips, funds)  TripMeter.jsx (time + distance card, peekMeter)  VouchBadge.jsx ContactSheet.jsx UserModal.jsx NoticeBanner.jsx ErrorBoundary.jsx RelayEditor.jsx QRCode.jsx SatsAmount.jsx
   features/
     auth/        AuthScreen (role-aware copy) + AuthSteps (unlock, key backup)
     profile/     ProfileParts (useSaveProfile, AccountHeader, ContactMethods, RelaysSection, LogoutButton),
-                 VehicleSection, TypicalFareSection ("Your rates", locked during a ride), CurrencySection, LightningAddressSection, WalletSection, KeysSection
+                 VehicleSection, VouchesSection ("Your vouches": npub in, list out), TypicalFareSection ("Your rates", locked during a ride), CurrencySection, LightningAddressSection, WalletSection, KeysSection
     ecash/       EcashSection (balance, mint, paste a token, back up, driver cash out), myMint.js
     payments/    PayDriver (a Lightning address: tips), AddFunds (mint invoice → ecash, NWC or any wallet), rideTicks.js (rider: payDue), redeemTicks.js (driver: redeem + reply),
                  redeemWaivers.js (rider: collect refunds), useRideLink.js (quiet phone, sign of life, 10-minute silence)
@@ -154,7 +156,7 @@ test/*.test.mjs
 | 30079 | RIDE_OFFER | `e`(request), `p`(rider), `d`, `t` | `{priceSats, mode, rates, mint, tripMiles, tripMinutes, etaMinutes, message, typicalSats, gender, plate}` — the driver's reply. `mode:"flat"`: the rider's flat price (accept) or a higher price (counter); `mode:"metered"`: the driver's standard fare (`priceSats` = their estimate). `rates` = `{base, perMile, perMinute, currency}` (a frozen copy) and `mint` = where the driver is paid; `gender` optional, self-declared; `plate` NIP-44 to the rider. No deposit |
 | 30080 | RIDE_ACCEPT | `e`(offer), `e`(request), `p`(driver), `d`, `t` | `{offerId, requestId, sealed}` — `offerId` names the offer whose rates and mint are FROZEN for the ride; `sealed` = exact trip, NIP-44 to the driver |
 | 30081 | RIDE_FINISH | `e`(request), `p`, `d`="finish-<id>", `t` | `{requestId, reason: rider\|driver\|destination\|unpaid\|silence, role, at, miles?, minutes?, atDestination?}` — by the rider or the assigned driver; ends the ride (NO cancellations, NO fees). `at`/`miles` = the moment and meter the charge runs to |
-| 30082 | RATING | `p`(ratee), `e`(ride), `d`, `t` | `{rating, review, rideId}` |
+| 30082 | RATING | | UNUSED: star ratings and reviews were removed (too easy to fake). Old events are ignored. See 30102 |
 | 30083 | DRIVER_ROUTE | | unused (feature removed) |
 | 30084 | RIDE_COMPLETE | `e`(request), `p`(rider), `d`, `t` | `{requestId}` — by the assigned driver. Older apps only; read as "finished at the destination" |
 | 30085 | RIDE_STAGE | `e`(request), `p`(rider), `d`="stage-<rideKey>", `t` | `{stage: "arrived" \| "riding", at, arrivedAt?, distM?, codes?}` — by the assigned driver; `at` = ms now, the "riding" marker recalls `arrivedAt` (a relay keeps only the newest marker); `distM` = the driver's measured metres from the pickup (≤ 50); `codes` = both start codes were checked |
@@ -169,6 +171,7 @@ test/*.test.mjs
 | 30099 | RIDE_STOP_CHANGE (addressable) | `e`(request), `p`(driver), `d`="stop-<rideKey>-<changeId>", `t` | `{changeId, mode: stop\|destination, sealedDriver, sealedSelf}` — the new place NIP-44 to the driver and the rider; only the ride's rider |
 | 30100 | RIDE_STOP_REPLY (addressable) | `e`(request), `p`(rider), `d`="stop-reply-<changeId>", `t` | `{changeId, accepted}` — only the assigned driver |
 | 30101 | RIDE_OFFER_DECLINE (addressable) | `e`(request), `e`(offer), `p`(driver), `d`="decline-<requestId>-<driver>", `t` | `{requestId, offerId}` — only the ride's rider; turns ONE driver's offer down, the request stays open |
+| 30102 | VOUCH_LIST (addressable) | `d`="vouches", `p`(each person), `t` | `{v:1, count}` — the people the author knows and trusts ("Your vouches"), at most 100, PUBLIC. A vouch is for the person (no role). The newest list replaces the old one |
 | 30091 | TRIP_SHARE (addressable) | `d`="share", `t`, `expiration` | `{sealed}` — signed by a throwaway key; payload encrypted with that key (in the link #fragment) |
 | 30090 | PRESENCE (addressable) | `d`="presence", `t`, `expiration` | `{name, npub, vehicle, rates?, hide?, lat, lng, ts}` — public, coarsened location; `hide` = hide tokens of the riders the driver blocked |
 | 21100 | RIDE_LOCATION (ephemeral) | `p`(rider), `expiration` | NIP-44 encrypted `{lat, lng, ts, pm?, tm?}` — exact, to rider only; `pm`/`tm` = the driver's odometer (miles to the pickup / on the trip) |
@@ -184,10 +187,9 @@ carries `driverPubkey`. Stage is `enroute` (default) → `arrived` → `riding`.
   d-tag alone). A RIDE_FINISH counts only from the rider or the assigned driver (the EARLIEST valid one ends the ride; within 10 s the one that costs
   the rider less; a claimed finish time must be close to the event's own time — except `silence`, which may run back to the last signed signal but never
   before a signed event that proves someone was there); a RIDE_COMPLETE (old) and a RIDE_STAGE only from the assigned driver; a RIDE_CONFIRM, a RIDE_PAYMENT, a RIDE_TICK and a
-  RIDE_STOP_CHANGE only from the ride's rider; a RIDE_TICK_REPLY, a RIDE_WAIVER and a RIDE_STOP_REPLY only from the assigned driver; a RIDE_ALIVE from either; a RATING only from the
-  other party of that ride (one per rater per ride). Stages only move forward (the
+  RIDE_STOP_CHANGE only from the ride's rider; a RIDE_TICK_REPLY, a RIDE_WAIVER and a RIDE_STOP_REPLY only from the assigned driver; a RIDE_ALIVE from either. Stages only move forward (the
   furthest valid marker wins). Always go through `rideVersions`/`rideStatus`/`rideEnding`/
-  `rideStage`/`reputation` and `lib/payments.js` — don't re-derive.
+  `rideStage`/`tripCounts` and `lib/payments.js` — don't re-derive.
 - **Offers expire**: for a ride needed now an offer is good for `OFFER_TTL_SECONDS`
   (`offersForRide`, `pendingOfferFor`). After a driver is chosen, read their offer with
   `offerFrom` (no time limit) — it carries the fare and sealed plate. For MONEY use `agreedOffer`/`rideTerms` (lib/terms.js): they read the offer the rider's RIDE_ACCEPT
@@ -223,7 +225,7 @@ carries `driverPubkey`. Stage is `enroute` (default) → `arrived` → `riding`.
   Demo data uses `relay.publishLocal` (cache only); replies to a demo request use
   `publish(..., { localOnly: true })`. Don't use `relay.publish(createNostrEvent(...))`
   for user actions — real relays reject unsigned events.
-- **Addressable kinds need unique `d` tags** (offer-<reqId>, accept-<reqId>, rating-<rideId>,
+- **Addressable kinds need unique `d` tags** (offer-<reqId>, accept-<reqId>, vouches,
   stage-<rideKey>, finish-/complete-<id>, tick-<rideKey>-<seq>-<nonce>, tick-reply-<tickId>, …). Read replaceable lists through `latestVersions()`.
 - **Payment is pay-as-you-ride in ecash (no escrow, no deposit, NO cancellations or cancel fees)** — see docs/index.md "Pay as you ride". The rider pays the driver in TICKS
   (lib/ticks.js): the base when the ride starts, each full mile, each full minute, and a final part at the finish. Money is in SATS; each tick's sats are fixed when it falls due
@@ -247,6 +249,10 @@ carries `driverPubkey`. Stage is `enroute` (default) → `arrived` → `riding`.
 - **Local currency** (`lib/currency.js`): each person picks one in Account; `AppContext` exposes `currency`, `prices` (code → BTC price, last good ones kept 24 h), `btcPrice` (the chosen
   currency's), `usdPrice`, `priceFor(code)`. A driver's rates carry their currency (`normalizeRates` adds `currency`, default USD; limits scale with the currency). Never guess a missing price:
   show sats / wait. Use `formatFiat(x)` (never a literal "$"). The app's own rates and `MIN_OFFER_USD` are dollars (use `usdPrice`).
+- **Vouches (lib/vouches.js, nostr/vouchSync.js, ui/VouchBadge.jsx, features/profile/VouchesSection.jsx)**: the ONLY reputation. No stars, no reviews (they are easy to fake): do not add them back. Each person publishes one public list (kind 30102,
+  `d`="vouches", a `p` tag per npub, max 100) from Account → Your vouches. A vouch is for the PERSON, in either role. The badge is read for the VIEWER and is ONE hop: `trustFor(target, me)` = the people in MY list who have the target in THEIR list
+  ("N of your vouches know and trust this person"; "You know and trust this person" when the target is in my own list). Never count a vouch from a person I did not choose, never go a second hop, and show NOTHING (no "0") when there is none. `syncVouches` asks
+  relays only for my list, my vouches' lists and their kind-0 names. `parsePubkey` refuses an nsec. Trip counts (`tripCounts`) are plain facts and stay.
 - **Blocking** is local (`getSetting("blocked")`, `useApp().blockUser/isBlockedPk`): filter at the data
   boundary (driver `open` list, rider presence and `offersForRide` in ActiveTrip). Don't re-add blocked people anywhere else.
   It also works the OTHER way (`lib/blocks.js`): requests carry `hide` tokens of blocked drivers (`hideList(me, blocked)`), driver presence carries `hide` tokens of blocked riders;
@@ -296,8 +302,7 @@ carries `driverPubkey`. Stage is `enroute` (default) → `arrived` → `riding`.
 - **nostr-tools filters**: `pool.subscribeMany(relays, filter, params)` and `querySync` take ONE filter OBJECT in the installed 2.25 (an array reaches the relay as an
   invalid filter and live subscriptions silently die). `test/pool-api.test.mjs` guards it. Test relays must be strict about this too.
 - **Pickup is never automatic**: `PlaceSearch` does NOT fill the pickup from GPS; the rider types an address or a business name, pins the spot (`PinPicker`, the "Set pickup on the map" button is always visible), or taps "Your location" (a deliberate tap). `PlanTrip` never passes `here` as a pickup. It shows a *Done* button when both places are set.
-- **Either person finishes the ride** (no cancellations). Both sides get an optional rating
-  (under 5 stars needs a reason — `ui/RatingForm.jsx`). Ended rides come back as the
+- **Either person finishes the ride** (no cancellations). There are NO star ratings and NO reviews (too easy to fake; see Vouches). Ended rides come back as the
   receipt/summary screen for up to 6 h until dismissed (`riderDone` / `driverDone` in localStorage).
 - **Live location**: the driver app broadcasts exact position to the rider (NIP-44, ephemeral) for the
   whole drive and public coarse presence while online and free. Geolocation needs https:// or
@@ -309,7 +314,7 @@ carries `driverPubkey`. Stage is `enroute` (default) → `arrived` → `riding`.
 - **Profiles carry photo + vehicle**: kind-0 has `picture` (small resized JPEG, ~20 KB budget in
   lib/image.js) and `vehicle:{picture,plateState,plateNumber,year,make,model}` (plate sealed).
   `relay.fetchProfile(pubkey)` pulls one user's kind-0 on demand (rider: DriverInfo; driver: RiderInfo).
-- **History = fetchHistory(pubkey)**: live sync and `fetchRecent` cover only 24 h. Reputation and past
+- **History = fetchHistory(pubkey)**: live sync and `fetchRecent` cover only 24 h. Trip counts and past
   trips need `relay.fetchHistory(pubkey)` (throttled to once per 5 min per pubkey, queued 3 at a time).
 - **Speed**: `relay.query()` uses indexes (by kind, and by `e`/`d`/`p` tag value) — put the most
   selective tag in the filter. lib/rides.js memoizes per `relay.version`. AppContext coalesces event

@@ -18,6 +18,7 @@ import { EVENT_KINDS, APP_TAG } from "../nostr/eventKinds.js";
 import { buildSignedEvent } from "../nostr/events.js";
 import { latestVersions } from "../nostr/replaceable.js";
 import { emptyWalletState } from "../nostr/wallet.js";
+import { syncVouches } from "../nostr/vouchSync.js";
 import { getProfile } from "../nostr/profiles.js";
 import { myVehicle } from "../lib/privacy.js";
 import { forgetKey } from "../nostr/keystore.js";
@@ -51,7 +52,7 @@ const APP_EVENT_KINDS = new Set([
   EVENT_KINDS.RIDE_ALIVE,
   EVENT_KINDS.RIDE_STOP_CHANGE,
   EVENT_KINDS.RIDE_STOP_REPLY,
-  EVENT_KINDS.RATING,
+  EVENT_KINDS.VOUCH_LIST,
 ]);
 
 // The hook every screen uses to reach shared state.
@@ -151,6 +152,20 @@ export function AppProvider({ initialView, children }) {
     }).catch(() => {});
     return () => { alive = false; if (off) off(); };
   }, [user?.publicKey]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Vouches (lib/vouches.js): bring in my list and the lists of the people I vouch for, so the badge on a card can say
+  // "N of your vouches know and trust this person". At login, every 5 minutes, and after I change my own list.
+  const refreshVouches = useCallback(async () => {
+    if (!user?.publicKey) return;
+    try { await syncVouches(user.publicKey); } catch { /* the relays are down: try again later */ }
+    setLiveTick((t) => t + 1);
+  }, [user?.publicKey]);
+  useEffect(() => {
+    if (!user?.publicKey) return undefined;
+    refreshVouches();
+    const id = setInterval(refreshVouches, 5 * 60000);
+    return () => clearInterval(id);
+  }, [refreshVouches, user?.publicKey]);
 
   // Re-read the latest ride requests from the cache (newest per request),
   // skipping anything malformed or not shaped like a ride.
@@ -280,7 +295,7 @@ export function AppProvider({ initialView, children }) {
   }, [initialView]);
 
   // On login, pull our full ride history (the live sync covers only 24 h)
-  // so Past Rides and our reputation are complete.
+  // so Past Rides and our trip counts are complete.
   useEffect(() => {
     if (user?.publicKey) relay.fetchHistory(user.publicKey);
   }, [user?.publicKey]);
@@ -330,6 +345,7 @@ export function AppProvider({ initialView, children }) {
     publish,
     wallet,
     setWallet,
+    refreshVouches,
     ecash,
     currency,
     setCurrency,

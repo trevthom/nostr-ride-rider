@@ -47,7 +47,7 @@ export function BackupStep({ nsec, onContinue }) {
     <div className="space-y-4">
       <h2 className="text-xl font-bold">Save your secret key</h2>
       <p className="text-neutral-600 text-[15px] leading-relaxed">
-        This key is your account. If you lose it, you lose the account and its ratings. No one can reset it.
+        This key is your account. If you lose it, you lose the account and the people who vouch for it. No one can reset it.
         Keep it in a password manager. Never share it.
       </p>
       <p className="text-xs font-mono break-all bg-neutral-100 rounded-xl p-3">{nsec}</p>

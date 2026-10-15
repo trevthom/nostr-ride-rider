@@ -45,7 +45,7 @@ const APP_KINDS = [
   EVENT_KINDS.RIDE_STOP_CHANGE,
   EVENT_KINDS.RIDE_STOP_REPLY,
   EVENT_KINDS.RIDE_OFFER_DECLINE,
-  EVENT_KINDS.RATING,
+  EVENT_KINDS.VOUCH_LIST,
 ];
 
 const nowSec = () => Math.floor(Date.now() / 1000);
@@ -113,6 +113,9 @@ class NostrRelay {
     }
   }
 
+  // Put an event fetched from the relays into the cache (the same checks as the live subscription). True if it was new.
+  ingest(event) { return this._ingest(event); }
+
   // Pull one user's profile (kind 0) from relays into the cache, so we
   // can show their display name (we don't sync the global kind-0 firehose).
   async fetchProfile(pubkey) {
@@ -127,8 +130,8 @@ class NostrRelay {
 
   // A user's FULL ride history (the live sync only covers 24 h): what
   // they wrote, what was addressed to them, every version of the rides
-  // those events point at, and the finishes/payments/ratings on those
-  // rides. Feeds Past Rides and reputation. At most once per 5 min per
+  // those events point at, and the finishes/payments on those
+  // rides. Feeds Past Rides and trip counts. At most once per 5 min per
   // pubkey unless `force`. Resolves when done (never rejects).
   async fetchHistory(pubkey, { force = false } = {}) {
     if (!pubkey) return;
@@ -173,7 +176,7 @@ class NostrRelay {
       for (const ds of chunks(tagVals(rides, "d"))) {
         if (authors.length) take(await q({ kinds: [EVENT_KINDS.RIDE_REQUEST], authors, "#d": ds }));
       }
-      // 3) How each ride ended, and its ratings.
+      // 3) How each ride ended, and what was paid.
       const dset = new Set(tagVals(rides, "d"));
       const versionIds = this.query({ kinds: [EVENT_KINDS.RIDE_REQUEST], authors })
         .filter((e) => dset.has((e.tags.find((t) => t[0] === "d") || [])[1]))

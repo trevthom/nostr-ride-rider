@@ -7,9 +7,8 @@ import { useEffect, useState } from "react";
 import { useApp } from "../../state/AppContext.jsx";
 import { useRider } from "../state/RiderContext.jsx";
 import { relay } from "../../nostr/relay.js";
-import { EVENT_KINDS } from "../../nostr/eventKinds.js";
 import { getProfile } from "../../nostr/profiles.js";
-import { rideDriver, rideEnding, rideKey, rideStatus, rideVersions } from "../../lib/rides.js";
+import { rideDriver, rideEnding, rideKey, rideStatus } from "../../lib/rides.js";
 import { currentLedger, ledgerSummary } from "../../lib/ridemoney.js";
 import { rideTerms } from "../../lib/terms.js";
 import { rideMint } from "../../lib/terms.js";
@@ -133,11 +132,6 @@ function PastTrip({ request, trip, onClose }) {
   const sum = ledgerSummary(request, terms && done ? currentLedger(request, { terms, price: priceFor(terms.currency), nowMs: Date.now(), miles: null, role: "rider" }) : null);
   const [adding, setAdding] = useState(false);
   const mint = rideMint(request);
-  const ids = new Set(rideVersions(request).map((e) => e.id));
-  const mine = relay
-    .query({ kinds: [EVENT_KINDS.RATING], authors: [user.publicKey] })
-    .find((r) => ids.has((r.tags.find((t) => t[0] === "e") || [])[1]));
-  const review = mine ? parse(mine) : null;
   const driver = driverPubkey ? getProfile(driverPubkey) : null;
   const [tipping, setTipping] = useState(false);
   const tipped = tipsOf(request).reduce((s, t) => s + t.sats, 0);
@@ -171,12 +165,6 @@ function PastTrip({ request, trip, onClose }) {
         </div>
       )}
       {driverPubkey && <DriverInfo pubkey={driverPubkey} offerEvent={offer} compact />}
-      {review && (
-        <div className="mt-4 text-sm">
-          <p className="font-semibold">Your rating: {"★".repeat(review.rating)}<span className="text-neutral-300">{"★".repeat(5 - review.rating)}</span></p>
-          {review.review && <p className="text-neutral-600 mt-1">{review.review}</p>}
-        </div>
-      )}
       {done && driverPubkey && (
         <Button size="md" variant="secondary" className="mt-4" onClick={() => setTipping(true)}>{tipped > 0 ? "Tip again" : "Leave a tip"}</Button>
       )}

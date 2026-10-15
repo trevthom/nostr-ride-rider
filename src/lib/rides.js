@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════
-//  RIDES — Shared helpers for ride expiry and user reputation.
+//  RIDES — Shared helpers for ride expiry, ride state and trip counts.
 //
 //  Trust rules (relay events are signed, but ANYONE can sign one):
 //   • A ride's versions are the requests with the same AUTHOR and
@@ -8,7 +8,6 @@
 //   • A completion (the driver finished at the destination) counts only from the assigned driver.
 //   • A tick (payment) and a stop change count only from the ride's rider; a tick reply, a
 //     waiver and a stop reply only from the assigned driver; "still riding / driving" from either.
-//   • A rating counts only from the other party of that ride.
 //   • A stage marker (arrived / riding) counts only from the assigned driver.
 //   • A confirmation (boarded / ended) and a payment record count only from the rider.
 // ════════════════════════════════════════════════════════════
@@ -223,15 +222,16 @@ function computeConfirm(request) {
   return out;
 }
 
-// Reputation for one pubkey, separated by role (rider vs driver).
+// How many trips one pubkey has completed, by role: { rides (as rider), drives (as driver) }. A plain count of signed, finished
+// rides. (There are no star ratings or reviews: they are too easy to fake. Trust comes from vouches, lib/vouches.js.)
 // Reads the local cache (already synced from relays).
-export function reputation(pubkey) {
-  return cached("rep:" + pubkey, () => computeReputation(pubkey));
+export function tripCounts(pubkey) {
+  return cached("trips:" + pubkey, () => computeTripCounts(pubkey));
 }
 const addrOf = (e) => `${e.pubkey}:${dtagOf(e)}`;
 
 // All requests by id, and the newest version per address — built once
-// per cache change and shared by every reputation() call.
+// per cache change and shared by every tripCounts() call.
 function requestIndex() {
   return cached("reqIndex", () => {
     const byId = {};
@@ -246,41 +246,9 @@ function requestIndex() {
   });
 }
 
-function computeReputation(pubkey) {
-  const { byId, latestByAddr, latest } = requestIndex();
-
+function computeTripCounts(pubkey) {
+  const { latest } = requestIndex();
   const rides = latest.filter((e) => e.pubkey === pubkey && rideStatus(e) === "completed").length;
   const drives = latest.filter((e) => parse(e)?.driverPubkey === pubkey && rideStatus(e) === "completed").length;
-
-  // One score per (rater, ride): the newest rating wins.
-  const riderScores = new Map();
-  const driverScores = new Map();
-  relay.query({ kinds: [EVENT_KINDS.RATING], "#p": [pubkey] }).forEach((rt) => {
-    const c = parse(rt);
-    if (!c || typeof c.rating !== "number" || c.rating < 1 || c.rating > 5) return;
-    const orig = byId[etagOf(rt)];
-    if (!orig) return;
-    const latestVer = (dtagOf(orig) && latestByAddr[addrOf(orig)]) || orig;
-    const driver = parse(latestVer)?.driverPubkey;
-    const key = `${rt.pubkey}|${addrOf(orig)}`;
-    // They were the rider → only their driver may rate them, and vice versa.
-    const target =
-      orig.pubkey === pubkey && driver && rt.pubkey === driver ? riderScores
-      : driver === pubkey && rt.pubkey === orig.pubkey ? driverScores
-      : null;
-    if (!target) return;
-    const prev = target.get(key);
-    if (!prev || rt.created_at > prev.at) target.set(key, { at: rt.created_at, rating: c.rating });
-  });
-
-  const avg = (m) => {
-    const arr = [...m.values()].map((v) => v.rating);
-    return arr.length ? arr.reduce((s, v) => s + v, 0) / arr.length : null;
-  };
-  return {
-    rides,
-    drives,
-    riderReviews: { count: riderScores.size, avg: avg(riderScores) },
-    driverReviews: { count: driverScores.size, avg: avg(driverScores) },
-  };
+  return { rides, drives };
 }

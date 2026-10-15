@@ -3,7 +3,7 @@
 //  earned (base + miles + minutes, or the flat price), mostly paid already tick by tick.
 //  If anything is still open (the wallet ran short), it is shown with "Add funds": the app pays the
 //  rest as soon as the wallet has the money, and it can be paid later from Activity.
-//  Then an optional rating of the driver and a quiet "Leave a tip" link (a tip is optional and can be
+//  Then a quiet "Leave a tip" link (a tip is optional and can be
 //  sent any time later from Activity). If the driver finished the ride before it started: a short notice.
 // ════════════════════════════════════════════════════════════
 
@@ -23,7 +23,6 @@ import { offerFrom } from "../../lib/trips.js";
 import Money from "../../ui/Money.jsx";
 import Button from "../../ui/Button.jsx";
 import Icon from "../../ui/Icon.jsx";
-import RatingForm from "../../ui/RatingForm.jsx";
 import { ConfirmDialog, Modal, inputCls } from "../../ui/Parts.jsx";
 import BlockButton from "../../ui/BlockButton.jsx";
 import DriverInfo from "../components/DriverInfo.jsx";
@@ -34,7 +33,7 @@ const parse = (e) => { try { return JSON.parse(e.content); } catch { return null
 
 export default function Receipt({ request }) {
   const { user, liveTick, btcPrice, priceFor } = useApp();
-  const { dismissReceipt, rateDriver, confirmRide, money, payNow, payMint } = useRider();
+  const { dismissReceipt, confirmRide, money, payNow, payMint } = useRider();
   void liveTick;
   const key = rideKey(request);
   const driverPubkey = rideDriver(request);
@@ -46,7 +45,6 @@ export default function Receipt({ request }) {
   const endedAt = rideEnding(request)?.at;
 
   const [adding, setAdding] = useState(false);
-  const [rated, setRated] = useState(false);
   const [leaving, setLeaving] = useState(false);
   const [reporting, setReporting] = useState(false);
   const [tipping, setTipping] = useState(false);
@@ -125,13 +123,6 @@ export default function Receipt({ request }) {
         {driverPubkey && (
           <div className="mt-6 pt-5 border-t border-neutral-100">
             <DriverInfo pubkey={driverPubkey} offerEvent={offer} compact />
-            <div className="mt-5">
-              {rated ? (
-                <p className="text-center text-neutral-600 text-[15px]">Thanks for rating your driver.</p>
-              ) : (
-                <RatingForm who="driver" onSubmit={(stars, review) => { rateDriver(request, driverPubkey, stars, review); setRated(true); }} onSkip={() => setRated(true)} />
-              )}
-            </div>
           </div>
         )}
 

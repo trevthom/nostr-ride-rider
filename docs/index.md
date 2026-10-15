@@ -4,7 +4,7 @@
 
 > This repository is the **rider** app. The **driver** app is in its own repository, **nostr-ride-driver**. They share no server: they find each other through Nostr relays, so both use the same event formats (see [Nostr events](#nostr-events)).
 
-Last updated with: **pay-as-you-ride ecash payments, Finish ride (no cancellations), start codes, local currency** (see the [changelog](#changelog)).
+Last updated with: **vouches ("I know and trust this person") in place of star ratings, pay-as-you-ride ecash payments, Finish ride (no cancellations), start codes, local currency** (see the [changelog](#changelog)).
 
 NostrRide is a decentralized ridesharing system. It is **two web apps** — a rider app and a driver
 app — that find each other through **Nostr relays**. There is no company server and no database.
@@ -34,17 +34,18 @@ Lightning (through a connected NWC wallet, or any wallet) fills the ecash wallet
 17. [Location and GPS](#location-and-gps)
 18. [Safety](#safety)
 19. [Blocking](#blocking)
-20. [Disputes and evidence](#disputes-and-evidence)
-21. [Reliability](#reliability)
-22. [Native app and background GPS](#native-app-and-background-gps)
-23. [Configuration](#configuration)
-24. [Testing](#testing)
-25. [Deploying](#deploying)
-26. [Separate repositories (generated)](#separate-repositories-generated)
-27. [Self-hosting map services](#self-hosting-map-services)
-28. [Trying it on an iPhone](#trying-it-on-an-iphone-without-the-apple-developer-program)
-29. [Known limits and roadmap](#known-limits-and-roadmap)
-30. [Changelog](#changelog)
+20. [Vouches ("I know and trust this person")](#vouches-i-know-and-trust-this-person)
+21. [Disputes and evidence](#disputes-and-evidence)
+22. [Reliability](#reliability)
+23. [Native app and background GPS](#native-app-and-background-gps)
+24. [Configuration](#configuration)
+25. [Testing](#testing)
+26. [Deploying](#deploying)
+27. [Separate repositories (generated)](#separate-repositories-generated)
+28. [Self-hosting map services](#self-hosting-map-services)
+29. [Trying it on an iPhone](#trying-it-on-an-iphone-without-the-apple-developer-program)
+30. [Known limits and roadmap](#known-limits-and-roadmap)
+31. [Changelog](#changelog)
 
 ## Quick start
 ```bash
@@ -63,7 +64,7 @@ Needs internet for Tailwind (CDN), fonts, the map, and the relays. Location need
 | Tab bar | Always visible, on every screen | Always visible, on every screen |
 | Home | "Where to?" → standard fare or flat price → request | GO button → request cards (accept; counter a flat price) |
 | During a trip | Live car, ETA, fare so far, start code, contact, **Finish ride**, add a stop | Route, arrived (within 50 m) / start code / **Finish ride**, fare and payments so far |
-| After a trip | Receipt (anything still owed), rate, tip | Summary, waive part of the fare, rate the rider |
+| After a trip | Receipt (anything still owed), tip | Summary, waive part of the fare |
 | Money | An ecash wallet (fill it with Lightning) | An ecash wallet (cash out to Lightning) |
 | Needs | Ecash in the wallet before the ride starts | Face photo, vehicle and vehicle photo, plate, Lightning address |
 
@@ -79,13 +80,13 @@ reverse. The Vite *mode* picks the app (`vite --mode rider|driver`).
 5. The driver drives to the pickup. The rider sees the car move live (end-to-end encrypted). **Nothing is charged yet.**
 6. The driver taps **I've arrived** (only within 50 m of the pickup). The rider checks the car. Then each person types the **2-digit code** shown on the other person's phone, and the driver taps **Start trip**.
 7. **The ride runs and the rider pays as it goes:** the base rate at the start, then each mile and each minute (ecash "ticks").
-8. Either person taps **Finish ride** and confirms. The rider pays what the ride earned, up to that moment. Both rate each other. The driver may waive part of the fare.
+8. Either person taps **Finish ride** and confirms. The rider pays what the ride earned, up to that moment. The driver may waive part of the fare. There are no star ratings and no reviews (see [Vouches](#vouches-i-know-and-trust-this-person)).
 
 **Going back while planning.** The back arrow on *Plan your ride* goes one screen back: to the home screen, or to the fare quote if the rider came from there with *Edit*.
 The back arrow on the quote goes to the search page. **Cancel** on the search page, **Cancel and go home** under the *Request ride* button, the **X** on the quote and pin pages, and a tap on the *Ride* tab all cancel the planning and show the home screen.
 Nothing is published until the rider taps *Request ride*. The tab bar is visible on every screen, including the quote and *Finding your driver*.
 
-**Choosing a driver.** Each reply shows the driver's photo, name, rating, car, plate, **gender (when the driver gave one)**, price, rates and mint. The rider taps **Choose**, or
+**Choosing a driver.** Each reply shows the driver's photo, name, the vouch badge (when someone you vouch for knows and trusts them), car, plate, **gender (when the driver gave one)**, price, rates and mint. The rider taps **Choose**, or
 **No thanks** to turn that driver down. Turning a driver down does **not** end the request: it stays open, other drivers can still accept it, and the declined driver is told (they stop waiting,
 the request leaves their list, and they cannot offer again on it). The confirm screen has *Not this driver* too. The rider can also close the whole request.
 
@@ -318,7 +319,8 @@ relays ─▶ local cache ─▶ screens read it with relay.query()
 - `src/state/AppContext.jsx` — shared state (`useApp()`): user, tab, ride requests, `publish`, notices, local currency and BTC prices, the ecash wallet, the NWC wallet.
 - `src/rider/state/RiderContext.jsx`, `src/driver/state/DriverContext.jsx` — role state.
 - `src/lib/trips.js` — works out the current ride from events (`activeRideFor`, `activeDriveFor`, offers).
-- `src/lib/rides.js` — the **trust rules** (who may finish a ride, mark a stage, or rate).
+- `src/lib/rides.js` — the **trust rules** (who may finish a ride or mark a stage), and the trip counts.
+- `src/lib/vouches.js`, `src/nostr/vouchSync.js`, `src/ui/VouchBadge.jsx`, `src/features/profile/VouchesSection.jsx` — the vouch list, the one-hop reading of it, the badge, and the Account section.
 - `src/lib/ticks.js`, `src/lib/ridemoney.js`, `src/lib/payments.js`, `src/lib/finish.js` — the ticks, the saved ledger, the payment events, and the finish and silence rules.
 - `src/nostr/ecash.js` (wallet bookkeeping), `src/nostr/cashuMint.js` (the only file that uses the Cashu client library, loaded on demand), `src/features/payments/` (paying and redeeming ticks, Add funds).
 - `src/ui/Layout.jsx` — page structure: full-screen map with a bottom sheet, tab bar.
@@ -333,7 +335,7 @@ More detail for contributors is in `CLAUDE.md` (the file map and every invariant
 | 30079 | Ride offer | driver | Accept or counter: price, `mode` (`metered` or `flat`), the driver's `rates` (frozen when chosen), `mint`, trip miles and minutes, ETA, estimate, optional gender, sealed plate |
 | 30080 | Ride accept | rider | Confirms a driver; exact trip sealed to the driver |
 | 30081 | Ride finish | rider or assigned driver | Ends a ride: who, why (`rider`, `driver`, `destination`, `unpaid`, `silence`), the time, the meter (miles, minutes), and whether the driver was at the destination |
-| 30082 | Rating | either party | Stars and review |
+| 30082 | Rating | — | **Unused.** Star ratings and reviews were removed (they are too easy to fake). Old events are ignored |
 | 30084 | Ride complete | assigned driver | Older apps' way to end a ride at the destination (still read as a finish) |
 | 30085 | Ride stage | assigned driver | `arrived` / `riding` |
 | 30086 | Payment record | rider | Lightning payment proof (invoice, preimage, LUD-21 URL) sealed to the driver; phase `tip` (older rides: `deposit`, `rest`) |
@@ -347,6 +349,7 @@ More detail for contributors is in `CLAUDE.md` (the file map and every invariant
 | 30099 | Stop change | rider | Add a stop or change the destination; the new place sealed to the driver and the rider |
 | 30100 | Stop change answer | assigned driver | Accept the extra stop (the driver's other choice is to finish the ride) |
 | 30101 | Offer declined | rider | "No thanks" to ONE driver's offer; the request stays open for everyone else. Only the ride's rider counts |
+| 30102 | Vouch list | anyone | "Your vouches": one `p` tag per person they know and trust (`d` = `vouches`, at most 100). Public. The newest list replaces the old one |
 | 30091 | Trip share | throwaway key | Live trip state for a "Share my trip" link, encrypted with a key in the link |
 | 30090 | Presence | driver | Online, coarse location, the driver's rates, short expiry |
 | 21100 | Ride location | driver | Exact location and the driver's odometer, encrypted to the rider, ephemeral |
@@ -364,6 +367,7 @@ Every event carries the app tag `["t","nostrride"]` because kind numbers like 30
 - The mint sees the amounts it signs and redeems, not who the people are (blind signatures). It can see which IP address asks.
 - A driver who is online shares a location rounded to about 100 m. The exact position goes only to the matched rider.
 - Requests, fares, offers and notes are public on the relays you use.
+- Your **vouch list** is public: anyone can see which npubs you know and trust.
 - Looking up an address from GPS sends the position (rounded to about 10 m) to the Photon geocoder.
 
 ## Payments
@@ -406,6 +410,19 @@ Either side can block. The block list is **local to the app on this device**, an
   If a rider blocks a driver while a request is open, the request is published again with the new list. This is a courtesy between honest apps, not a lock: someone who changes their app can still read public events.
 - Block from a person's profile (tap their name or photo), or from the receipt or trip summary. Manage the list in Account → Blocked people.
 - Not synced across devices or between the two apps yet.
+
+## Vouches ("I know and trust this person")
+The app has **no star ratings and no reviews**, because both are easy to fake. The only kind of reputation is a **vouch**: "I know and trust this person."
+- In *Account → Your vouches* a person pastes the **npub** of each person they know and trust (a `nostr:` link or 64 hex digits also work; an **nsec is refused**). Remove a person with *Remove*. A list holds up to 100 people.
+- A vouch is for **the person**. It counts the same when that person rides and when that person drives.
+- **What you see.** Say you are B. When you look at a driver or a rider A (an offer, a request card, a profile), the badge counts the people **in your list who have A in their list**:
+  - one: "1 of your vouches knows and trusts this person"; two or more: "2 of your vouches know and trust this person". Tap the badge to see their names.
+  - A is in your own list: "You know and trust this person" (with the count first, when others in your list vouch for A too).
+  - Nobody you vouch for vouches for A: **nothing shows**. There is no "0" and no warning. A stranger is not marked bad; they are just not vouched for.
+- **One hop only.** A vouch from someone you did not choose never shows, so a crowd of fake accounts that vouch for each other changes nothing on your screen. A vouch of a vouch of a vouch is not counted either.
+- **How it travels.** A list is one public, replaceable event (kind 30102, `d` = `vouches`). The app reads only your list, then the lists of the people in it, and their names (three small relay questions at login, then every 5 minutes and after each change to your list).
+- **Public.** Anyone who reads the relays can see who you vouch for. The Account screen says so.
+- The trip counts on a profile ("12 trips") stay. They are plain facts from signed events, not opinions. Old rating events (kind 30082) on the relays are ignored.
 
 ## Disputes and evidence
 There is no escrow, so the apps keep a signed trail:
@@ -457,13 +474,13 @@ A web page cannot read the location with the screen off. `native/` wraps the **d
 `npm test` runs `test/*.test.mjs` with Node's built-in runner: trust rules, ride stages, finishing a ride (who may finish, earliest finish wins, the silence cut-off), fares, trips,
 earnings, privacy, history, Lightning invoices, geocoding, publishing and the outbox, event ordering, contact links, GPS, payment evidence, blocking, trip sharing, native location, tips,
 pickup changes, the odometer (and the GPS-gap rule) and the 5% distance rule, stage times, relay subscription calls, flat offers and counters, driver rates and currencies, exact amounts, gender
-ordering, driver requirements, expiry of unmatched requests, blocking both ways, declined offers (`requests`), **the tick schedule (standard and flat), missed payments, the final tick, the start code, the 50 m arrival rule, silence and sign-of-life
+ordering, driver requirements, expiry of unmatched requests, blocking both ways, declined offers (`requests`), **vouches (reading an npub, the list event, the one-hop badge, its words, the sync)**, **the tick schedule (standard and flat), missed payments, the final tick, the start code, the 50 m arrival rule, silence and sign-of-life
 rules, waivers, extra stops and frozen rates, the ecash wallet (funding, paying, redeeming, crash recovery, cash out, encrypted saving), a whole ride's money between a rider and a
 driver, and the real `@cashu/cashu-ts` client against a local test mint that does the real blind-signature maths**.
 
 The apps were also run end to end in a headless browser (a rider and a driver playing a whole ride through a local relay and the local test mint): funding with an invoice, the request,
 the offer, the confirm screen, the 50 m arrival lock, both start codes, the base, minute and mile ticks, Finish ride with its confirmation, the receipt and summary, missed
-payments, a refill after the ride, and a waiver with a refund. That harness is in `scripts/e2e/` (it needs `npm i --no-save ws playwright`; it is not part of `npm test`).
+payments, a refill after the ride, and a waiver with a refund. The vouch badge was run the same way (`scripts/e2e/vouches.mjs`: a friend's list, the badge on a request card and on an offer, an nsec refused, Remove). That harness is in `scripts/e2e/` (it needs `npm i --no-save ws playwright`; it is not part of `npm test`).
 **Never run against a public mint, and never on a real phone.**
 
 ## Deploying
@@ -520,6 +537,7 @@ To switch, copy `env.example` to `.env`, set `VITE_TILE_URL` (and `VITE_PHOTON_U
 - Funds are held per mint. A rider with ecash at another mint must add funds at the driver's mint (no swap between mints yet).
 - No in-app chat; the Contact sheet shows the other person's Signal, Telegram or phone.
 - No push notification when the app is closed (needs a push server).
+- Vouches are not checked by anyone: a person can vouch for anyone. They only count for you when someone **you** chose vouches. The list is public, and there is no way to vouch in private yet.
 - Blocks are not synced across devices or apps. A Nostr mute list (NIP-51) could do it.
 - The native background-GPS shell is untested on a device. Browsers cannot track location with the screen off.
 - No arbiter or ruling flow yet; only the evidence trail.
@@ -531,6 +549,7 @@ To switch, copy `env.example` to `.env`, set `VITE_TILE_URL` (and `VITE_PHOTON_U
   and a cancel rate on profiles.
 
 ## Changelog
+- **Vouches replace star ratings and reviews** — ratings and reviews are removed from both apps (they are too easy to fake): no stars after a ride, none on profiles, no review text. The only reputation is now a **vouch**, "I know and trust this person". *Account → Your vouches* holds the npubs a person knows and trusts (an nsec is refused; up to 100; the list is public, kind 30102). When someone **you** vouch for also vouches for a driver or a rider, their card shows "N of your vouches know and trust this person" (one hop only; tap for names; "You know and trust this person" when they are in your own list). A vouch is for the person, in either role. Nothing shows for a person nobody you vouch for knows. Trip counts stay as plain facts. Old rating events are ignored; kind 30082 is unused. New: `lib/vouches.js`, `nostr/vouchSync.js`, `ui/VouchBadge.jsx`, `features/profile/VouchesSection.jsx`, `test/vouches.test.mjs`.
 - **Shared trips show the rider, every 6 s** — "Share my trip" now sends the rider's own phone position (it used to send the car's), and sends it every 6 seconds like the driver's pings (one shared `LOCATION_PING_MS`); before, the timer was 15 s and any car update forced a send. The car still shows until the ride starts. A stale fix is not sent. Older trip links keep working: an update from an older app is drawn as the car, as before.
 - **Strike removed; default mint is Macadamia** — the optional Strike link (funding, tips, cash out and whole rides paid Strike to Strike) is taken out of `main` again (two revert commits; the code stays in the history). The ecash mint a new driver starts with is now `https://macadamia.cash`, set in `src/config/services.js`; `VITE_DEFAULT_MINT` still overrides it. The address was given by the owner and could not be checked from the build machine.
 - **Reservations expire, blocking both ways, nearby list, gender, "No thanks"** — a reservation nobody takes closes 2 hours after its pick-up time (was 1), and logging out closes every request still waiting for a driver. Blocking hides people from each other on the map (hide tokens in requests and presence). *New request alerts* off now really stops the pop-up; the Drive tab keeps its count bubble and a new *See nearby requests* list shows pickup, dropoff, fare, time to the rider, trip distance, trip time and notes. The rider sees the driver's gender (if given) before choosing, and *No thanks* turns one driver down without closing the request (new kind 30101). Presence and trip-share relay pools wait 15 s for a connection.

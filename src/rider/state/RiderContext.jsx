@@ -8,7 +8,7 @@
 //    • the CURRENT ride, derived from signed events (so a reload or
 //      another device shows the same screen) and the receipt to show
 //      after a trip
-//    • actions: requestRide, raiseOffer, proposePickup, confirmDriver, declineOffer, finishRide, rateDriver
+//    • actions: requestRide, raiseOffer, proposePickup, confirmDriver, declineOffer, finishRide
 //    • the ride's MONEY: while a ride runs (and after it ended, until it is paid) the rider's app pays
 //      the driver in ecash ticks (features/payments/rideTicks.js) and reports `money` to the screens
 //  Banners: offers arriving, driver arrived, trip done, driver finished the ride, waived fares.
@@ -442,17 +442,6 @@ export function RiderProvider({ children }) {
     return () => clearInterval(id);
   }, [me, pushNotice, liveTick]);
 
-  const rateDriver = useCallback(
-    (request, driverPubkey, rating, review) => {
-      publish(
-        EVENT_KINDS.RATING,
-        { rating, review, rideId: request.id },
-        [["p", driverPubkey], ["e", request.id], ["d", "rating-" + request.id], ["t", "rating"]]
-      );
-    },
-    [publish]
-  );
-
   // Places the rider has been to, newest first (for quick "Where to?" picks).
   const recentPlaces = () => {
     const seen = new Set();
@@ -475,7 +464,7 @@ export function RiderProvider({ children }) {
     share, startShare, stopShare, shareUpdate, shareUrl,
     activeRide, focused: !!focused, focusRide: (r) => setFocusId(r ? r.id : null), upcoming, receipt, dismissReceipt,
     genderPref, setGenderPref,
-    requestRide, raiseOffer, proposePickup, confirmDriver, recordPayment, confirmRide, proposeStop, finishRide, declineOffer, rateDriver, recentPlaces,
+    requestRide, raiseOffer, proposePickup, confirmDriver, recordPayment, confirmRide, proposeStop, finishRide, declineOffer, recentPlaces,
     money, payNow, reportMiles, payTerms, payMint,
     nearestDriverEta: (to) => {
       if (!to || !drivers.length) return null;
