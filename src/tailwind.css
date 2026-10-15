@@ -1,0 +1,5 @@
+/* Tailwind's three layers (base reset, components, utilities). The utility classes used in the screens are generated
+   from the files listed in tailwind.config.js and served as part of the app's own CSS. Our own styles (index.css) come after. */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;

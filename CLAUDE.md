@@ -11,9 +11,9 @@ The sibling repo is **nostr-ride-driver**. Both speak the same events (table bel
 
 > **Generated repository.** This is a copy of the rider app made from **trevthom/nostr-ride** by `scripts/export-apps.mjs`. Make changes in nostr-ride and export again: a hand edit here is overwritten by the next export.
 
-Stack: **React 18 + Vite**. **Tailwind is loaded from a CDN** in `index.html`
-(NOT a build dependency — do not add `@tailwindcss/vite` or `tailwindcss`
-to package.json; its native binary breaks on some machines, which is why it was removed).
+Stack: **React 18 + Vite**. **Tailwind CSS v3 is built into the app's own CSS** (`src/tailwind.css` + `tailwind.config.js`,
+through PostCSS in `vite.config.js`): no script from another site runs in the page (the app holds keys and money). Use **v3 only**:
+Tailwind v4 and `@tailwindcss/vite` have a native binary that breaks on some machines. The built pages carry a Content-Security-Policy (`csp.mjs`).
 Full human-readable docs: `docs/index.md`.
 Look: white UI, black buttons, bottom sheets over a full-screen map (Inter font).
 
@@ -354,7 +354,9 @@ carries `driverPubkey`. Stage is `enroute` (default) → `arrived` → `riding`.
   connection are in memory only (cleared on reload).
 - **Wallet is live, not faked**: balance/transactions come from the user's real wallet over NIP-47.
   A working NWC string is required; otherwise the UI shows an error, never fake data.
-- **Tailwind via CDN** → arbitrary classes work, no build-time purge. Colors: black = primary, green
+- **Tailwind (built, v3) and no third-party script**: the build scans `tailwind.config.js` `content` (apps/**/*.{html,jsx}, src/**/*.{js,jsx}) for class names, so write every class out in full: a class made from pieces (`"bg-" + color`) gets NO css
+  (the old CDN hid this by watching the page). Arbitrary values (`bg-[#e6f4ec]`) work. `scripts/e2e` prints the class names on screen that the built CSS has no rule for (`h.missingStyles`; Leaflet's own markers are expected).
+  The built html carries a CSP `<meta>` (`csp.mjs`, build only): scripts from the app's own files only, no inline script. Do not add a `<script src=…>` from another site, an inline script, or an `eval`. Colors: black = primary, green
   (`#05944f`) = driver "go"/confirm, amber = warnings, `#f7931a` = Lightning bolt, blue = "you".
 - **Public visibility**: requests/offers are public on the relays (anyone on those relays can read
   them). That is why exact points and plates are sealed; notes, fares and approximate areas are public.

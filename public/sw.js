@@ -13,7 +13,7 @@
 // ════════════════════════════════════════════════════════════
 
 const CACHE = "nostrride-v1:" + self.registration.scope;
-const CDN = ["cdn.tailwindcss.com", "fonts.googleapis.com", "fonts.gstatic.com"];
+const CDN = ["fonts.googleapis.com", "fonts.gstatic.com"];
 
 // On install, keep the page and its script/style files, so the first OFFLINE start works too.
 self.addEventListener("install", (event) => {

@@ -55,7 +55,7 @@ npm test           # automated checks
 npm run build      # dist/
 ```
 To play a whole ride, also run the **driver** app from its repository (port 5174) and sign in with a different account in each.
-Needs internet for Tailwind (CDN), fonts, the map, and the relays. Location needs `https://` or `localhost`.
+Needs internet for fonts, the map, and the relays. Location needs `https://` or `localhost`.
 
 ## The two apps
 | | Rider app (repo nostr-ride-rider) | Driver app (repo nostr-ride-driver) |
@@ -497,7 +497,7 @@ A web page cannot read the location with the screen off. `native/` wraps the **d
 | Relays | `src/config/relays.js` (also editable in the app) |
 | Map tiles, address search, routing | `.env` (see `env.example`); defaults in `src/config/services.js` |
 | Emergency number, arrival radius | `src/config/settings.js` |
-| Colors | `src/theme.js`, Tailwind classes |
+| Colors | `src/theme.js`, Tailwind classes (built into the app's CSS: `tailwind.config.js`, `src/tailwind.css`) |
 
 ## Testing
 `npm test` runs `test/*.test.mjs` with Node's built-in runner: trust rules, ride stages, finishing a ride (who may finish, earliest finish wins, the silence cut-off), fares, trips,
@@ -515,6 +515,8 @@ payments, a refill after the ride, and a waiver with a refund. The vouch badge w
 ## Deploying
 `npm run build` makes `dist/`. Put it on any static host (for example `ride.example.com`); it works from any sub-path. Use `https://` (location needs it). Each app keeps its own
 saved key in the browser.
+The built pages carry a Content-Security-Policy (`<meta>`, `csp.mjs`). If the host lets you set headers, also send `Content-Security-Policy: frame-ancestors 'none'` (a `<meta>` tag cannot set it) so the pages cannot be framed by another site.
+A host that adds its own scripts to pages (an analytics snippet, for example) will be blocked by the policy: that is on purpose.
 
 ## Separate repositories (generated)
 Two repositories hold one app each: `trevthom/nostr-ride-rider` and `trevthom/nostr-ride-driver`.
@@ -579,6 +581,7 @@ To switch, copy `env.example` to `.env`, set `VITE_TILE_URL` (and `VITE_PHOTON_U
   and a cancel rate on profiles.
 
 ## Changelog
+- **No script from another site runs in the apps: Tailwind is built in, and the pages carry a Content-Security-Policy** — both apps used to load Tailwind from `https://cdn.tailwindcss.com` as a script. A script runs with full access to the page, so the CDN (or anyone who got into it) could have read the secret key, the ecash and the recovery phrase. Now Tailwind CSS v3 is a normal build step (PostCSS in `vite.config.js`, `tailwind.config.js`, `src/tailwind.css`) and the styles are one CSS file the app hosts itself. `vite build` also adds a Content-Security-Policy `<meta>` (`csp.mjs`) to every page: scripts only from the app's own files, no inline script, no `object`, no `<base>`, no form posts; network connections stay open to `https:`/`wss:` because relays, mints and Lightning servers are on addresses the person chooses. The dev server is not affected. Class names must now be written out in full (the old CDN also found names built from pieces at run time); the browser tests print any class name on screen without a rule. Tailwind v3 is pure JavaScript, so the old reason for keeping it out of `package.json` (v4's native binary) does not apply; v4 and `@tailwindcss/vite` are still not to be used. The Inter font still loads from Google Fonts. `frame-ancestors` cannot be set from a `<meta>` tag: set it as a header on the host if the pages must not be framed.
 - **Pin the drop-off on the map too** — the search page has a second button, *Set drop-off on the map* (next to *Set pickup on the map*). It opens the same full-screen map with a fixed pin (the pin starts at the drop-off already chosen, else near the pickup); the address of the spot is looked up and shown, and *Confirm drop-off* sets the place. With both places set the quote opens. Back from the pin page keeps what was chosen. `components/PinPicker.jsx` takes a `field`; the plan state has `pinField`. `scripts/e2e/nav.mjs` covers it.
 - **A 12-word recovery phrase for the ecash, and collapsible Account sections** — the ecash lives on the device, so a lost phone used to mean lost money. Now every coin the wallet makes for itself gets its secret from a recipe (a BIP39 phrase + the mint's keyset + a counter, Cashu NUT-13), and the 12 words on a new device find the coins again at the mint (NUT-09) and swap them for fresh ones, so a copy on the lost phone is worth nothing. The phrase is its own secret (not the nsec), kept encrypted on the device and never sent anywhere; the person writes it down and types three words back; a warning shows at the top of Account while there is ecash and the words are not written down. Counters are saved before the mint is asked; coins sent to a driver use random secrets (a restore never brings them back); a second device with the same phrase skips ahead past used counters; old coins are moved under the phrase once it is confirmed; words that find nothing never replace the wallet's own phrase. New: `lib/recovery.js`, `nostr/seedbox.js`, `nostr/ecashRecovery.js`, `features/ecash/RecoverySection.jsx` + `RestorePanel.jsx`, NUT-09 in the local test mint, `test/recovery.test.mjs`, `test/restore.test.mjs`, `scripts/e2e/recovery.mjs`. `@cashu/cashu-ts` is now pinned to an exact version and `@scure/bip39` is a dependency. Every section on both Account screens is now a **fold** (`ui/Fold.jsx`): closed at first, a tap opens it, what you opened is remembered on the device, and a closed section keeps what was typed in it. The vehicle and Lightning address sections of a driver who still needs them start open.
 - **Vouches replace star ratings and reviews** — ratings and reviews are removed from both apps (they are too easy to fake): no stars after a ride, none on profiles, no review text. The only reputation is now a **vouch**, "I know and trust this person". *Account → Your vouches* holds the npubs a person knows and trusts (an nsec is refused; up to 100; the list is public, kind 30102). When someone **you** vouch for also vouches for a driver or a rider, their card shows "N of your vouches know and trust this person" (one hop only; tap for names; "You know and trust this person" when they are in your own list). A vouch is for the person, in either role. Nothing shows for a person nobody you vouch for knows. Trip counts stay as plain facts. Old rating events are ignored; kind 30082 is unused. New: `lib/vouches.js`, `nostr/vouchSync.js`, `ui/VouchBadge.jsx`, `features/profile/VouchesSection.jsx`, `test/vouches.test.mjs`.

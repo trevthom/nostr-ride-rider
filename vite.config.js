@@ -1,6 +1,9 @@
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { fileURLToPath } from "node:url";
+import tailwindcss from "tailwindcss";
+import autoprefixer from "autoprefixer";
+import { cspPlugin } from "./csp.mjs";
 
 // "2026-10-12 21:30 UTC": the build time (shown in Account, so a person can tell which version is running).
 const buildId = () => new Date().toISOString().slice(0, 16).replace("T", " ") + " UTC";
@@ -10,7 +13,9 @@ const buildId = () => new Date().toISOString().slice(0, 16).replace("T", " ") + 
 // files work from any folder or sub-path (GitHub Pages, Netlify, a plain server).
 export default defineConfig({
   base: "./",
-  plugins: [react()],
+  plugins: [react(), cspPlugin()],
+  // Tailwind CSS v3 is built into the app's own CSS (src/tailwind.css); no script from a CDN runs in the page.
+  css: { postcss: { plugins: [tailwindcss(fileURLToPath(new URL("./tailwind.config.js", import.meta.url))), autoprefixer()] } },
   define: { __APP_ROLE__: JSON.stringify("rider"), __BUILD_ID__: JSON.stringify(buildId()) },
   server: { port: 5173 },
   preview: { port: 4173 },

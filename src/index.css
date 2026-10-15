@@ -1,6 +1,6 @@
 /* ── Global styles ──
-   Tailwind's utility classes load from a CDN script in the app's index.html,
-   so they are NOT imported here. This file holds only our own styles: the
+   Tailwind's utility classes are built into the app's CSS from src/tailwind.css (see tailwind.config.js),
+   which each entry page imports BEFORE this file. This file holds only our own styles: the
    font, page basics, and a few small animations. */
 
 *, *::before, *::after {

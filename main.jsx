@@ -1,5 +1,6 @@
 import ReactDOM from "react-dom/client";
 import App from "./src/rider/App.jsx";
+import "./src/tailwind.css";
 import "./src/index.css";
 import { registerServiceWorker } from "./src/lib/notify.js";
 
