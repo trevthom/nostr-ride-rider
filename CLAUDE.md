@@ -103,9 +103,6 @@ src/
     stops.js      # extra stop / new destination: stopChanges, stopTrip/fullTrip, hasAcceptedStop, nextStop; STOP_NOTE_*
     currency.js   # CURRENCIES, get/setCurrency, formatFiat, toMinor, satsFromFiat/fiatFromSats (pure maths)
     mints.js      # cleanMintUrl/isMintUrl/mintLabel
-    strike.js     # makeStrike({apiKey}): Strike API client — RIDER pays an invoice (payQuote → execute → waitForPayment), DRIVER gets paid (receiveInvoice in BTC or USD, invoiceState); sats↔BTC strings; invoiceFits/tickSlack; StrikeError
-    strikerail.js # the Strike RAIL: a ride paid straight Strike → Strike. rideRail/rideStrike (frozen by offer + accept), RIDE_INVOICE builders/readers, strikeTickLive, local records (payRecords, issuedRecords), strikeCanPay
-    strikekey.js  # the Strike API key saved ONLY encrypted (NIP-44 to the user's key); strikeSource / strikeReceive choices
     trips.js      # derive current state: activeRideFor, activeDriveFor, offersForRide, rankOffers/offerGender, offerFrom, pendingOfferFor, acceptFor, upcomingRidesFor, isScheduledLater
     odometer.js   # stepOdo/newOdo: miles of a GPS track (skips wobble, bad fixes, glitches) (pure)
     meter.js      # referenceMiles (driver's distance unless the rider's differs >5%), meterView, fmt* (pure)
@@ -123,7 +120,6 @@ src/
     gps.js (gpsStatus/gpsMessage: good|weak|stale; canBeOnline/approxNote) useGeolocation.js (pos, error, status) useWakeLock.js
     geo.js geocode.js (search + reverseGeocode) routing.js (OSRM, cached) image.js lnurl.js locations.js profile.js (driveGaps/gapsText/isDriveReady)
   state/AppContext.jsx            # shared state (above)
-  state/useStrike.js              # the optional Strike link as state: AppContext exposes it as `strike` (connected, client, balances, source, receive, connect, disconnect)
   ui/                             # shared UI kit
     Layout.jsx    # AppFrame, MapPage (+ measures the Sheet so the map pads for it), Sheet (collapsible with `peek`/openKey/closeKey), FloatButton, Screen, TabBar
     MapView.jsx   # Leaflet + OpenStreetMap tiles; pins, OSRM route, cars, "me" dot, price pills, ref.fit(); trip mode (`navigation` + `follow`)
@@ -132,10 +128,9 @@ src/
   features/
     auth/        AuthScreen (role-aware copy) + AuthSteps (unlock, key backup)
     profile/     ProfileParts (useSaveProfile, AccountHeader, ContactMethods, RelaysSection, LogoutButton),
-                 VehicleSection, TypicalFareSection ("Your rates", locked during a ride), CurrencySection, LightningAddressSection, WalletSection, StrikeSection, KeysSection
+                 VehicleSection, TypicalFareSection ("Your rates", locked during a ride), CurrencySection, LightningAddressSection, WalletSection, KeysSection
     ecash/       EcashSection (balance, mint, paste a token, back up, driver cash out), myMint.js
-    payments/    PayDriver (a Lightning address: tips), AddFunds (mint invoice → ecash, Strike, NWC or any wallet), StrikePay (quote → cost → confirm → pay), CurrencyChoice (Bitcoin | US dollars), rideTicks.js (rider: payDue), redeemTicks.js (driver: redeem + reply),
-                 strikeTicks.js (rider, Strike rail: ask for an invoice, pay it), strikeServe.js (driver, Strike rail: make the invoice, confirm when PAID),
+    payments/    PayDriver (a Lightning address: tips), AddFunds (mint invoice → ecash, NWC or any wallet), rideTicks.js (rider: payDue), redeemTicks.js (driver: redeem + reply),
                  redeemWaivers.js (rider: collect refunds), useRideLink.js (quiet phone, sign of life, 10-minute silence)
   rider/
     App.jsx  state/RiderContext.jsx
@@ -156,8 +151,8 @@ test/*.test.mjs
 |---|---|---|---|
 | 0 | METADATA | — | `{name, about, communication[], picture, lud16, gender?, rates?, vehicle}` (+ fields from other apps, kept on merge) |
 | 30078 | RIDE_REQUEST | `d`(id), `t`, `p`(driver, once confirmed) | `{pickup, dropoff, time, notes, status, hide?, fareMode, fareSats, suggestedSats, distanceMiles, durationMin, sealed}` — `hide` = hide tokens of the drivers the rider blocked (lib/blocks.js); pickup/dropoff are COARSE; `sealed` = exact trip, NIP-44 to the rider. `fareMode` = `"standard"` (each driver's rates; `fareSats` is only an estimate) or `"flat"` (`fareSats` is the RIDER'S FLAT PRICE); older requests lack both (the driver app estimates); `suggestedSats` is what the app suggested. `status` ∈ `requested \| in_progress \| closed` (old: `cancelled`) |
-| 30079 | RIDE_OFFER | `e`(request), `p`(rider), `d`, `t` | `{priceSats, mode, rates, mint, strike?, tripMiles, tripMinutes, etaMinutes, message, typicalSats, gender, plate}` — the driver's reply. `mode:"flat"`: the rider's flat price (accept) or a higher price (counter); `mode:"metered"`: the driver's standard fare (`priceSats` = their estimate). `rates` = `{base, perMile, perMinute, currency}` (a frozen copy) and `mint` = where the driver is paid; `gender` optional, self-declared; `plate` NIP-44 to the rider. No deposit |
-| 30080 | RIDE_ACCEPT | `e`(offer), `e`(request), `p`(driver), `d`, `t` | `{offerId, requestId, rail?, sealed}` — `rail:"strike"` = the ride is paid straight from the rider's Strike (counts only if the offer has `strike`);  `offerId` names the offer whose rates and mint are FROZEN for the ride; `sealed` = exact trip, NIP-44 to the driver |
+| 30079 | RIDE_OFFER | `e`(request), `p`(rider), `d`, `t` | `{priceSats, mode, rates, mint, tripMiles, tripMinutes, etaMinutes, message, typicalSats, gender, plate}` — the driver's reply. `mode:"flat"`: the rider's flat price (accept) or a higher price (counter); `mode:"metered"`: the driver's standard fare (`priceSats` = their estimate). `rates` = `{base, perMile, perMinute, currency}` (a frozen copy) and `mint` = where the driver is paid; `gender` optional, self-declared; `plate` NIP-44 to the rider. No deposit |
+| 30080 | RIDE_ACCEPT | `e`(offer), `e`(request), `p`(driver), `d`, `t` | `{offerId, requestId, sealed}` — `offerId` names the offer whose rates and mint are FROZEN for the ride; `sealed` = exact trip, NIP-44 to the driver |
 | 30081 | RIDE_FINISH | `e`(request), `p`, `d`="finish-<id>", `t` | `{requestId, reason: rider\|driver\|destination\|unpaid\|silence, role, at, miles?, minutes?, atDestination?}` — by the rider or the assigned driver; ends the ride (NO cancellations, NO fees). `at`/`miles` = the moment and meter the charge runs to |
 | 30082 | RATING | `p`(ratee), `e`(ride), `d`, `t` | `{rating, review, rideId}` |
 | 30083 | DRIVER_ROUTE | | unused (feature removed) |
@@ -167,13 +162,12 @@ test/*.test.mjs
 | 30087 | RIDE_CONFIRM | `e`(request), `p`(driver), `d`="confirm-<rideKey>-<phase>", `t` | `{phase:"boarded"\|"code"\|"ended"\|"problem", ok, note}` — by the rider (`code` = typed the driver's start code) |
 | 30093 | RIDE_PICKUP_CHANGE (addressable) | `e`(request), `p`(driver), `d`="pickup-<rideKey>-<changeId>", `t` | `{changeId, sealedDriver, sealedSelf}` — the new pickup `{pickup:{name,lat,lng}}` NIP-44 to the driver and to the rider; only the ride's rider |
 | 30094 | RIDE_PICKUP_REPLY (addressable) | `e`(request), `p`(rider), `d`="pickup-reply-<changeId>", `t` | `{changeId, accepted}` — only the assigned driver |
-| 30095 | RIDE_TICK (addressable) | `e`(request), `p`(driver), `d`="tick-<rideKey>-<seq>-<nonce>", `t` | `{seq, trigger, amountSats, mint, rail?, at, sealed}` — one ecash payment by the ride's rider; `sealed` = `{token}` (a cashuB token) NIP-44 to the driver; the amount is public. `rail:"strike"` = no token: a request for the driver's Strike invoice (`sealed` = `{rail}`) |
+| 30095 | RIDE_TICK (addressable) | `e`(request), `p`(driver), `d`="tick-<rideKey>-<seq>-<nonce>", `t` | `{seq, trigger, amountSats, mint, at, sealed}` — one ecash payment by the ride's rider; `sealed` = `{token}` (a cashuB token) NIP-44 to the driver; the amount is public |
 | 30096 | RIDE_TICK_REPLY (addressable) | `e`(request), `e`(tick), `p`(rider), `d`="tick-reply-<tickId>", `t` | `{tickId, ok, receivedSats, reason}` — only the assigned driver; `ok:false` only for a FINAL refusal (never for an unreachable mint) |
 | 30097 | RIDE_WAIVER (addressable) | `e`(request), `p`(rider), `d`="waive-<rideKey>-<ms>", `t` | `{forgivenSats, refundSats, reason, sealed?}` — only the assigned driver; `sealed` = `{token}` NIP-44 to the rider (the refund) |
 | 30098 | RIDE_ALIVE (addressable) | `e`(request), `p`(other), `d`="alive-<rideKey>-<role>", `t` | `{role, forRole, at}` — "still riding / still driving": a signed sign of life by the rider or the assigned driver, vouching for `forRole` |
 | 30099 | RIDE_STOP_CHANGE (addressable) | `e`(request), `p`(driver), `d`="stop-<rideKey>-<changeId>", `t` | `{changeId, mode: stop\|destination, sealedDriver, sealedSelf}` — the new place NIP-44 to the driver and the rider; only the ride's rider |
 | 30100 | RIDE_STOP_REPLY (addressable) | `e`(request), `p`(rider), `d`="stop-reply-<changeId>", `t` | `{changeId, accepted}` — only the assigned driver |
-| 30102 | RIDE_INVOICE (addressable) | `e`(request), `e`(tick), `p`(rider), `d`="invoice-<tickId>", `t` | `{tickId, ok, sats, currency, receive, expiresAt, reason, sealed}` — only the assigned driver; the driver's Strike invoice for one Strike tick, `sealed` = `{bolt11}` NIP-44 to the rider |
 | 30101 | RIDE_OFFER_DECLINE (addressable) | `e`(request), `e`(offer), `p`(driver), `d`="decline-<requestId>-<driver>", `t` | `{requestId, offerId}` — only the ride's rider; turns ONE driver's offer down, the request stays open |
 | 30091 | TRIP_SHARE (addressable) | `d`="share", `t`, `expiration` | `{sealed}` — signed by a throwaway key; payload encrypted with that key (in the link #fragment) |
 | 30090 | PRESENCE (addressable) | `d`="presence", `t`, `expiration` | `{name, npub, vehicle, rates?, hide?, lat, lng, ts}` — public, coarsened location; `hide` = hide tokens of the riders the driver blocked |
@@ -244,15 +238,6 @@ carries `driverPubkey`. Stage is `enroute` (default) → `arrived` → `riding`.
   Proofs are saved encrypted (NIP-44 to the user's own key, in pieces). Rules: one money move at a time (`_exclusive`); a token being sent sits in `pending` until its event is
   published/queued (`settle`) or is returned (`unreserve`/`recoverPending`); a token is redeemed once (fingerprint); the sender adds the mint's input fee (`includeFees`) so the receiver
   gets the full tick; `EcashError.definitive` separates a mint's "no" from an unreachable mint. Never log proofs or tokens. Test against `test/helpers/localmint.mjs` (real maths).
-- **Strike rail** (`lib/strikerail.js`, `features/payments/strikeTicks.js` + `strikeServe.js`): a ride can be paid straight from the rider's Strike into the driver's Strike, NO mint. The driver's offer carries `strike:{currency}` (their choice, frozen
-  with the offer); the rider's RIDE_ACCEPT carries `rail:"strike"` (`rideRail` = "strike" only if BOTH say so; everything else is ecash). Per tick: rider publishes a RIDE_TICK `rail:"strike"` (a request, no token) → the driver's Strike makes ONE invoice in that
-  currency, saved BEFORE it is sent (`issuedRecords`), sent sealed as RIDE_INVOICE (30102) → the rider's Strike pays it, once (`payRecords`: "paying" is set before `execute`; an unknown outcome is never retried, only a clear 4xx) → the driver replies "received" ONLY when
-  its OWN Strike says `PAID` (`invoiceState`). `sentSats(request, nowMs)` counts a Strike tick only while it can still be answered/paid (`strikeTickLive`), so an unanswered or unpaid tick is asked for again and nothing is paid twice. The rider refuses an invoice
-  larger than the tick (`invoiceFits`). `redeemTicks` skips Strike ticks; a waiver cannot refund on a Strike ride; `payMint` is null on a Strike ride (no Add funds).
-- **Strike** (optional; `lib/strike.js`, `lib/strikekey.js`, `state/useStrike.js`; docs/index.md "Strike"): the RIDER's Strike pays a Lightning invoice the app made itself (the mint's, or the driver's lud16) from the Bitcoin or the US dollar balance
-  (`StrikePay`: quote → show the cost → ONLY then `execute` → `waitForPayment`); the DRIVER's cash out into Strike makes the invoice IN the currency the driver chose (`receiveInvoice`: BTC must match to the sat, USD within 5% of the market price, whole cents).
-  The API key is saved ONLY encrypted (`strikekey.js`), never in the clear and never logged; `strike.client` exposes calls, not the key. Drivers never see "Pay with Strike", riders never see "Cash out to Strike". A failed or lost payment says
-  "look in Strike first" (no double pay). Written from Strike's public reference and tested against `test/helpers/localstrike.mjs`; NOT yet run against live Strike (CORS unknown: `VITE_STRIKE_API_URL` can point at a proxy).
 - **Tips** still go over Lightning: the rider's `lud16` payment via `PayDriver` and a RIDE_PAYMENT `tip` record. **Evidence**: tips are re-checked by the driver app
   (`verifyPayment`: only a `verify` URL on the host of the driver's own lud16 is fetched); the tick trail (30095/30096/30097/30098) is the evidence for the ride's money.
 - **Finish ride (lib/finish.js)**: one `finishRide` action per app (rider: RiderContext, driver: DriverContext), always behind a `ConfirmDialog`. Before the `riding` marker nothing is

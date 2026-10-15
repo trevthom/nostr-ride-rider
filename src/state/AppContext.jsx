@@ -2,7 +2,7 @@
 //  APP STATE — The state BOTH apps share: the logged-in user, which
 //  tab is showing, the ride requests from the relays, transient
 //  banners, the local currency and the BTC prices, the ecash wallet,
-//  the connected Lightning (NWC) wallet, and the optional Strike account.
+//  and the connected Lightning (NWC) wallet.
 //
 //  Role-specific state lives next to each app:
 //    src/rider/state/RiderContext.jsx    (requesting + riding)
@@ -18,7 +18,6 @@ import { EVENT_KINDS, APP_TAG } from "../nostr/eventKinds.js";
 import { buildSignedEvent } from "../nostr/events.js";
 import { latestVersions } from "../nostr/replaceable.js";
 import { emptyWalletState } from "../nostr/wallet.js";
-import useStrike from "./useStrike.js";
 import { getProfile } from "../nostr/profiles.js";
 import { myVehicle } from "../lib/privacy.js";
 import { forgetKey } from "../nostr/keystore.js";
@@ -152,9 +151,6 @@ export function AppProvider({ initialView, children }) {
     }).catch(() => {});
     return () => { alive = false; if (off) off(); };
   }, [user?.publicKey]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // The optional Strike account (rider: pays from it; driver: cashes out into it). See state/useStrike.js.
-  const strike = useStrike(user);
 
   // Re-read the latest ride requests from the cache (newest per request),
   // skipping anything malformed or not shaped like a ride.
@@ -335,7 +331,6 @@ export function AppProvider({ initialView, children }) {
     wallet,
     setWallet,
     ecash,
-    strike,
     currency,
     setCurrency,
     prices,

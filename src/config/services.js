@@ -8,8 +8,6 @@
 //    VITE_PHOTON_URL        base URL of a Photon geocoder
 //    VITE_OSRM_URL          base URL of an OSRM routing server
 //    VITE_DEFAULT_MINT      the ecash (Cashu) mint a new driver starts with (see lib/mints.js)
-//    VITE_STRIKE_API_URL    the Strike API (lib/strike.js): https://api.strike.me, or the sandbox https://api.next.strike.me
-//                           (or your own proxy, if Strike does not allow calls from a web page)
 // ════════════════════════════════════════════════════════════
 
 const env = (typeof import.meta !== "undefined" && import.meta.env) || {};
@@ -21,9 +19,6 @@ export const PHOTON_URL = clean(env.VITE_PHOTON_URL || "https://photon.komoot.io
 export const OSRM_URL = clean(env.VITE_OSRM_URL || "https://router.project-osrm.org");
 
 // The ecash mint a driver is paid at until they choose another in Account. A mint holds the money behind
-// ecash, so it must be one you trust: set VITE_DEFAULT_MINT before you launch. This public mint is only a
-// starting point for trying the app.
-export const DEFAULT_MINT = clean(env.VITE_DEFAULT_MINT || "https://mint.minibits.cash/Bitcoin");
-
-// Strike (optional): a rider pays from a Strike account, a driver cashes out into one. See lib/strike.js.
-export const STRIKE_API_URL = clean(env.VITE_STRIKE_API_URL || "https://api.strike.me");
+// ecash, so it must be one you trust: set VITE_DEFAULT_MINT before you launch. The default is the Macadamia
+// mint (macadamia.cash). It has not been run against yet: if the address is wrong, set VITE_DEFAULT_MINT.
+export const DEFAULT_MINT = clean(env.VITE_DEFAULT_MINT || "https://macadamia.cash");

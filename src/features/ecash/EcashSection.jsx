@@ -6,28 +6,24 @@
 //    • the mint:  a driver is paid at it; a rider starts "Add funds" there
 //    • paste an ecash token to add it to the wallet
 //    • back up the wallet as tokens (ecash is cash: whoever holds a token owns it)
-//    • driver: cash out to their Lightning address, or into their Strike account as Bitcoin or US dollars (the driver chooses)
+//    • driver: cash out to their Lightning address
 //  The ecash is saved on this device, encrypted to your key. Logging out keeps it.
 // ════════════════════════════════════════════════════════════
 
 import { useState } from "react";
 import { useApp } from "../../state/AppContext.jsx";
 import { IS_DRIVER_APP } from "../../config/app.js";
-import { SectionLabel, ConfirmDialog, inputCls } from "../../ui/Parts.jsx";
+import { SectionLabel, inputCls } from "../../ui/Parts.jsx";
 import Button from "../../ui/Button.jsx";
 import Icon from "../../ui/Icon.jsx";
 import Money, { moneyText } from "../../ui/Money.jsx";
 import { cleanMintUrl, mintLabel } from "../../lib/mints.js";
-import { requestInvoice } from "../../lib/lnurl.js";
-import { strikeAmountText } from "../../lib/strike.js";
-import CurrencyChoice from "../payments/CurrencyChoice.jsx";
+import { requestInvoice, isLightningAddress } from "../../lib/lnurl.js";
 import AddFunds from "../payments/AddFunds.jsx";
 import { getMyMint, setMyMint } from "./myMint.js";
 
 export default function EcashSection({ locked = false }) {
-  const { ecash, user, btcPrice, usdPrice, strike, pushNotice } = useApp();
-  const strikeOut = IS_DRIVER_APP && strike.connected; // a driver can cash out into Strike
-  const [confirmOut, setConfirmOut] = useState(null); // the mint whose balance is about to go to Strike
+  const { ecash, user, btcPrice, pushNotice } = useApp();
   const [mint, setMint] = useState(getMyMint());
   const [draft, setDraft] = useState(mint);
   const [adding, setAdding] = useState(false);
@@ -73,32 +69,6 @@ export default function EcashSection({ locked = false }) {
     setBusy("");
   };
 
-  // Into Strike: it makes the invoice in the currency the driver chose (lib/strike.js receiveInvoice), the mint pays it.
-  const cashOutStrike = async (url) => {
-    setConfirmOut(null);
-    setBusy("out");
-    setMsg("");
-    try {
-      const made = [];
-      const r = await ecash.cashOut(url, async (sats) => {
-        const inv = await strike.client.receiveInvoice({ sats, currency: strike.receive, usdPerBtc: usdPrice });
-        made.push(inv);
-        return inv.bolt11;
-      });
-      const inv = made.find((i) => i.sats === r.paidSats);
-      setMsg(`Sent ${moneyText(r.paidSats, btcPrice)} to Strike${inv ? `. Strike received ${strikeAmountText(inv.receive)}` : ""}. Mint fee: ${r.feeSats} sats.`);
-      pushNotice("Cash out sent to Strike.");
-      strike.refresh().catch(() => {});
-    } catch (e) {
-      setMsg(e.message || "The cash out failed. Your ecash is still here.");
-    }
-    setBusy("");
-  };
-  // What a Strike cash out of this balance is worth, as a guess to show before the driver confirms.
-  const guess = (sats) => (strike.receive === "USD"
-    ? (usdPrice ? `about ${strikeAmountText({ currency: "USD", amount: ((sats * usdPrice) / 1e8).toFixed(2) })} in US dollars` : "in US dollars at Strike's rate")
-    : `${sats.toLocaleString()} sats as Bitcoin, less the mint's fee`);
-
   return (
     <section>
       <SectionLabel>Ecash wallet</SectionLabel>
@@ -117,14 +87,9 @@ export default function EcashSection({ locked = false }) {
               <div key={url} className="flex items-center gap-2 mt-3 text-sm">
                 <span className="flex-1 min-w-0 truncate text-neutral-600">{mintLabel(url)}</span>
                 <span className="font-semibold tabular-nums">{sats.toLocaleString()} sats</span>
-                {strikeOut && (
-                  <button type="button" onClick={() => setConfirmOut(url)} disabled={busy === "out" || locked} className="text-xs font-semibold underline disabled:text-neutral-400">
-                    {busy === "out" ? "Sending…" : "Cash out to Strike"}
-                  </button>
-                )}
                 {IS_DRIVER_APP && user.lud16 && (
                   <button type="button" onClick={() => cashOut(url)} disabled={busy === "out" || locked} className="text-xs font-semibold underline disabled:text-neutral-400">
-                    {busy === "out" ? "Sending…" : strikeOut ? "To my address" : "Cash out"}
+                    {busy === "out" ? "Sending…" : "Cash out"}
                   </button>
                 )}
               </div>
@@ -132,13 +97,7 @@ export default function EcashSection({ locked = false }) {
             <div className="flex gap-2 mt-4">
               <Button size="md" onClick={() => setAdding(true)}><Icon name="zap" size={16} /> Add funds</Button>
             </div>
-            {IS_DRIVER_APP && total > 0 && !user.lud16 && !strikeOut && <p className="text-xs text-amber-700 mt-2">Set a Lightning address, or link Strike, to cash out.</p>}
-            {strikeOut && total > 0 && (
-              <div className="mt-3">
-                <p className="text-xs text-neutral-500 mb-1">Cash out to Strike as</p>
-                <CurrencyChoice value={strike.receive} onChange={strike.setReceive} label="Cash out to Strike as" disabled={locked || busy === "out"} />
-              </div>
-            )}
+            {IS_DRIVER_APP && total > 0 && !user.lud16 && <p className="text-xs text-amber-700 mt-2">Set a Lightning address to cash out.</p>}
             {IS_DRIVER_APP && locked && <p className="text-xs text-neutral-500 mt-2">Cash out is paused while a ride is running.</p>}
           </div>
 
@@ -186,9 +145,6 @@ export default function EcashSection({ locked = false }) {
           </p>
         </>
       )}
-      <ConfirmDialog open={!!confirmOut} title="Cash out to Strike?" confirmLabel="Cash out" cancelLabel="Keep"
-        message={confirmOut ? `${(balances[confirmOut] || 0).toLocaleString()} sats go to your Strike account: ${guess(balances[confirmOut] || 0)}. Strike's own rate decides the final amount.` : ""}
-        onConfirm={() => cashOutStrike(confirmOut)} onCancel={() => setConfirmOut(null)} />
       {adding && <AddFunds mint={mint} onClose={() => setAdding(false)} />}
     </section>
   );

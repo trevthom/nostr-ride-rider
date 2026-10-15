@@ -13,7 +13,6 @@ import { rideDriver, rideEnding, rideKey, rideStatus, rideVersions } from "../..
 import { currentLedger, ledgerSummary } from "../../lib/ridemoney.js";
 import { rideTerms } from "../../lib/terms.js";
 import { rideMint } from "../../lib/terms.js";
-import { rideRail } from "../../lib/strikerail.js";
 import { sentSats } from "../../lib/payments.js";
 import AddFunds from "../../features/payments/AddFunds.jsx";
 import { exactTrip } from "../../lib/privacy.js";
@@ -133,7 +132,7 @@ function PastTrip({ request, trip, onClose }) {
   const terms = rideTerms(request);
   const sum = ledgerSummary(request, terms && done ? currentLedger(request, { terms, price: priceFor(terms.currency), nowMs: Date.now(), miles: null, role: "rider" }) : null);
   const [adding, setAdding] = useState(false);
-  const mint = rideRail(request) === "strike" ? null : rideMint(request); // a ride paid from Strike has no ecash to top up
+  const mint = rideMint(request);
   const ids = new Set(rideVersions(request).map((e) => e.id));
   const mine = relay
     .query({ kinds: [EVENT_KINDS.RATING], authors: [user.publicKey] })

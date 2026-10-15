@@ -1,8 +1,6 @@
 // ════════════════════════════════════════════════════════════
 //  PAY DRIVER — Pays `amountSats` to the driver's Lightning address
-//  (lud16 in their profile). Three ways:
-//    • Strike — the rider's linked Strike account pays the driver's invoice, after the rider has
-//      seen the cost (features/payments/StrikePay.jsx). Done when Strike says it is done.
+//  (lud16 in their profile). Two ways:
 //    • Connected wallet — gets an invoice from the driver's address
 //      and pays it over NWC. Done when the wallet confirms.
 //    • Any other wallet — shows the driver's invoice (QR / string /
@@ -22,11 +20,9 @@ import { proofLevel } from "../../lib/evidence.js";
 import QRCode from "../../ui/QRCode.jsx";
 import Button from "../../ui/Button.jsx";
 import Icon from "../../ui/Icon.jsx";
-import StrikePay from "./StrikePay.jsx";
 
 export default function PayDriver({ amountSats, address, memo = "NostrRide fare", onPaid }) {
-  const { wallet, strike, btcPrice } = useApp();
-  const [strikeInv, setStrikeInv] = useState(null); // the driver's invoice while the Strike panel is open
+  const { wallet, btcPrice } = useApp();
   const [busy, setBusy] = useState(""); // "" | "wallet" | "invoice" | "check"
   const [error, setError] = useState("");
   const [invoice, setInvoice] = useState(null); // { pr, verify }
@@ -79,23 +75,6 @@ export default function PayDriver({ amountSats, address, memo = "NostrRide fare"
     setBusy("");
   };
 
-  const startStrike = async () => {
-    setBusy("strike");
-    setError("");
-    try {
-      setStrikeInv((await requestInvoice(address, amountSats, memo)).pr);
-    } catch (e) {
-      setError(e.message || "Couldn't get an invoice from the driver's wallet.");
-    }
-    setBusy("");
-  };
-  const strikePaid = ({ state }) => {
-    const pr = strikeInv;
-    setStrikeInv(null);
-    if (state === "pending") return setError("Strike is still sending this payment. Look in your Strike app before you try again, so you don't pay twice.");
-    finish({ via: "wallet", pr });
-  };
-
   const showInvoice = async () => {
     setBusy("invoice");
     setError("");
@@ -129,21 +108,14 @@ export default function PayDriver({ amountSats, address, memo = "NostrRide fare"
   };
 
   const amountText = moneyText(amountSats, btcPrice);
-  if (strikeInv) return <StrikePay invoice={strikeInv} sats={amountSats} to="your driver" onPaid={strikePaid} onCancel={() => setStrikeInv(null)} />;
   return (
     <div>
-      {/* Option 0: the linked Strike account */}
-      {strike.connected && (
-        <Button onClick={startStrike} loading={busy === "strike"} className="mb-2">
-          {busy === "strike" ? "Getting invoice…" : <><Icon name="zap" size={18} />Pay {amountText} with Strike</>}
-        </Button>
-      )}
       {/* Option 1: connected wallet */}
-      <Button variant={strike.connected ? "secondary" : "primary"} onClick={payWithWallet} disabled={!wallet.connected} loading={busy === "wallet"} className="mb-2">
+      <Button onClick={payWithWallet} disabled={!wallet.connected} loading={busy === "wallet"} className="mb-2">
         {busy === "wallet" ? "Paying…" : <><Icon name="zap" size={18} />Pay {amountText} with wallet</>}
       </Button>
       {!wallet.connected && (
-        <p className="text-neutral-500 text-xs text-center mb-3">Connect {strike.connected ? "a Lightning" : "Strike or a"} wallet in Account to pay in one tap.</p>
+        <p className="text-neutral-500 text-xs text-center mb-3">Connect a wallet in Account to pay in one tap.</p>
       )}
 
       {/* Option 2: the driver's invoice, for any wallet */}

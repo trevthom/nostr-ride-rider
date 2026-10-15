@@ -30,7 +30,7 @@ export async function payDue({ request, user, ecash, publish, terms, mint, price
   const sum = ledgerSummary(request, ledger);
   const base = { ...sum, ledger };
   if (!ledger || !driver) return { status: "wait", due: 0, ...base };
-  const sent = sentSats(request, nowMs) + forgivenSats(request);
+  const sent = sentSats(request) + forgivenSats(request);
   const due = dueSats(ledger, sent);
   if (due <= 0) return { status: "ok", due: 0, ...base };
   const final = !!ledger.final;

@@ -29,7 +29,6 @@ export async function redeemTicks({ request, user, ecash, publish, mint, nowMs =
   if (!ecash || !mint) return out;
   const replies = tickReplies(request);
   for (const tick of ticksOf(request)) {
-    if (tick.rail === "strike") continue; // paid through Strike, not ecash: features/payments/strikeServe.js answers it
     if (replies.has(tick.id) || inFlight.has(tick.id)) continue;
     if ((retryAt.get(tick.id) || 0) > nowMs) { out.waiting++; continue; }
     inFlight.add(tick.id);

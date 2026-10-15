@@ -5,8 +5,6 @@
 //
 //    RIDE_TICK        rider → driver   one ecash payment. The token is sealed to the driver; the
 //                                      amount is public (like a tip). d = tick-<rideKey>-<seq>-<nonce>
-//                                      With rail "strike" there is no token: it asks the driver for a Strike invoice
-//                                      (lib/strikerail.js) and the rider's Strike pays it.
 //    RIDE_TICK_REPLY  driver → rider   "received" (ok) or a final refusal. d = tick-reply-<tickId>
 //    RIDE_WAIVER      driver → rider   part of the fare is waived: the unpaid part is forgiven, and/or
 //                                      ecash is sent back (sealed to the rider)
@@ -24,7 +22,6 @@ import { relay } from "../nostr/relay.js";
 import { EVENT_KINDS } from "../nostr/eventKinds.js";
 import { rideDriver, rideKey, rideVersions, RIDER_SIGNAL_KINDS, DRIVER_SIGNAL_KINDS } from "./rides.js";
 import { seal, unseal } from "./privacy.js";
-import { invoicesOf, strikeTickLive } from "./strikerail.js";
 
 const parse = (e) => { try { return JSON.parse(e.content); } catch { return null; } };
 const etags = (e) => e.tags.filter((t) => t[0] === "e").map((t) => t[1]);
@@ -33,13 +30,12 @@ const idsOf = (request) => new Set(rideVersions(request).map((e) => e.id));
 const onRide = (e, ids) => etags(e).some((id) => ids.has(id));
 
 // ── Building ──
-export function tickEvent(request, driverPubkey, user, { seq, trigger, amountSats, mint = "", token, rail, at = Date.now() }) {
+export function tickEvent(request, driverPubkey, user, { seq, trigger, amountSats, mint, token, at = Date.now() }) {
   const nonce = Math.random().toString(36).slice(2, 8);
   const latest = rideVersions(request)[0] || request;
-  const strike = rail === "strike";
   return {
     kind: EVENT_KINDS.RIDE_TICK,
-    content: { seq, trigger, amountSats, mint, at, ...(strike && { rail: "strike" }), sealed: seal(user.sk, driverPubkey, strike ? { rail: "strike" } : { token }) },
+    content: { seq, trigger, amountSats, mint, at, sealed: seal(user.sk, driverPubkey, { token }) },
     tags: [["e", latest.id], ["p", driverPubkey], ["d", `tick-${rideKey(request)}-${seq}-${nonce}`], ["t", "ride-tick"]],
   };
 }
@@ -70,7 +66,7 @@ export function aliveEvent(request, otherPubkey, role, forRole) {
 }
 
 // ── Reading ──
-// The valid ticks of a ride, oldest first: [{ id, seq, trigger, amountSats, mint, rail, at, createdAt }]. rail: "ecash" | "strike".
+// The valid ticks of a ride, oldest first: [{ id, seq, trigger, amountSats, mint, at, createdAt }].
 export function ticksOf(request) {
   const ids = idsOf(request), driver = rideDriver(request);
   if (!driver) return [];
@@ -79,7 +75,7 @@ export function ticksOf(request) {
     .filter((e) => onRide(e, ids))
     .map((e) => ({ e, c: parse(e) }))
     .filter(({ c }) => c && sats(c.amountSats) && typeof c.sealed === "string")
-    .map(({ e, c }) => ({ id: e.id, event: e, seq: Number(c.seq) || 0, trigger: String(c.trigger || ""), amountSats: c.amountSats, mint: String(c.mint || ""), rail: c.rail === "strike" ? "strike" : "ecash", at: Number(c.at) || e.created_at * 1000, createdAt: e.created_at }))
+    .map(({ e, c }) => ({ id: e.id, event: e, seq: Number(c.seq) || 0, trigger: String(c.trigger || ""), amountSats: c.amountSats, mint: String(c.mint || ""), at: Number(c.at) || e.created_at * 1000, createdAt: e.created_at }))
     .sort((a, b) => a.createdAt - b.createdAt || a.seq - b.seq);
 }
 
@@ -111,15 +107,10 @@ export function paidSats(request) {
     return s + (r?.ok ? Math.min(t.amountSats, (r.receivedSats || t.amountSats) + 2) : 0);
   }, 0);
 }
-export function sentSats(request, nowMs = Date.now()) {
+export function sentSats(request) {
   const replies = tickReplies(request);
-  const invoices = invoicesOf(request);
-  // A refused tick (the token was bad) was not paid, so it does not count as sent. A Strike tick counts while the driver can still
-  // answer it with an invoice, and while that invoice can still be paid (lib/strikerail.js strikeTickLive).
-  return ticksOf(request).reduce((s, t) => {
-    if (t.rail === "strike") return s + (strikeTickLive(t, invoices.get(t.id), replies.get(t.id), nowMs) ? t.amountSats : 0);
-    return s + (replies.get(t.id)?.ok === false ? 0 : t.amountSats);
-  }, 0);
+  // A refused tick (the token was bad) was not paid, so it does not count as sent.
+  return ticksOf(request).reduce((s, t) => s + (replies.get(t.id)?.ok === false ? 0 : t.amountSats), 0);
 }
 
 // The driver's waivers, oldest first: [{ id, forgivenSats, refundSats, reason, at, hasToken, event }].
