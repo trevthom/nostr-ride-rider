@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════
-//  ARRIVAL — "I've arrived" counts only when the driver's GPS is within 50 m
+//  ARRIVAL — "I've arrived" counts only when the driver's GPS is within 150 m
 //  of the pickup, on a good fix. The driver app disables the button until then
 //  and the signed marker carries the measured distance, so the rider's app can
 //  warn when the driver says "arrived" from far away.
@@ -10,8 +10,8 @@
 
 import { haversineDistance } from "./geo.js";
 
-export const ARRIVE_MAX_METERS = 50;
-export const ARRIVE_CLAIM_SLACK_METERS = 150; // the rider's check allows for GPS error on both phones
+export const ARRIVE_MAX_METERS = 150;
+export const ARRIVE_CLAIM_SLACK_METERS = 300; // the rider's check allows for GPS error on both phones (twice the limit)
 const M_PER_MILE = 1609.344;
 
 export function canMarkArrived({ pos, status, pickup }) {

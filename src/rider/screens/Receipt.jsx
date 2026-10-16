@@ -28,6 +28,7 @@ import BlockButton from "../../ui/BlockButton.jsx";
 import DriverInfo from "../components/DriverInfo.jsx";
 import TipSheet from "../components/TipSheet.jsx";
 import { tipsOf } from "../../lib/evidence.js";
+import FareBreakdown from "../../ui/FareBreakdown.jsx";
 
 const parse = (e) => { try { return JSON.parse(e.content); } catch { return null; } };
 
@@ -54,7 +55,8 @@ export default function Receipt({ request }) {
 
   // What the ride earned, what the driver confirmed, what was waived and what is still open.
   const terms = rideTerms(request);
-  const sum = money && money.ledger ? money : { ...ledgerSummary(request, terms ? currentLedger(request, { terms, price: priceFor(terms.currency), nowMs: Date.now(), miles: null, role: "rider" }) : null), status: "ok" };
+  const ledger = money && money.ledger ? money.ledger : terms ? currentLedger(request, { terms, price: priceFor(terms.currency), nowMs: Date.now(), miles: null, role: "rider" }) : null;
+  const sum = money && money.ledger ? money : { ...ledgerSummary(request, ledger), status: "ok" };
   const owes = completed && sum.outstanding > 2;
   const waived = waiversOf(request).reduce((t, w) => t + w.forgivenSats + w.refundSats, 0);
   const fin = endedAt ? rideEnding(request)?.fin : null;
@@ -104,6 +106,7 @@ export default function Receipt({ request }) {
           {sum.forgiven > 0 && <div className="flex justify-between"><dt className="text-neutral-600">Waived by your driver</dt><dd><Money sats={sum.forgiven} /></dd></div>}
           {owes && <div className="flex justify-between"><dt className="font-semibold text-amber-700">Still to pay</dt><dd><Money sats={sum.outstanding} className="font-bold" /></dd></div>}
         </dl>
+        {completed && <FareBreakdown ledger={ledger} paidSats={sum.paid} className="mt-3 rounded-2xl bg-neutral-100 px-4 py-3" />}
         {waived > 0 && <p className="text-[#05944f] text-sm font-medium mt-2">Your driver waived part of the fare{waiversOf(request).some((w) => w.refundSats > 0) ? " and sent money back to your wallet" : ""}.</p>}
         <p className="text-neutral-500 text-xs mt-2">The fare is the base rate, each mile and each minute of the ride. It was paid in ecash while you rode.</p>
 

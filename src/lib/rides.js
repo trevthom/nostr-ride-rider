@@ -202,7 +202,7 @@ function computeTimes(request) {
 
 // The rider's own confirmations of a ride, newest per phase:
 // { boarded?, code?, ended?, problem? }, each {ok, note, at}. ("problem" = reported mid-trip;
-// "code" = the rider typed the driver's start code correctly, lib/startcode.js.)
+// "code" = the rider typed the 4-digit start code shown on the driver's phone, lib/startcode.js.)
 // Only the rider's count.
 export function rideConfirm(request) {
   return cached("cfm:" + request.id, () => computeConfirm(request));

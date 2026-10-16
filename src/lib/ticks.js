@@ -23,7 +23,7 @@
 //  Pure functions. A ledger is plain JSON, so each app saves it with the ride.
 //    newLedger(startedAt, mode)
 //    advanceLedger(ledger, { terms, nowMs, miles, price }) → ledger
-//    owedSats / dueSats / missedTicks / settle / convertToMetered / milesAt
+//    owedSats / dueSats / missedTicks / paidBreakdown / settle / convertToMetered / milesAt
 // ════════════════════════════════════════════════════════════
 
 import { satsFromFiat } from "./currency.js";
@@ -161,6 +161,31 @@ export function convertToMetered(ledger, { terms, nowMs, miles, price }) {
   if (!metered) return ledger;
   const fresh = { ...newLedger(ledger.startedAt, "metered"), samples: ledger.samples };
   return advanceLedger(fresh, { terms: metered, nowMs, miles, price });
+}
+
+// What has been PAID so far, by kind, for the "Paid so far" lines of the fare cards:
+//   { base, miles: { n, sats }, minutes: { n, sats }, end }   (all sats)
+// What was paid covers the ride's ticks in the order they fell due. A tick counts (n) once it is covered, with the same few sats of slack as
+// missedTicks; a tick only partly covered adds the part that was paid to its line but not to the count. `end` = the part of the last mile and
+// minute that is settled when the ride is finished.
+export function paidBreakdown(ledger, paidSats) {
+  const out = { base: 0, miles: { n: 0, sats: 0 }, minutes: { n: 0, sats: 0 }, end: 0 };
+  if (!ledger) return out;
+  const paid = Math.max(0, paidSats || 0);
+  const list = [...ledger.units].sort((a, b) => a.at - b.at);
+  if (ledger.final) list.push({ kind: "final", at: ledger.final.at, sats: ledger.final.sats });
+  let cum = 0;
+  for (const u of list) {
+    const before = cum;
+    cum += u.sats;
+    const covered = cum <= paid + Math.floor(cum * 0.02) + 1;
+    const sats = covered ? u.sats : Math.max(0, Math.min(u.sats, paid - before));
+    if (u.kind === "base") out.base += sats;
+    else if (u.kind === "mile") { out.miles.sats += sats; if (covered) out.miles.n++; }
+    else if (u.kind === "minute") { out.minutes.sats += sats; if (covered) out.minutes.n++; }
+    else out.end += sats;
+  }
+  return out;
 }
 
 // A one-line name for a tick (receipts, history).

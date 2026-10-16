@@ -8,6 +8,8 @@
 //   Sheet      The white bottom card (Uber/Lyft style). With a `peek` it can
 //              also be nearly collapsed: only a drag handle and one line show,
 //              and the user drags it up (or taps it) to open the details.
+//   StickyActions  The main button(s) of a Sheet: they stay at the bottom edge while the rest of the sheet scrolls, so
+//              on a short phone the button ("Request ride", "Accept", "Start trip") is never below the fold.
 //   Screen     A plain scrolling page with a big title (Activity, Account).
 // ════════════════════════════════════════════════════════════
 
@@ -20,7 +22,7 @@ const SheetHeight = createContext(() => {});
 
 export function AppFrame({ children }) {
   return (
-    <div className="mx-auto h-[100dvh] w-full max-w-md relative overflow-hidden bg-white flex flex-col sm:border-x sm:border-neutral-200">
+    <div className="nr-frame mx-auto w-full max-w-md relative overflow-hidden bg-white flex flex-col pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)] sm:border-x sm:border-neutral-200">
       {children}
     </div>
   );
@@ -32,7 +34,8 @@ export function MapPage({ map, top, children }) {
   const shown = sheetH && isValidElement(map) ? cloneElement(map, { padBottom: sheetH + 28 }) : map;
   return (
     <SheetHeight.Provider value={setSheetH}>
-      <div className="relative flex-1 min-h-0 bg-neutral-200">
+      {/* --nr-sheet = the sheet's height: the map's attribution line sits just above the sheet, not under or over it (index.css). */}
+      <div className="relative flex-1 min-h-0 bg-neutral-200" style={{ "--nr-sheet": `${sheetH}px` }}>
         {shown}
         {top && (
           <div className="absolute top-0 inset-x-0 z-[500] px-4 pt-[max(1rem,env(safe-area-inset-top))] pointer-events-none">
@@ -161,6 +164,15 @@ export function Sheet({ children, className = "", label, maxHeight = "82%", peek
         {children}
       </div>
     </section>
+  );
+}
+
+// The main button(s) of a sheet, pinned to the bottom edge of the sheet's scrolling area. Inside a Sheet only.
+export function StickyActions({ children, className = "" }) {
+  return (
+    <div className={`nr-sticky sticky bottom-0 z-10 -mx-5 px-5 pt-3 pb-2 bg-white before:content-[''] before:absolute before:inset-x-0 before:-top-4 before:h-4 before:bg-gradient-to-t before:from-white before:to-transparent before:pointer-events-none ${className}`}>
+      {children}
+    </div>
   );
 }
 

@@ -25,7 +25,7 @@ import MapView from "../../ui/MapView.jsx";
 import Money, { moneyText } from "../../ui/Money.jsx";
 import AmountInput from "../../ui/AmountInput.jsx";
 import Button from "../../ui/Button.jsx";
-import { MapPage, Sheet, FloatButton } from "../../ui/Layout.jsx";
+import { MapPage, Sheet, FloatButton, StickyActions } from "../../ui/Layout.jsx";
 import { ConfirmDialog } from "../../ui/Parts.jsx";
 import AddFunds from "../../features/payments/AddFunds.jsx";
 import FareTerms, { offerRates, RatesLine } from "../components/FareTerms.jsx";
@@ -301,11 +301,13 @@ function ConfirmDriver({ request, trip, offer, onBack, onDecline }) {
         ) : need == null ? (
           <p className="text-amber-700 text-sm mt-3" role="alert">The bitcoin price for {rates.currency} is not available yet. Try again in a moment.</p>
         ) : null}
-        <div className="mt-4 space-y-2">
+        <StickyActions className="mt-4 space-y-2">
           {short > 0 && mint && (
             <Button onClick={() => setAdding(true)} disabled={!ecash}><Icon name="zap" size={18} /> Add {moneyText(short, btcPrice)} to your wallet</Button>
           )}
           <Button variant="go" onClick={go} loading={done} disabled={!ready}>Confirm driver</Button>
+        </StickyActions>
+        <div className="mt-1 space-y-2">
           {!done && <Button variant="secondary" onClick={onDecline}>Not this driver</Button>}
           {!done && <p className="text-neutral-500 text-xs text-center">Your request stays open. Other drivers can still accept it.</p>}
         </div>

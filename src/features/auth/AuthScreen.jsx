@@ -145,7 +145,7 @@ export default function AuthScreen({ onLogin }) {
   const onEnter = (e) => { if (e.key === "Enter") { e.preventDefault(); submit(); } };
 
   return (
-    <div className="h-[100dvh] overflow-y-auto bg-white mx-auto max-w-md sm:border-x sm:border-neutral-200">
+    <div className="nr-frame overflow-y-auto bg-white mx-auto max-w-md sm:border-x sm:border-neutral-200">
       <ConnectionBanner />
       {/* Brand header */}
       <div className="bg-black text-white px-6 pt-[max(3rem,env(safe-area-inset-top))] pb-10">

@@ -42,8 +42,8 @@ export const LOCATION_PING_MS = 6000;
 export const EMERGENCY_NUMBER = "911";
 
 // Driver app: within this many meters of the pickup (or dropoff) the app suggests
-// "I've arrived" (or "Finish ride"). The "I've arrived" button itself works only within
-// 50 m of the pickup (lib/arrival.js).
+// "I've arrived" (or "Finish ride"). The "I've arrived" button itself works within
+// the same distance of the pickup (ARRIVE_MAX_METERS in lib/arrival.js).
 export const ARRIVE_RADIUS_METERS = 150;
 
 // Driver app: only show requests with a pickup within this many miles.

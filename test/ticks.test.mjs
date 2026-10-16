@@ -1,4 +1,4 @@
-// Pay-as-you-ride ticks, finishing a ride, start codes, the 50 m arrival rule, silence, GPS gaps, currency.
+// Pay-as-you-ride ticks, finishing a ride, the start code, the 150 m arrival rule, silence, GPS gaps, currency.
 // Run with: npm test
 import assert from "node:assert/strict";
 const R = new URL("../src", import.meta.url).pathname;
@@ -121,20 +121,45 @@ assert.equal(Fin.readFinish({ reason: "<script>", at: -5, miles: "x" }).reason, 
 assert.equal(Fin.readFinish({ reason: "silence", at: T0, miles: 3.2, minutes: 11, role: "driver", atDestination: true }).atDestination, true);
 assert.equal(Fin.readFinish("x"), null);
 
-// ── The start code: each person has their own, both phones can work it out, nobody else can ──
+// ── The "Paid so far" lines: the base, the miles and the minutes paid, in the order they fell due ──
+{
+  const led = { v: 1, mode: "metered", startedAt: 0, samples: [], final: null, units: [
+    { id: "base", kind: "base", at: 0, sats: 2000 }, { id: "min-1", kind: "minute", at: 60000, sats: 250 }, { id: "min-2", kind: "minute", at: 120000, sats: 250 },
+    { id: "mile-1", kind: "mile", at: 150000, sats: 1100 }, { id: "min-3", kind: "minute", at: 180000, sats: 250 },
+  ] };
+  const at = (paid, l = led) => Tk.paidBreakdown(l, paid);
+  assert.deepEqual(at(0), { base: 0, miles: { n: 0, sats: 0 }, minutes: { n: 0, sats: 0 }, end: 0 }, "nothing paid yet");
+  assert.deepEqual(at(2000), { base: 2000, miles: { n: 0, sats: 0 }, minutes: { n: 0, sats: 0 }, end: 0 }, "the base only");
+  assert.deepEqual(at(2500), { base: 2000, miles: { n: 0, sats: 0 }, minutes: { n: 2, sats: 500 }, end: 0 }, "two minutes");
+  assert.deepEqual(at(3600), { base: 2000, miles: { n: 1, sats: 1100 }, minutes: { n: 2, sats: 500 }, end: 0 }, "a mile");
+  assert.deepEqual(at(3599).miles, { n: 1, sats: 1100 }, "a sat short (two prices a few seconds apart) still counts");
+  assert.deepEqual(at(2700).miles, { n: 0, sats: 200 }, "a mile only partly paid adds what was paid, not a mile");
+  const all = at(3850);
+  assert.equal(all.base + all.miles.sats + all.minutes.sats, 3850, "the lines add up to what was paid");
+  assert.equal(all.minutes.n, 3);
+  assert.deepEqual(Tk.paidBreakdown(null, 100), { base: 0, miles: { n: 0, sats: 0 }, minutes: { n: 0, sats: 0 }, end: 0 }, "no ledger: all zero");
+  const fin = { ...led, final: { at: 200000, sats: 123, miles: 1.2, minutes: 3.3 } };
+  assert.equal(at(3973, fin).end, 123, "the settled rest of the last mile and minute is its own line");
+  assert.equal(at(3850, fin).end, 0, "until it is paid");
+}
+
+// ── The start code: ONE 4-digit code, shown on the driver's phone and typed by the rider; both phones can work it out, nobody else can ──
 const rider = generateKeypair(), driver = generateKeypair();
 const key = rider.publicKey + ":ride-1";
-const riderCode = Sc.startCode(rider.sk, driver.publicKey, key, "rider");
-const driverCode = Sc.startCode(rider.sk, driver.publicKey, key, "driver");
-assert.match(riderCode, /^\d\d$/);
-assert.equal(Sc.startCode(driver.sk, rider.publicKey, key, "rider"), riderCode, "the driver's phone works out the same code");
-assert.equal(Sc.startCode(driver.sk, rider.publicKey, key, "driver"), driverCode);
-const codes = new Set(Array.from({ length: 40 }, (_, i) => Sc.startCode(rider.sk, driver.publicKey, key + i, "rider")));
-assert.ok(codes.size > 15, "different for every ride");
-assert.ok(Sc.checkCode(riderCode, riderCode));
-assert.ok(Sc.checkCode(" " + riderCode + " ", riderCode), "spaces are fine");
-assert.ok(!Sc.checkCode("7", "07"), "two digits are required");
-assert.ok(!Sc.checkCode("", "07"));
+const code = Sc.startCode(rider.sk, driver.publicKey, key);
+assert.match(code, /^\d{4}$/, "four digits");
+assert.equal(Sc.startCode(driver.sk, rider.publicKey, key), code, "the driver's phone works out the same code");
+const stranger = generateKeypair();
+assert.notEqual(Sc.startCode(stranger.sk, driver.publicKey, key), code, "a stranger cannot work it out");
+const codes = new Set(Array.from({ length: 40 }, (_, i) => Sc.startCode(rider.sk, driver.publicKey, key + i)));
+assert.ok(codes.size > 35, "different for every ride (10,000 codes): " + codes.size);
+assert.ok(Sc.checkCode(code, code));
+assert.ok(Sc.checkCode(" " + code + " ", code), "spaces are fine");
+assert.ok(Sc.checkCode("0731", "0731") && !Sc.checkCode("731", "0731"), "a leading zero counts: all four digits are required");
+assert.ok(!Sc.checkCode("07", "0731"), "two digits are not enough");
+assert.ok(!Sc.checkCode("07311", "0731"), "five digits are too many");
+assert.ok(!Sc.checkCode("", code));
+assert.ok(!Sc.checkCode("12ab", "1234"));
 let gate = null;
 for (let i = 0; i < 2; i++) gate = Sc.recordAttempt(gate, false, T0);
 assert.ok(Sc.attemptGate(gate, T0).open, "2 wrong tries are allowed");
@@ -145,16 +170,20 @@ gate = Sc.recordAttempt(gate, false, T0 + 31000);
 assert.ok(!Sc.attemptGate(gate, T0 + 31000 + 40000).open, "the next lock is longer (60 s)");
 assert.deepEqual(Sc.recordAttempt(gate, true, T0), { wrong: 0, lockedUntil: 0 }, "a right code clears it");
 
-// ── "I've arrived" only within 50 m of the pickup, on a good fix ──
+// ── "I've arrived" only within 150 m of the pickup, on a good fix ──
 const pin = { lat: 38, lng: -84.5 };
 const at = (m) => ({ lat: pin.lat + m / 111320, lng: pin.lng });
+assert.equal(Ar.ARRIVE_MAX_METERS, 150);
 assert.ok(Ar.canMarkArrived({ pos: at(30), status: "good", pickup: pin }).ok, "30 m away");
-assert.ok(!Ar.canMarkArrived({ pos: at(80), status: "good", pickup: pin }).ok, "80 m away");
-assert.match(Ar.canMarkArrived({ pos: at(80), status: "good", pickup: pin }).reason, /within 50 m/);
+assert.ok(Ar.canMarkArrived({ pos: at(80), status: "good", pickup: pin }).ok, "80 m away is close enough now");
+assert.ok(Ar.canMarkArrived({ pos: at(140), status: "good", pickup: pin }).ok, "140 m away");
+assert.ok(!Ar.canMarkArrived({ pos: at(170), status: "good", pickup: pin }).ok, "170 m away");
+assert.match(Ar.canMarkArrived({ pos: at(170), status: "good", pickup: pin }).reason, /within 150 m/);
 assert.ok(!Ar.canMarkArrived({ pos: at(10), status: "weak", pickup: pin }).ok, "a weak fix cannot prove it");
 assert.ok(!Ar.canMarkArrived({ pos: at(10), status: "stale", pickup: pin }).ok);
 assert.ok(!Ar.canMarkArrived({ pos: null, status: "searching", pickup: pin }).ok);
 assert.ok(!Ar.arrivalMismatch(at(120), pin), "the rider's check allows for GPS error");
+assert.ok(!Ar.arrivalMismatch(at(250), pin), "even a claim at the edge of the limit plus GPS error on both phones");
 assert.ok(Ar.arrivalMismatch(at(900), pin), "a claimed arrival 900 m away is flagged");
 assert.ok(!Ar.arrivalMismatch(null, pin));
 

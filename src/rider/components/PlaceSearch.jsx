@@ -84,7 +84,7 @@ export default function PlaceSearch({ pickup, dropoff, here, near, recents, onCh
           <span className="flex-1 w-px bg-neutral-300 my-1" />
           <span className="w-2.5 h-2.5 bg-black" />
         </div>
-        <div className="flex-1 space-y-2">
+        <div className="flex-1 min-w-0 space-y-2">
           {["pickup", "dropoff"].map((field) => (
             <div key={field} className={`flex items-center rounded-xl px-4 ${focus === field ? "bg-white ring-2 ring-black" : "bg-neutral-100"}`}>
               <input
@@ -104,9 +104,9 @@ export default function PlaceSearch({ pickup, dropoff, here, near, recents, onCh
                   onClick={() => here && choose("pickup", here)}
                   disabled={!here}
                   aria-label="Your location"
-                  className="shrink-0 ml-1 inline-flex items-center gap-1 bg-white rounded-full px-2.5 py-1.5 text-xs font-semibold border border-neutral-300 active:bg-neutral-100 disabled:opacity-40"
+                  className="shrink-0 ml-1 inline-flex items-center gap-1 bg-white rounded-full px-2.5 py-1.5 max-[380px]:p-2 text-xs font-semibold border border-neutral-300 active:bg-neutral-100 disabled:opacity-40"
                 >
-                  <Icon name="locate" size={14} /> {here ? "Your location" : "Locating…"}
+                  <Icon name="locate" size={14} /> <span className="max-[380px]:sr-only">{here ? "Your location" : "Locating…"}</span>
                 </button>
               )}
               {focus === field && loading && <Spinner size={16} />}

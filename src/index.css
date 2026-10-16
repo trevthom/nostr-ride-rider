@@ -12,6 +12,21 @@ html, body, #root {
   height: 100%;
 }
 
+/* A phone must not inflate text in landscape (iOS) ... */
+html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
+
+/* ... and must not zoom the page when a field is focused: iOS Safari zooms any field under 16px. Touch screens only, so
+   the desktop look is unchanged. (A field with its own bigger size, like the 4-digit code, is not listed.) */
+@media (pointer: coarse) {
+  input[class*="text-sm"], input[class*="text-xs"], input[class*="text-[1"], select, textarea { font-size: 16px !important; }
+}
+
+/* The app frame: the screen's height without the browser bars (dvh); 100% where dvh is not known (iOS before 15.4). */
+.nr-frame { height: 100%; height: 100dvh; }
+
+/* A phone held sideways has too little height to pin buttons: they scroll with the sheet there. */
+@media (max-height: 480px) { .nr-sticky { position: static; } }
+
 body {
   margin: 0;
   background: #f3f3f3;
@@ -29,6 +44,8 @@ button:disabled { cursor: not-allowed; }
    fights the app's own controls. */
 .leaflet-container { background: #ebebeb; font-family: inherit; }
 .leaflet-control-attribution { font-size: 9px !important; opacity: 0.8; margin-bottom: 0 !important; }
+/* The credit line stays visible above the bottom sheet (MapPage sets --nr-sheet to the sheet's height). */
+.leaflet-bottom.leaflet-right { bottom: var(--nr-sheet, 0px); }
 .nr-pin { background: transparent; border: none; }
 /* Pins and price tags stay upright when the trip map is turned (heading-up). */
 .nr-up { transform: rotate(var(--nr-rot, 0deg)); transition: transform .6s ease; }

@@ -6,8 +6,8 @@
 //    riding   trip underway to the dropoff
 //  The driver's exact position arrives end-to-end encrypted
 //  (subscribeRideLocation) and is only ever shown to this rider.
-//  Starting: when the rider is at the car, each phone shows its own 2-digit code and each
-//  person types the code on the other's phone (lib/startcode.js).
+//  Starting: when the rider is at the car, the DRIVER's phone shows a 4-digit code and the rider
+//  types it here (lib/startcode.js); the driver types nothing.
 //  Paying: from the start, the rider's app pays the driver in ecash ticks (the base rate, then
 //  each mile and each minute). The screen shows what the ride has cost so far.
 //  Either person can "Finish ride" (after a confirmation). There are no cancellations and no fees:
@@ -47,6 +47,7 @@ import Avatar from "../../ui/Avatar.jsx";
 import ChangePickup from "../components/ChangePickup.jsx";
 import { pickupChange, PICKUP_CHANGE_NOTE } from "../../lib/pickup.js";
 import { meterView } from "../../lib/meter.js";
+import FareBreakdown from "../../ui/FareBreakdown.jsx";
 import { publishMeter } from "../../nostr/live.js";
 import TripMeter, { peekMeter } from "../../ui/TripMeter.jsx";
 import { useRiderMeter } from "../state/useRiderMeter.js";
@@ -149,14 +150,13 @@ export default function OnTrip({ request, trip }) {
 
   const confirm = rideConfirm(request);
   const gateState = attemptGate(gate, Date.now());
-  const driverCode = driverPubkey ? startCode(user.sk, driverPubkey, key, "driver") : "";
-  const riderCode = driverPubkey ? startCode(user.sk, driverPubkey, key, "rider") : "";
+  const startCodeNow = driverPubkey ? startCode(user.sk, driverPubkey, key) : ""; // the code the driver's phone shows
   const enterCode = () => {
     if (!gateState.open) return;
-    const ok = checkCode(typed, driverCode);
+    const ok = checkCode(typed, startCodeNow);
     setGate(recordAttempt(gate, ok, Date.now()));
     if (ok) { confirmRide(request, "code", true); setCodeMsg(""); setTyped(""); }
-    else setCodeMsg("That is not the code on your driver's phone. Check it and try again.");
+    else setCodeMsg("That is not the 4-digit code on your driver's phone. Check it and try again.");
   };
   // The driver's phone going quiet is not the end of the ride; the driver is asked, not the rider. If both
   // phones were silent for 10 minutes the ride finishes at the last signal.
@@ -242,6 +242,7 @@ export default function OnTrip({ request, trip }) {
               <span className="text-neutral-600">Paid</span>
               <Money sats={money?.paid || 0} />
             </div>
+            <FareBreakdown ledger={money?.ledger} paidSats={money?.paid || 0} className="mt-3 pt-3 border-t border-neutral-200" />
             <p className="text-xs text-neutral-500 mt-2">
               You pay as you ride: the base rate at the start, then each mile and each minute{money?.status === "paid" ? ". A payment just went out." : "."}
             </p>
@@ -305,26 +306,22 @@ export default function OnTrip({ request, trip }) {
         )}
         {confirm.boarded?.ok && stage === "arrived" && <p className="mt-3 text-sm text-[#05944f] font-medium">You confirmed the car matches.</p>}
 
-        {/* Starting the ride: both people confirm they are at the car with a 2-digit code */}
+        {/* Starting the ride: the rider types the 4-digit code shown on the driver's phone */}
         {stage === "arrived" && confirm.boarded?.ok && !confirm.boarded.note?.includes("did not match") && (
           <div className="mt-4 rounded-2xl border-2 border-black p-4" role="group" aria-label="Start code">
             <p className="font-bold">Start the ride</p>
-            <p className="text-xs text-neutral-600 mb-3">Both of you must be at the car. Show your code to your driver, and type the code on your driver's phone.</p>
-            <div className="flex items-center justify-between rounded-xl bg-neutral-100 px-4 py-3">
-              <span className="text-sm text-neutral-600">Your code</span>
-              <span className="text-3xl font-extrabold tracking-widest tabular-nums" aria-label={`Your code is ${riderCode}`}>{riderCode}</span>
-            </div>
+            <p className="text-xs text-neutral-600 mb-3">Once you are at the car, ask your driver for the <span className="whitespace-nowrap">4-digit</span> start code on their phone and type it here.</p>
             {confirm.code?.ok ? (
-              <p className="mt-3 text-sm text-[#05944f] font-medium flex items-center gap-1"><Icon name="check" size={16} /> You entered your driver's code. Waiting for your driver to start the trip.</p>
+              <p className="text-sm text-[#05944f] font-medium flex items-center gap-1"><Icon name="check" size={16} /> Code accepted. Waiting for your driver to start the trip.</p>
             ) : (
-              <div className="mt-3">
-                <label className="block text-sm font-semibold mb-1" htmlFor="driver-code">Your driver's code</label>
+              <div>
+                <label className="block text-sm font-semibold mb-1" htmlFor="start-code">Start code</label>
                 <div className="flex gap-2">
-                  <input id="driver-code" inputMode="numeric" autoComplete="off" maxLength={2} value={typed}
+                  <input id="start-code" inputMode="numeric" autoComplete="off" maxLength={4} value={typed}
                     onChange={(e) => { setTyped(e.target.value.replace(/\D/g, "")); setCodeMsg(""); }}
                     onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); enterCode(); } }}
-                    placeholder="00" className="w-24 bg-neutral-100 rounded-xl px-4 py-3 text-2xl text-center font-bold tracking-widest focus:outline-none focus:ring-2 focus:ring-black" />
-                  <Button size="md" onClick={enterCode} disabled={typed.length !== 2 || !gateState.open}>Confirm</Button>
+                    placeholder="0000" className="w-32 bg-neutral-100 rounded-xl px-4 py-3 text-2xl text-center font-bold tracking-widest focus:outline-none focus:ring-2 focus:ring-black" />
+                  <Button size="md" onClick={enterCode} disabled={typed.length !== 4 || !gateState.open}>Confirm</Button>
                 </div>
                 {!gateState.open && <p className="text-xs text-amber-700 mt-1" role="alert">Too many tries. Wait {Math.ceil(gateState.waitMs / 1000)} s.</p>}
                 {codeMsg && gateState.open && <p className="text-xs text-red-600 mt-1" role="alert">{codeMsg}</p>}
@@ -335,13 +332,13 @@ export default function OnTrip({ request, trip }) {
 
         <div className="flex gap-3 mt-4">
           <button type="button" onClick={() => setContact(true)} className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-neutral-100 font-semibold text-[15px] active:bg-neutral-200">
-            <Icon name="phone" size={18} /> Contact
+            <Icon name="phone" size={18} className="max-[380px]:hidden" /> Contact
           </button>
           <button type="button" onClick={() => setSafety(true)} className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-neutral-100 font-semibold text-[15px] active:bg-neutral-200">
-            <Icon name="shield" size={18} /> Safety{share ? " ●" : ""}
+            <Icon name="shield" size={18} className="max-[380px]:hidden" /> Safety{share ? " ●" : ""}
           </button>
           <button type="button" onClick={() => setAsking(true)} className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-neutral-100 font-semibold text-[15px] text-red-600 active:bg-neutral-200">
-            <Icon name="x" size={18} /> Finish ride
+            <Icon name="x" size={18} className="max-[380px]:hidden" /> Finish ride
           </button>
         </div>
         {riding && !pendingStop && (

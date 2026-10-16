@@ -4,7 +4,7 @@
 
 > This repository is the **rider** app. The **driver** app is in its own repository, **nostr-ride-driver**. They share no server: they find each other through Nostr relays, so both use the same event formats (see [Nostr events](#nostr-events)).
 
-Last updated with: **a 12-word recovery phrase for the ecash wallet, collapsible Account sections, vouches ("I know and trust this person") in place of star ratings, pay-as-you-ride ecash payments, Finish ride (no cancellations), start codes, local currency** (see the [changelog](#changelog)).
+Last updated with: **phone-sized screens (pinned main buttons), one 4-digit start code typed only by the rider, I've arrived within 150 m, a 12-word recovery phrase for the ecash wallet, collapsible Account sections, vouches ("I know and trust this person") in place of star ratings, pay-as-you-ride ecash payments, Finish ride (no cancellations), start codes, local currency** (see the [changelog](#changelog)).
 
 NostrRide is a decentralized ridesharing system. It is **two web apps** — a rider app and a driver
 app — that find each other through **Nostr relays**. There is no company server and no database.
@@ -64,8 +64,13 @@ Needs internet for fonts, the map, and the relays. Location needs `https://` or 
 | Account | Every setting is a section that opens and closes (closed at first; what you opened is remembered on the device) | The same |
 | Tab bar | Always visible, on every screen | Always visible, on every screen |
 | Home | "Where to?" → standard fare or flat price → request | GO button → request cards (accept; counter a flat price) |
-| During a trip | Live car, ETA, fare so far, start code, contact, **Finish ride**, add a stop | Route, arrived (within 50 m) / start code / **Finish ride**, fare and payments so far |
+| During a trip | Live car, ETA, fare so far, start code, contact, **Finish ride**, add a stop | Route, arrived (within 150 m) / start code / **Finish ride**, fare and payments so far |
 | After a trip | Receipt (anything still owed), tip | Summary, waive part of the fare |
+
+**Phone screens.** Both apps are laid out for a phone first: the page fills the screen (without the browser bars), keeps clear of the notch and the home bar, and the keyboard shrinks the page instead of covering a field. The main button of a sheet
+(*Request ride*, *Accept*, *Confirm driver*, *I've arrived*, *Start trip*, *Finish ride*) stays pinned at the bottom of the sheet, so on a small phone it is never below the fold; the sheet scrolls above it. On a phone held sideways the buttons scroll
+with the sheet. Fields are 16 px or larger on touch screens, so iPhones do not zoom in. The search fields fit a 320 px screen (the *Your location* button turns into an icon), at most two notices show at once, and the map's credit line sits above the sheet. On a computer the
+app is a phone-width column in the middle of the page, as before. `E2E_VIEWPORT=360x640 node scripts/e2e/ride.mjs` plays a ride in a phone-sized browser.
 | Money | An ecash wallet (fill it with Lightning) | An ecash wallet (cash out to Lightning) |
 | Needs | Ecash in the wallet before the ride starts | Face photo, vehicle and vehicle photo, plate, Lightning address |
 
@@ -79,7 +84,7 @@ reverse. The Vite *mode* picks the app (`vite --mode rider|driver`).
 3. Nearby drivers get a **request card** with a countdown. A driver **accepts**, or (for a flat price) **counters** with a higher price. The reply carries the driver's rates and ecash mint.
 4. The rider **chooses a driver**. The rider needs enough ecash at the driver's mint for the start (the base rate, two minutes and a mile). There is **no deposit**.
 5. The driver drives to the pickup. The rider sees the car move live (end-to-end encrypted). **Nothing is charged yet.**
-6. The driver taps **I've arrived** (only within 50 m of the pickup). The rider checks the car. Then each person types the **2-digit code** shown on the other person's phone, and the driver taps **Start trip**.
+6. The driver taps **I've arrived** (only within 150 m of the pickup). The rider checks the car. Then the rider types the **4-digit start code** shown on the driver's phone, and the driver taps **Start trip**. The driver types nothing.
 7. **The ride runs and the rider pays as it goes:** the base rate at the start, then each mile and each minute (ecash "ticks").
 8. Either person taps **Finish ride** and confirms. The rider pays what the ride earned, up to that moment. The driver may waive part of the fare. There are no star ratings and no reviews (see [Vouches](#vouches-i-know-and-trust-this-person)).
 
@@ -137,16 +142,16 @@ only what the ride has earned so far, and most of it is already paid.
   chooses that offer, they are frozen for the ride. The Account screen locks the rates while a ride runs, and a new offer sent later changes nothing
   (the app reads the offer the rider chose).
 
-### Starting the ride: a code on each phone
-1. The driver taps **I've arrived**. This works only within **50 m** of the pickup, on a good GPS fix (`ARRIVE_MAX_METERS`, `src/lib/arrival.js`).
+### Starting the ride: one code, typed by the rider
+1. The driver taps **I've arrived**. This works only within **150 m** of the pickup, on a good GPS fix (`ARRIVE_MAX_METERS`, `src/lib/arrival.js`).
    The button is off until then and says how far away the driver is. The marker carries the measured distance. The rider's app warns if the driver
-   says "arrived" but the car is not near the pin.
+   says "arrived" but the car is not near the pin (more than 300 m away: the limit plus room for GPS error on both phones).
 2. The rider checks the car, plate and driver (*It matches*).
-3. **Each phone shows its own random 2-digit code.** The rider types the code shown on the **driver's** phone. The driver types the code shown on the
-   **rider's** phone. The codes come from the two people's shared secret and the ride (HMAC of the NIP-44 conversation key), so nothing travels between
-   the phones for them, a third person cannot work them out, and every ride has new ones.
-4. When both codes are right, **Start trip** works. Only 100 codes exist, so typing is locked for 30 s after the third wrong try, then for longer.
-5. The start is the signed *riding* marker. The base tick is due at once.
+3. **The driver's phone shows a random 4-digit start code.** The driver reads it to the rider, and the **rider** types it on the rider's phone. The driver types
+   nothing. The code comes from the two people's shared secret and the ride (HMAC of the NIP-44 conversation key), so nothing travels between
+   the phones for it, a third person cannot work it out, and every ride has a new one.
+4. When the rider's code is right (a signed *code* confirmation), **Start trip** works on the driver's phone. 10,000 codes exist, so typing is locked for 30 s after the third wrong try, then for longer.
+5. The start is the signed *riding* marker (its `codes` field says the start code was checked). The base tick is due at once.
 
 ### Missed payments
 - The rider's app pays each tick as soon as it is due. If the wallet is short, it pays what it can and the rest **stays due**.
@@ -248,7 +253,7 @@ still calls unspent (NUT-09), and the money is back. No server, no account, no r
   old coins moved, no phrase on the wire), `scripts/e2e/recovery.mjs` (the screens, a fresh browser, new words, disconnect and connect, no phrase on any relay), `scripts/e2e/disconnect.mjs` (a driver's GO while disconnected).
 
 ### What is built and what is not
-- Built and tested: ticks, flat and standard fares, missed-payment counting, the final tick, Finish ride with confirmation, the start code, the 50 m arrival rule, the
+- Built and tested: ticks, flat and standard fares, missed-payment counting, the final tick, Finish ride with confirmation, the start code, the 150 m arrival rule, the
   GPS-gap rule, silence and sign-of-life events, extra stops, waivers, currencies, the ecash wallet, funding by invoice and NWC, cash out, rates frozen per ride.
 - Tested against **a local test mint that does the real blind-signature maths** (`test/helpers/localmint.mjs`) with the real `@cashu/cashu-ts` client, and in a headless
   browser with a rider and a driver. **Not yet run against a public mint or on a phone.**
@@ -256,6 +261,10 @@ still calls unspent (NUT-09), and the money is back. No server, no account, no r
   closed, a dispute arbiter.
 
 ## During a trip (both apps)
+- **"Paid so far" lines next to the fare.** Under *Fare so far* and *Paid*, both apps show what has been paid until now, split by kind, and it grows through the ride:
+  `Paid so far:` · `Base rate: $2.00` · `Miles: 3 ($3.30)` · `Minutes: 7 ($1.75)`. A mile or a minute counts once its payment is covered; one only partly paid adds the part that was paid to its
+  amount but not to the count. After the ride, the receipt (rider) and the summary (driver) show the same lines, plus *End of ride:* for the settled rest of the last mile and minute. For a flat price the
+  lines are the same, scaled to the price. (`lib/ticks.js paidBreakdown`, `ui/FareBreakdown.jsx`.)
 - **Nearly full-screen map.** Once a driver is confirmed, the trip card is tucked away: only a handle and one line
   (for example "Driver arriving in 5 min") show at the bottom. Drag the handle up, or tap it, to open the details; drag down or tap to close.
   The card opens by itself when the user has a step to take: the rider when the driver arrives (check the car), the driver at the arrival
@@ -381,7 +390,7 @@ More detail for contributors is in `CLAUDE.md` (the file map and every invariant
 | 30084 | Ride complete | assigned driver | Older apps' way to end a ride at the destination (still read as a finish) |
 | 30085 | Ride stage | assigned driver | `arrived` / `riding` |
 | 30086 | Payment record | rider | Lightning payment proof (invoice, preimage, LUD-21 URL) sealed to the driver; phase `tip` (older rides: `deposit`, `rest`) |
-| 30087 | Rider confirmation | rider | `boarded`, `code` (typed the driver's start code), `ended`, or `problem` (with a note) |
+| 30087 | Rider confirmation | rider | `boarded`, `code` (typed the 4-digit start code shown on the driver's phone), `ended`, or `problem` (with a note) |
 | 30093 | Pickup change | rider | A new pickup while the driver is on the way; the exact place sealed to the driver and the rider |
 | 30094 | Pickup change answer | assigned driver | Accept or decline that change |
 | 30095 | Tick | rider | One ecash payment while the ride runs: amount and what it was for (public), the Cashu token (sealed to the driver) |
@@ -404,7 +413,7 @@ Every event carries the app tag `["t","nostrride"]` because kind numbers like 30
   encrypted (NIP-44) first to the rider, then to the chosen driver.
 - The **license plate** is sealed to the rider who receives the offer.
 - A rider's **gender preference** never leaves the device.
-- The **ecash token** in a tick is sealed to the driver; the **start codes** are never sent (each phone works out both from a shared secret); a **refund token** is sealed to the rider.
+- The **ecash token** in a tick is sealed to the driver; the **start code** is never sent (each phone works it out from a shared secret); a **refund token** is sealed to the rider.
   The tick **amounts** are public, like tips. The ecash wallet is saved on the device encrypted to the user's own key.
 - The mint sees the amounts it signs and redeems, not who the people are (blind signatures). It can see which IP address asks.
 - A driver who is online shares a location rounded to about 100 m. The exact position goes only to the matched rider.
@@ -431,7 +440,7 @@ Payments are **peer to peer, with no escrow and no deposit.** The full rules are
 - The driver app keeps the screen awake while online or driving (browsers stop GPS when the screen sleeps). The rider app keeps it awake while a ride is running (a sleeping page stops paying the ticks, see [Missed payments](#missed-payments)).
 - ETAs use the road time from the router, with a straight-line guess as a fallback.
 - Browsers cannot track location in the background. The [native app](#native-app-and-background-gps) can.
-- **I've arrived works only within 50 m of the exact pickup, on a good fix.** Within 150 m of the pickup (or the next stop or destination) the app shows a notice and highlights the next step. It never acts for the driver.
+- **I've arrived works only within 150 m of the exact pickup, on a good fix.** At the same distance from the pickup (or the next stop or destination) the app shows a notice and highlights the next step. It never acts for the driver.
 - A **GPS gap** (a tunnel) of up to 10 minutes is filled with a straight line between the fixes around it; after more than 10 minutes tracking restarts at the new fix without adding the missing miles.
 
 ## Safety
@@ -504,7 +513,7 @@ A web page cannot read the location with the screen off. `native/` wraps the **d
 |---|---|
 | App rates (the fallback), flat-price limits, driver-rate limits, timers, demo data | `src/config/settings.js` |
 | Tick rules: grace time for a missed payment (30 s), missed-payment limit (2) | `src/lib/ticks.js` |
-| Silence rules (10 minutes), arrival distance (50 m), start-code lock | `src/lib/finish.js`, `src/lib/arrival.js`, `src/lib/startcode.js` |
+| Silence rules (10 minutes), arrival distance (150 m), start-code lock | `src/lib/finish.js`, `src/lib/arrival.js`, `src/lib/startcode.js` |
 | The ecash mint a new driver starts with | `VITE_DEFAULT_MINT` in `.env` (default in `src/config/services.js`) |
 | Supported currencies | `src/lib/currency.js` |
 | Relays | `src/config/relays.js` (also editable in the app) |
@@ -521,7 +530,7 @@ rules, waivers, extra stops and frozen rates, the ecash wallet (funding, paying,
 driver, and the real `@cashu/cashu-ts` client against a local test mint that does the real blind-signature maths**.
 
 The apps were also run end to end in a headless browser (a rider and a driver playing a whole ride through a local relay and the local test mint): funding with an invoice, the request,
-the offer, the confirm screen, the 50 m arrival lock, both start codes, the base, minute and mile ticks, Finish ride with its confirmation, the receipt and summary, missed
+the offer, the confirm screen, the 150 m arrival lock, the 4-digit start code typed by the rider, the base, minute and mile ticks, Finish ride with its confirmation, the receipt and summary, missed
 payments, a refill after the ride, and a waiver with a refund. The vouch badge was run the same way (`scripts/e2e/vouches.mjs`: a friend's list, the badge on a request card and on an offer, an nsec refused, Remove). That harness is in `scripts/e2e/` (it needs `npm i --no-save ws playwright`; it is not part of `npm test`).
 **Never run against a public mint, and never on a real phone.**
 
@@ -594,6 +603,10 @@ To switch, copy `env.example` to `.env`, set `VITE_TILE_URL` (and `VITE_PHOTON_U
   and a cancel rate on profiles.
 
 ## Changelog
+- **"Paid so far" lines: base rate, miles and minutes** — the fare card of both apps (and the rider's receipt and the driver's summary) now shows four lines near the fare: `Paid so far:`, `Base rate: $x.xx`, `Miles: # ($x.xx)`, `Minutes: # ($x.xx)`, so the totals can be followed all through the ride. They are worked out from the ride's saved list of payments (`paidBreakdown`: what the driver confirmed covers the ticks in the order they fell due). On the driver's phone the fare card now comes before the trip meter, so the lines are not hidden under the pinned *Finish ride* button. Tested in `test/ticks.test.mjs`, and `scripts/e2e/ride.mjs` checks the lines on both screens.
+- **Phone screens** — the apps are now fitted to the phone. Found by playing a whole ride in a 360×640 and a 320×568 browser and reading the screenshots: the pickup and drop-off fields ran off the right edge of the search page (the flex child had no `min-w-0`), the main button of most sheets was below the fold (the driver's *Accept*, with its 45-second timer, too), three stacked notices covered half of the driver's screen, the three buttons of the rider's trip sheet wrapped, and the map's credit line sat on top of the sheet's buttons. Now: `StickyActions` pins the main button at the bottom of the sheet (scrolls normally in landscape); the search fields fit (the *Your location* button is an icon under 380 px); at most two notices; the credit line sits above the sheet; fields are 16 px on touch screens (iOS does not zoom); `interactive-widget=resizes-content` so the keyboard shrinks the page; the frame uses `dvh` with a fallback and respects the side safe areas; text is not inflated in landscape. The desktop column is unchanged. New: `E2E_VIEWPORT` for the browser tests.
+- **One 4-digit start code, typed only by the rider** — before, each phone showed a 2-digit code and each person typed the other's. Now the **driver's** phone shows one random 4-digit code (10,000 possibilities; the lock after three wrong tries stays) and the **rider** types it; the driver types nothing, and *Start trip* unlocks when the rider's signed *code* confirmation arrives. The code is still worked out on both phones from the shared secret and never sent. The driver's code card is the first thing on the driver's sheet at the pickup. `startCode(sk, otherPubkey, rideKey)` lost its `role` argument. The `codes` field of the *riding* marker keeps its name and now means "the start code was checked".
+- **I've arrived works within 150 m (was 50 m)** — `ARRIVE_MAX_METERS` is 150, so a driver who has stopped at the kerb or in a car park near the pin can mark arrival; the rider's own check of a claimed arrival is now 300 m (was 150 m), and the driver's *You're at the pickup* notice and the button work at the same distance.
 - **The rider's phone no longer stops paying when the screen locks** — a rider with a full wallet showed up on the driver's screen as "missed payments". Cause: only the driver app held a screen wake lock. In the rider app the 3-second payment timer froze as soon as the phone's screen went dark (a web page's timers stop), so after the base tick no minute or mile tick was paid until the rider looked at the phone again, while the driver's app, awake, counted them as missed after 30 s (two missed payments let the driver finish the ride). Reproduced with the real money code (`test/rideflow.test.mjs`, section 11): base paid, then no payments → the driver sees "missed 2" and about 2 dollars open with a full wallet; one payment on waking clears it. Now the rider app holds the wake lock while a ride is `in_progress` (`RiderContext`), pays at once when the page wakes (`visibilitychange`, `online`), and `OnTrip` says *Keep this app open on your screen* when the browser will not give the lock. `useWakeLock` now returns true when the lock is unavailable.
 - **Disconnect ecash from this device; a restore moves the money under the device's own new words; old phones stop showing moved money** — *Account → Ecash wallet → Disconnect ecash from this device* swaps every coin for a new one (a copy taken earlier is worth nothing), then erases the coins, the counters and the recovery phrase from the device; it is refused while a payment is being sent or while there is money and the 12 words are not written down; if a mint cannot be reached for the swap the person may go on anyway. While disconnected a driver cannot go online and a rider cannot confirm a driver, and *Connect ecash wallet* makes a new empty wallet. Restore changed too: it no longer takes over the typed words; the coins are swapped under THIS wallet's own phrase and the typed phrase is left empty (so a leaked phrase or a compromised lost phone cannot take the money again), and the app asks for the new words at once. A device whose coins were moved elsewhere now asks the mint at start and every 5 minutes and drops the spent coins, so it stops showing them (`syncSpent`). New: `EcashWallet.syncSpent/wipe`, `recovery.disconnect`, `forgetWallet`, `ecashOff/connectEcash/disconnectEcash` in `useApp()`, `scripts/e2e/disconnect.mjs`.
 - **Default mint is Minibits again; a mint address is checked; no more page dump** — `https://macadamia.cash` is the website of the Macadamia iOS wallet, not a mint: every mint request got a 404 web page, and adding funds showed that whole page as the error. The default mint is `https://mint.minibits.cash/Bitcoin` again (`src/config/services.js`; `VITE_DEFAULT_MINT` still overrides it). Now the Cashu adapter turns an answer that is a web page into a short reason ("… is not a Cashu mint: it answered with a web page. Check the mint address."), and *Account → Ecash wallet → Save* asks the mint first (`ecash.checkMint`) and refuses an address that is not a mint. Tested against a local server that answers like that website (`test/cashu-adapter.test.mjs`).

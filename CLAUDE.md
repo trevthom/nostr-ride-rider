@@ -6,7 +6,7 @@ should let you make correct edits without reading every file.
 ## What this is
 NostrRide **Rider app** — one half of a decentralized ridesharing system. The rider and driver
 apps are **separate repositories** that talk to each other only over **Nostr** (no server, no DB).
-This repo is the **rider** app: Uber/Lyft-style: "Where to?", fare quote, find a driver, watch the car arrive, start with a 2-digit code, pay the driver in ecash as the ride runs, finish the ride, rate.
+This repo is the **rider** app: Uber/Lyft-style: "Where to?", fare quote, find a driver, watch the car arrive, start with a 4-digit code (the driver shows it, the rider types it), pay the driver in ecash as the ride runs, finish the ride, rate.
 The sibling repo is **nostr-ride-driver**. Both speak the same events (table below).
 
 > **Generated repository.** This is a copy of the rider app made from **trevthom/nostr-ride** by `scripts/export-apps.mjs`. Make changes in nostr-ride and export again: a hand edit here is overwritten by the next export.
@@ -54,8 +54,8 @@ Each screen is wrapped in an `ErrorBoundary`.
 | 2 | "Finding your driver…" (can change a flat price after 30 s) | RIDE_REQUEST again, same d-tag, new `fareSats` | **Accept**; for a flat price also **counter** (higher price); or Decline |
 | 3 | list of replies with each driver's rates + mint (preferred gender first if asked, then fastest) | RIDE_OFFER 30079 (`mode` metered/flat, `priceSats`, frozen `rates`, `mint`, trip miles/minutes, ETA, `gender`, sealed plate; good 5 min) | "Waiting for rider…" |
 | 4 | **Choose** → confirm (needs ecash at the driver's mint for the start; NO deposit) | RIDE_ACCEPT 30080 (names the offer; exact trip sealed to driver) + RIDE_REQUEST `in_progress`+`driverPubkey` | drive starts: route to pickup. Nothing is charged yet |
-| 5 | car moves live, "arriving in N min" | RIDE_LOCATION 21100 every 6 s (NIP-44 to rider) | **I've arrived** works only within 50 m (good fix) → RIDE_STAGE 30085 `arrived` (+`distM`) |
-| 6 | "Your driver has arrived", checks the car (RIDE_CONFIRM `boarded`), types the driver's 2-digit code (RIDE_CONFIRM `code`) | | types the rider's code → **Start trip** → RIDE_STAGE `riding` (+`codes`) |
+| 5 | car moves live, "arriving in N min" | RIDE_LOCATION 21100 every 6 s (NIP-44 to rider) | **I've arrived** works only within 150 m (good fix) → RIDE_STAGE 30085 `arrived` (+`distM`) |
+| 6 | "Your driver has arrived", checks the car (RIDE_CONFIRM `boarded`), types the 4-digit start code shown on the driver's phone (RIDE_CONFIRM `code`) | shows the start code; the driver types nothing | **Start trip** (after the rider's code) → RIDE_STAGE `riding` (+`codes`) |
 | 7 | "On the way to …"; the rider's app pays ticks: base, each mile, each minute | RIDE_TICK 30095 (token sealed to driver) | redeems each tick at the mint, answers RIDE_TICK_REPLY 30096; sees fare so far, missed payments |
 | 8 | **Finish ride** (confirm) → pays the final tick; receipt | RIDE_FINISH 30081 (either person; time + meter) | **Finish ride** (confirm) or after 2 missed payments; summary; may waive (RIDE_WAIVER 30097) |
 **There are no cancellations and no cancel fees.** Either person finishes the ride (RIDE_FINISH 30081). Before the ride
@@ -101,8 +101,8 @@ src/
     payments.js   # tick/reply/waiver/alive event builders and readers (ticksOf, tickReplies, paidSats, sentSats, waiversOf, signalTimes, outstandingSats)
     terms.js      # rideTerms(request): the CHOSEN offer's frozen rates/mode/price → ticks; rideMint; agreedOffer
     finish.js     # finish reasons, SILENCE_FINISH_MS, bothQuiet/quietMs/finishCutoff, waiverSplit, readFinish
-    startcode.js  # the 2-digit start codes (HMAC of the NIP-44 conversation key), wrong-try lock
-    arrival.js    # canMarkArrived (≤ 50 m, good fix), arrivalMismatch (rider's check)
+    startcode.js  # the ONE 4-digit start code (HMAC of the NIP-44 conversation key; shown on the driver's phone, typed by the rider), wrong-try lock
+    arrival.js    # canMarkArrived (≤ 150 m, good fix), arrivalMismatch (rider's check, 300 m)
     stops.js      # extra stop / new destination: stopChanges, stopTrip/fullTrip, hasAcceptedStop, nextStop; STOP_NOTE_*
     currency.js   # CURRENCIES, get/setCurrency, formatFiat, toMinor, satsFromFiat/fiatFromSats (pure maths)
     mints.js      # cleanMintUrl/isMintUrl/mintLabel
@@ -163,9 +163,9 @@ test/*.test.mjs
 | 30082 | RATING | | UNUSED: star ratings and reviews were removed (too easy to fake). Old events are ignored. See 30102 |
 | 30083 | DRIVER_ROUTE | | unused (feature removed) |
 | 30084 | RIDE_COMPLETE | `e`(request), `p`(rider), `d`, `t` | `{requestId}` — by the assigned driver. Older apps only; read as "finished at the destination" |
-| 30085 | RIDE_STAGE | `e`(request), `p`(rider), `d`="stage-<rideKey>", `t` | `{stage: "arrived" \| "riding", at, arrivedAt?, distM?, codes?}` — by the assigned driver; `at` = ms now, the "riding" marker recalls `arrivedAt` (a relay keeps only the newest marker); `distM` = the driver's measured metres from the pickup (≤ 50); `codes` = both start codes were checked |
+| 30085 | RIDE_STAGE | `e`(request), `p`(rider), `d`="stage-<rideKey>", `t` | `{stage: "arrived" \| "riding", at, arrivedAt?, distM?, codes?}` — by the assigned driver; `at` = ms now, the "riding" marker recalls `arrivedAt` (a relay keeps only the newest marker); `distM` = the driver's measured metres from the pickup (≤ 150); `codes` = the start code was checked (the field keeps its old name) |
 | 30086 | RIDE_PAYMENT | `e`(request), `p`(driver), `d`="pay-<rideKey>-<phase>" (`-tip-<ms>` for a tip), `t` | `{phase:"tip" (old rides: "deposit"\|"rest"), amountSats, level, sealed}` — by the rider; `sealed` = `{pr, preimage, verify}` NIP-44 to the driver. Tips only |
-| 30087 | RIDE_CONFIRM | `e`(request), `p`(driver), `d`="confirm-<rideKey>-<phase>", `t` | `{phase:"boarded"\|"code"\|"ended"\|"problem", ok, note}` — by the rider (`code` = typed the driver's start code) |
+| 30087 | RIDE_CONFIRM | `e`(request), `p`(driver), `d`="confirm-<rideKey>-<phase>", `t` | `{phase:"boarded"\|"code"\|"ended"\|"problem", ok, note}` — by the rider (`code` = typed the 4-digit start code shown on the driver's phone) |
 | 30093 | RIDE_PICKUP_CHANGE (addressable) | `e`(request), `p`(driver), `d`="pickup-<rideKey>-<changeId>", `t` | `{changeId, sealedDriver, sealedSelf}` — the new pickup `{pickup:{name,lat,lng}}` NIP-44 to the driver and to the rider; only the ride's rider |
 | 30094 | RIDE_PICKUP_REPLY (addressable) | `e`(request), `p`(rider), `d`="pickup-reply-<changeId>", `t` | `{changeId, accepted}` — only the assigned driver |
 | 30095 | RIDE_TICK (addressable) | `e`(request), `p`(driver), `d`="tick-<rideKey>-<seq>-<nonce>", `t` | `{seq, trigger, amountSats, mint, at, sealed}` — one ecash payment by the ride's rider; `sealed` = `{token}` (a cashuB token) NIP-44 to the driver; the amount is public |
@@ -248,8 +248,8 @@ carries `driverPubkey`. Stage is `enroute` (default) → `arrived` → `riding`.
   (`verifyPayment`: only a `verify` URL on the host of the driver's own lud16 is fetched); the tick trail (30095/30096/30097/30098) is the evidence for the ride's money.
 - **Finish ride (lib/finish.js)**: one `finishRide` action per app (rider: RiderContext, driver: DriverContext), always behind a `ConfirmDialog`. Before the `riding` marker nothing is
   owed (`closed`). A quiet phone is never a finish; `useRideLink` asks "still with you?" after 2 min (RIDE_ALIVE), and finishes with reason `silence` only when BOTH were silent for 10 min,
-  checked once when an app starts for the ride; time our own relays were down (`nostr/link.js`) is never counted. "I've arrived" needs `canMarkArrived` (≤ 50 m, good fix). The ride starts
-  with both 2-digit codes (`lib/startcode.js`): rider confirm `code` + the driver's typed check. A GPS gap ≤ 10 min is filled with a straight line (`odometer.js maxGapMs`).
+  checked once when an app starts for the ride; time our own relays were down (`nostr/link.js`) is never counted. "I've arrived" needs `canMarkArrived` (≤ 150 m, good fix). The ride starts
+  with ONE 4-digit code (`lib/startcode.js`): the driver's phone shows it, the RIDER types it (rider confirm `code`), and "Start trip" unlocks on that confirmation; the driver types nothing. A GPS gap ≤ 10 min is filled with a straight line (`odometer.js maxGapMs`).
 - **Local currency** (`lib/currency.js`): each person picks one in Account; `AppContext` exposes `currency`, `prices` (code → BTC price, last good ones kept 24 h), `btcPrice` (the chosen
   currency's), `usdPrice`, `priceFor(code)`. A driver's rates carry their currency (`normalizeRates` adds `currency`, default USD; limits scale with the currency). Never guess a missing price:
   show sats / wait. Use `formatFiat(x)` (never a literal "$"). The app's own rates and `MIN_OFFER_USD` are dollars (use `usdPrice`).
@@ -351,6 +351,11 @@ carries `driverPubkey`. Stage is `enroute` (default) → `arrived` → `riding`.
   oversized box turned with CSS; Leaflet's own drag is off and panning is done in MapView (its mouse maths ignores the turn); icons that
   must stay upright carry the `nr-up` class. Never animate a zoom the app starts itself: Leaflet reports an animated zoom's start
   later, so it would look like the user zoomed. Do not add `leaflet-rotate` (GPL-3 licence; it also patches Leaflet core).
+- **Paid so far lines**: the fare cards show `Paid so far:` / `Base rate: $` / `Miles: # ($)` / `Minutes: # ($)` (`ui/FareBreakdown.jsx`, from `lib/ticks.js paidBreakdown(ledger, paidSats)`: what the driver confirmed covers the ticks in time order; a tick counts once covered, with missedTicks' slack). Rider `OnTrip` + `Receipt`, driver `DriveTrip` + `DriveSummary`.
+- **Phone screens** (ui/Layout.jsx, index.css, `scripts/e2e` with `E2E_VIEWPORT=360x640`): the app frame is `.nr-frame` (`100dvh`, `100%` where dvh is unknown) with the side safe-area insets; the viewport meta has `interactive-widget=resizes-content` (the keyboard shrinks the page, so a field in a sheet stays visible);
+  on touch screens (`pointer: coarse`) every field is at least 16px (iOS zooms the page on a smaller one); the desktop look is unchanged (`max-w-md` column). The main button(s) of a sheet go in `<StickyActions>` (Request ride, Accept, Confirm driver, I've arrived / Start trip / Finish ride): they stay at the bottom of the
+  sheet's scroll area so a short phone never has them below the fold (they scroll normally on a phone held sideways, `max-height: 480px`). Put what a person needs FIRST (the driver's start code) above the sticky bar's reach, at the top of the sheet. Flex rows that hold an input need `min-w-0` on the flex child (the search fields once ran off a 360 px screen);
+  below 380 px wide use `max-[380px]:` to drop icons or labels (`sr-only`, so the accessible name stays). At most two notices show at once (`NoticeBanner`). The map's credit line sits just above the sheet (`--nr-sheet`, set by `MapPage`). Check a new screen at 320×568 and 360×640.
 - **No StrictMode** (see main.jsx): it double-mounts the map in dev and caused crashes.
   Keep every hook above a screen's early `return null`.
 - **Login persistence**: with "Remember me" the key is saved encrypted with the user's password

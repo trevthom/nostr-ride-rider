@@ -26,7 +26,7 @@ import Money, { moneyText } from "../../ui/Money.jsx";
 import AmountInput from "../../ui/AmountInput.jsx";
 import Icon from "../../ui/Icon.jsx";
 import Button from "../../ui/Button.jsx";
-import { MapPage, Sheet, FloatButton } from "../../ui/Layout.jsx";
+import { MapPage, Sheet, FloatButton, StickyActions } from "../../ui/Layout.jsx";
 import { inputCls } from "../../ui/Parts.jsx";
 import PlaceSearch from "../components/PlaceSearch.jsx";
 import PinPicker from "../components/PinPicker.jsx";
@@ -373,9 +373,11 @@ function Quote() {
         </div>
 
         {error && <p className="text-red-600 text-sm mt-2">{error}</p>}
-        <Button className="mt-4" onClick={request} disabled={!quote || (flat && !offerOk)}>
-          {!quote ? "Finding route…" : flat ? (offerOk ? <>Request ride · {moneyText(offerSats, btcPrice)} flat</> : "Enter your price") : <>Request ride · about {moneyText(suggestedSats, btcPrice)}</>}
-        </Button>
+        <StickyActions className="mt-4">
+          <Button onClick={request} disabled={!quote || (flat && !offerOk)}>
+            {!quote ? "Finding route…" : flat ? (offerOk ? <>Request ride · {moneyText(offerSats, btcPrice)} flat</> : "Enter your price") : <>Request ride · about {moneyText(suggestedSats, btcPrice)}</>}
+          </Button>
+        </StickyActions>
         <Button variant="secondary" className="mt-2" onClick={resetPlan}>Cancel and go home</Button>
         <p className="text-neutral-500 text-xs text-center mt-2">
           {flat ? "Drivers can accept your price or counter it. " : "Drivers who accept charge their own rates. "}You choose who to ride with, and drivers see only the approximate area until you do.
