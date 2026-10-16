@@ -57,7 +57,7 @@ const miles = (a, b) => haversineDistance(a.lat, a.lng, b.lat, b.lng);
 
 export default function OnTrip({ request, trip }) {
   const { user, pushNotice, btcPrice } = useApp();
-  const { finishRide, myPosition, gps, share, shareUpdate, confirmRide, money, reportMiles, payMint } = useRider();
+  const { finishRide, myPosition, gps, share, shareUpdate, confirmRide, money, reportMiles, payMint, screenMayDim } = useRider();
   const driverPubkey = rideDriver(request);
   const stage = rideStage(request);
   const offer = offerFrom(request, driverPubkey);
@@ -245,6 +245,11 @@ export default function OnTrip({ request, trip }) {
             <p className="text-xs text-neutral-500 mt-2">
               You pay as you ride: the base rate at the start, then each mile and each minute{money?.status === "paid" ? ". A payment just went out." : "."}
             </p>
+            {riding && screenMayDim && (
+              <p className="mt-2 text-xs text-amber-800 bg-amber-50 rounded-xl px-3 py-2" role="status">
+                Keep this app open on your screen. Payments stop while your phone sleeps, and your driver sees them as missed.
+              </p>
+            )}
             {money?.status === "short" && (
               <div className="mt-2 rounded-xl bg-amber-50 text-amber-800 px-3 py-2" role="alert">
                 <p className="text-sm font-semibold">Your ecash wallet is short by {moneyText(Math.max(1, money.shortSats || money.due), btcPrice)}.</p>

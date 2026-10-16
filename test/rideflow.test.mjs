@@ -187,4 +187,24 @@ signAs(rider, K.RIDE_ALIVE, { role: "rider", forRole: "driver", at: T0 + 9 * MIN
 signAs(rider, K.RIDE_FINISH, { requestId: ride8.id, reason: "silence", role: "rider", at: T0 + 3 * MIN, miles: 0.5 }, [["e", ride8.id], ["p", driver.publicKey], ["d", "finish-" + ride8.id]], T0 + 21 * MIN);
 const endAt = (await import(`${R}/lib/rides.js`)).rideEnding(ride8).fin.at;
 assert.equal(endAt, sec(T0 + 9 * MIN) * 1000, "a 'silence' finish cannot claim an earlier time than a signed sign of life: the charge runs to minute 9");
+// ── 11. The rider's phone sleeps with a full wallet (a web page's timers stop): the driver sees missed payments, and ONE payment on waking clears them ──
+const ride9 = newRide("i", "metered");
+assert.equal((await payDue(ctx(ride9, riderW, rider, T0 + 5000, 0))).status, "paid", "the screen is on at the start: the base is paid");
+await redeemTicks({ request: ride9, user: driver, ecash: driverW, publish: publishAs(driver), mint: MINT, nowMs: T0 + 6000 });
+assert.equal(Pay.paidSats(ride9), 2000);
+// The timer stops (nobody calls payDue). The driver's app, awake, keeps its own ledger.
+const asleepAt = T0 + 3 * MIN + 31000;
+const driverLed = () => Rm.currentLedger(ride9, { terms: Tm.rideTerms(ride9), price: PRICE, nowMs: asleepAt, miles: 0.5, role: "driver" });
+const driverSum = Rm.ledgerSummary(ride9, driverLed());
+assert.equal(driverSum.outstanding, 750, "the base is paid; what is open is minutes 1, 2 and 3 (3 x 250 sats)");
+assert.ok(Tk.missedTicks(driverLed(), driverSum.paid + driverSum.forgiven, asleepAt) >= Tk.MISSED_LIMIT, "the driver sees missed payments and may finish the ride, though the rider's wallet is full");
+// The phone wakes (the app pays at once on `visibilitychange`): everything due goes out as ONE token and the driver is level again.
+r = await payDue(ctx(ride9, riderW, rider, asleepAt + 1000, 0.5));
+assert.equal(r.status, "paid", "the wallet had the money all along");
+assert.equal(r.sentNow, 750, "one payment for all three minutes");
+assert.equal(Pay.ticksOf(ride9).length, 2, "the base and the catch-up: two ticks in all");
+await redeemTicks({ request: ride9, user: driver, ecash: driverW, publish: publishAs(driver), mint: MINT, nowMs: asleepAt + 2000 });
+const levelSum = Rm.ledgerSummary(ride9, driverLed());
+assert.equal(levelSum.outstanding, 0);
+assert.equal(Tk.missedTicks(driverLed(), levelSum.paid + levelSum.forgiven, asleepAt + 2000), 0, "no missed payment is left");
 console.log("rideflow tests ok");

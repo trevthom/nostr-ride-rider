@@ -325,7 +325,9 @@ carries `driverPubkey`. Stage is `enroute` (default) → `arrived` → `riding`.
   localhost. **GPS quality** (`lib/gps.js`): a fix is `good` (≤ 200 m), `weak` (Wi-Fi/IP/indoors) or
   `stale` (> 60 s old). A driver can go online, and is advertised, on a `good` fix OR an APPROXIMATE one (`canBeOnline`: a fresh `weak` fix accurate to 25 km; presence is rounded to ~100 m anyway) — not on a stale, missing or vaguer one; `I've arrived` still needs `good`. Ride location
   is sent unless `stale`; the rider app warns when a pickup came from a weak fix. Browsers pause GPS when
-  the tab is hidden, so the driver app holds a screen wake lock while online or driving (`useWakeLock`).
+  the tab is hidden, so the driver app holds a screen wake lock while online or driving (`useWakeLock`). The RIDER app holds one too while a ride is `in_progress` (`RiderContext`): a sleeping page stops the 3 s
+  payment loop, so no tick is paid and the driver sees "missed payments" with a full wallet. `useWakeLock` returns true when the lock is unavailable (no browser support, refused, released) and `OnTrip` then tells the rider to keep the app open; the loop also runs
+  at once on `visibilitychange` and `online`. A page that is hidden (another app, a locked phone without the lock) still pays nothing until it wakes.
   ETAs use the OSRM road time from the map route (`onRoute`), with a straight-line guess as fallback.
 - **Profiles carry photo + vehicle**: kind-0 has `picture` (small resized JPEG, ~20 KB budget in
   lib/image.js) and `vehicle:{picture,plateState,plateNumber,year,make,model}` (plate sealed).

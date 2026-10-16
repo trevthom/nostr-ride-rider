@@ -20,6 +20,7 @@ import { relay } from "../../nostr/relay.js";
 import { EVENT_KINDS } from "../../nostr/eventKinds.js";
 import { subscribePresence } from "../../nostr/live.js";
 import { useGeolocation } from "../../lib/useGeolocation.js";
+import { useWakeLock } from "../../lib/useWakeLock.js";
 import { reverseGeocode } from "../../lib/geocode.js";
 import { haversineDistance } from "../../lib/geo.js";
 import { pickupEta } from "../../lib/fare.js";
@@ -172,6 +173,9 @@ export function RiderProvider({ children }) {
 
   // ── The ride's money: pay the driver tick by tick, and collect refunds ──
   const payRide = activeRide && rideStatus(activeRide) === "in_progress" ? activeRide : receipt;
+  // A sleeping phone stops the timer below, so no tick is paid and the driver sees "missed payments" with a full wallet.
+  // Keep the screen on for as long as the ride runs; `screenMayDim` is true when the browser would not give us the lock.
+  const screenMayDim = useWakeLock(!!activeRide && rideStatus(activeRide) === "in_progress");
   const milesRef = useRef(null); // the trip distance both screens show, reported by the trip screen
   const reportMiles = useCallback((m) => { milesRef.current = m; }, []);
   const [money, setMoney] = useState(null);
@@ -198,7 +202,11 @@ export function RiderProvider({ children }) {
     };
     tick();
     const id = setInterval(tick, 3000);
-    return () => { alive = false; clearInterval(id); };
+    // The page just woke up (screen unlocked, app switched back, network back): pay what fell due at once, not at the next timer.
+    const wake = () => { if (document.visibilityState === "visible") tick(); };
+    document.addEventListener("visibilitychange", wake);
+    window.addEventListener("online", wake);
+    return () => { alive = false; clearInterval(id); document.removeEventListener("visibilitychange", wake); window.removeEventListener("online", wake); };
   }, [payKey, !!ecash, !!payTerms, run]); // eslint-disable-line react-hooks/exhaustive-deps
   // Pay now, outside the timer (after adding funds): resolves to the result.
   const payNow = useCallback(async (request) => run(request || payRide), [run, payRide]);
@@ -465,7 +473,7 @@ export function RiderProvider({ children }) {
     activeRide, focused: !!focused, focusRide: (r) => setFocusId(r ? r.id : null), upcoming, receipt, dismissReceipt,
     genderPref, setGenderPref,
     requestRide, raiseOffer, proposePickup, confirmDriver, recordPayment, confirmRide, proposeStop, finishRide, declineOffer, recentPlaces,
-    money, payNow, reportMiles, payTerms, payMint,
+    money, payNow, reportMiles, payTerms, payMint, screenMayDim,
     nearestDriverEta: (to) => {
       if (!to || !drivers.length) return null;
       const miles = Math.min(...drivers.map((d) => haversineDistance(to.lat, to.lng, d.lat, d.lng)));
