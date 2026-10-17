@@ -50,9 +50,9 @@ Each screen is wrapped in an `ErrorBoundary`.
 | Step | Rider app | Event (kind) | Driver app |
 |---|---|---|---|
 | 0 | sees cars nearby | PRESENCE 30090 (public, coarse) | **GO** online (needs GPS + `isDriveReady`) |
-| 1 | picks route, chooses **Standard fare** (each driver's rates) or a **Flat price** (own offer), taps **Request** | RIDE_REQUEST 30078 `status:requested`, `fareMode`, `fareSats` (the flat price, or the estimate), `suggestedSats` | incoming card (45 s countdown) + price tags on map |
-| 2 | "Finding your driver…" (can change a flat price after 30 s) | RIDE_REQUEST again, same d-tag, new `fareSats` | **Accept**; for a flat price also **counter** (higher price); or Decline |
-| 3 | list of replies with each driver's rates + mint (preferred gender first if asked, then fastest) | RIDE_OFFER 30079 (`mode` metered/flat, `priceSats`, frozen `rates`, `mint`, trip miles/minutes, ETA, `gender`, sealed plate; good 5 min) | "Waiting for rider…" |
+| 1 | picks route, sees the suggested fare (each driver's own rates), taps **Request** | RIDE_REQUEST 30078 `status:requested`, `fareMode:"standard"`, `fareSats` (the estimate), `suggestedSats` | incoming card (45 s countdown) + price tags on map |
+| 2 | "Finding your driver…" | — | **Accept** (sends the offer) or Decline. There is no flat price and no counter-offer |
+| 3 | list of replies with each driver's rates + mint (preferred gender first if asked, then fastest) | RIDE_OFFER 30079 (`mode` metered, `priceSats` = the driver's estimate, frozen `rates`, `mint`, trip miles/minutes, ETA, `gender`, sealed plate; good 5 min) | "Waiting for rider…" |
 | 4 | **Choose** → confirm (needs ecash at the driver's mint for the start; NO deposit) | RIDE_ACCEPT 30080 (names the offer; exact trip sealed to driver) + RIDE_REQUEST `in_progress`+`driverPubkey` | drive starts: route to pickup. Nothing is charged yet |
 | 5 | car moves live, "arriving in N min" | RIDE_LOCATION 21100 every 6 s (NIP-44 to rider) | **I've arrived** works only within 150 m (good fix) → RIDE_STAGE 30085 `arrived` (+`distM`) |
 | 6 | "Your driver has arrived", checks the car (RIDE_CONFIRM `boarded`), types the 4-digit start code shown on the driver's phone (RIDE_CONFIRM `code`) | shows the start code; the driver types nothing | **Start trip** (after the rider's code) → RIDE_STAGE `riding` (+`codes`) |
@@ -72,7 +72,7 @@ src/
   index.css  theme.js             # font, animations; few colors (THEME)
   config/
     app.js                        # APP_ROLE / IS_DRIVER_APP / APP_NAME / BUILD_ID (build time + commit, shown in Account)
-    settings.js                   # tunables: FARE_RATES (USD, no minimum), FALLBACK_BTC_USD, MIN_OFFER_USD/MAX_OFFER_FACTOR (flat price),
+    settings.js                   # tunables: FARE_RATES (USD, no minimum), FALLBACK_BTC_USD,
                                   #   RATE_LIMITS, REQUEST_CARD_SECONDS, OFFER_TTL_SECONDS, DEFAULT_REQUEST_RADIUS_MILES,
                                   #   USE_DEMO_DATA (dev only), CONTACT_PLATFORMS
     services.js                   # tile / Photon / OSRM URLs + DEFAULT_MINT, overridable by VITE_* env (see env.example)
@@ -96,7 +96,7 @@ src/
     demoData.js                   # dev-only fake riders/requests (driver app only)
   lib/
     rides.js      # trust rules: rideVersions/rideStatus (requested→in_progress→completed|closed)/rideEnding (earliest finish; silence cut-off clamped)/rideStage/rideTimes/rideConfirm/rideDriver/rideKey/tripCounts (plain counts, no stars)
-    ticks.js      # PURE tick maths: unitSats, newLedger/advanceLedger (base, mile, minute), missedTicks, settle (final tick), convertToMetered (flat→normal fare), milesAt
+    ticks.js      # PURE tick maths: unitSats, newLedger/advanceLedger (base, mile, minute), missedTicks, settle (final tick), milesAt
     ridemoney.js  # currentLedger(request,…): the saved ledger of a ride, advanced or settled; ledgerSummary; milesAtTime
     payments.js   # tick/reply/waiver/alive event builders and readers (ticksOf, tickReplies, paidSats, sentSats, waiversOf, signalTimes, outstandingSats)
     terms.js      # rideTerms(request): the CHOSEN offer's frozen rates/mode/price → ticks; rideMint; agreedOffer
@@ -110,13 +110,14 @@ src/
     odometer.js   # stepOdo/newOdo: miles of a GPS track (skips wobble, bad fixes, glitches) (pure)
     meter.js      # referenceMiles (driver's distance unless the rider's differs >5%), meterView, fmt* (pure)
     pickup.js     # pickupChange(request): pending|accepted|declined; PICKUP_CHANGE_NOTE (the exact place logic is in privacy.js)
-    fare.js       # quoteFare/fareAmount/usdToSats/pickupEta + normalizeRates (incl. currency)/typicalFare/typicalSats/median/satsFromUsd/usdFromSats/offerLimitsSats/offerLevel/replyKind (pure)
+    fare.js       # quoteFare/fareAmount/usdToSats/pickupEta + normalizeRates (incl. currency)/typicalFare/typicalSats/median/satsFromUsd/usdFromSats (pure)
     earnings.js   # completedDrives (paid ticks + tips), summarizeEarnings
     privacy.js    # publicPlace, seal/unseal, exactTrip, sealVehicle/myVehicle/offerPlate
     contact.js    # contactHref (safe links from untrusted handles)
     evidence.js   # tip records (30086) + proofLevel + driver-side verifyPayment + disputeRecord (ticks, replies, waivers, finishes); rideConfirm is in rides.js
     bolt11.js     # paymentHash / preimageMatches
     blocks.js     # local block list helpers
+    appearance.js # light/dark look: isDark/setDark (saved AT ONCE in localStorage `nostrride_dark`), applyAppearance (the `dark` class on <html> + <meta theme-color>), useDark
     recovery.js   # the 12-word recovery phrase (pure): newPhrase/cleanPhrase/checkPhrase/seedOf/pickCheckPositions/checkAnswers/boxKey (@scure/bip39; HKDF)
     vouches.js    # "I know and trust this person": parsePubkey (npub; an nsec is refused), vouchEvent/vouchList (kind 30102), trustFor(target, me) = {direct, via} (ONE hop, only through people I vouch for), trustHeadline/trustDetail (the badge words)
     safety.js     # trusted contacts, sms link, trip message
@@ -130,17 +131,17 @@ src/
     MapView.jsx   # Leaflet + OpenStreetMap tiles; pins, OSRM route, cars, "me" dot, price pills, ref.fit(); trip mode (`navigation` + `follow`)
     Button.jsx Icon.jsx Avatar.jsx Money.jsx Parts.jsx (Row, Toggle, Field, ConfirmDialog, Modal, Spinner)
     Fold.jsx      # a section that opens and closes (Account); openFold(id); FoldTitle/SectionLabel draw nothing inside a Fold (the header has the title)
-    AmountInput.jsx (local currency or sats, unit swap; flat prices, counters, tips, funds)  TripMeter.jsx (time + distance card, peekMeter)  VouchBadge.jsx ContactSheet.jsx UserModal.jsx NoticeBanner.jsx ErrorBoundary.jsx RelayEditor.jsx QRCode.jsx SatsAmount.jsx
+    AmountInput.jsx (local currency or sats, unit swap; tips, funds, waivers)  PasswordField.jsx (password input with a show/hide eye)  TripMeter.jsx (time + distance card, peekMeter)  VouchBadge.jsx ContactSheet.jsx UserModal.jsx NoticeBanner.jsx ErrorBoundary.jsx RelayEditor.jsx QRCode.jsx SatsAmount.jsx
   features/
     auth/        AuthScreen (role-aware copy) + AuthSteps (unlock, key backup)
     profile/     ProfileParts (useSaveProfile, AccountHeader, ContactMethods, RelaysSection, LogoutButton),
-                 VehicleSection, VouchesSection ("Your vouches": npub in, list out), TypicalFareSection ("Your rates", locked during a ride), CurrencySection, LightningAddressSection, WalletSection, KeysSection
+                 AppearanceSection (the Dark mode switch), VehicleSection, VouchesSection ("Your vouches": npub in, list out), TypicalFareSection ("Your rates", locked during a ride), CurrencySection, LightningAddressSection, WalletSection, KeysSection
     ecash/       EcashSection (balance, mint, paste a token, back up, driver cash out), RecoverySection (RecoveryFold + RecoveryNotice: write down 12 words, show again, I-lost-a-phone) + RestorePanel, myMint.js
     payments/    PayDriver (a Lightning address: tips), AddFunds (mint invoice → ecash, NWC or any wallet), rideTicks.js (rider: payDue), redeemTicks.js (driver: redeem + reply),
                  redeemWaivers.js (rider: collect refunds), useRideLink.js (quiet phone, sign of life, 10-minute silence)
   rider/
     App.jsx  state/RiderContext.jsx
-    screens/ HomeScreen (dispatch) PlanTrip (idle/search/pin/quote: standard fare | flat price) ActiveTrip (searching/choose/confirm driver)
+    screens/ HomeScreen (dispatch) PlanTrip (idle/search/pin/quote) ActiveTrip (searching/choose/confirm driver)
              OnTrip (enroute/arrived/riding) Receipt  ActivityScreen  AccountScreen
     state/ useRiderMeter (rider's own odometers + the 5% rule)
     components/ PlaceSearch, PinPicker (drag the map under a pin → the pickup OR the drop-off: `field`), GenderPref, ChangePickup, AddStop, FareTerms, TipSheet, DriverInfo (+ Plate, useDriverInfo)
@@ -156,8 +157,8 @@ test/*.test.mjs
 | Kind | Name | Key tags | Content (JSON) |
 |---|---|---|---|
 | 0 | METADATA | — | `{name, about, communication[], picture, lud16, gender?, rates?, vehicle}` (+ fields from other apps, kept on merge) |
-| 30078 | RIDE_REQUEST | `d`(id), `t`, `p`(driver, once confirmed) | `{pickup, dropoff, time, notes, status, hide?, fareMode, fareSats, suggestedSats, distanceMiles, durationMin, sealed}` — `hide` = hide tokens of the drivers the rider blocked (lib/blocks.js); pickup/dropoff are COARSE; `sealed` = exact trip, NIP-44 to the rider. `fareMode` = `"standard"` (each driver's rates; `fareSats` is only an estimate) or `"flat"` (`fareSats` is the RIDER'S FLAT PRICE); older requests lack both (the driver app estimates); `suggestedSats` is what the app suggested. `status` ∈ `requested \| in_progress \| closed` (old: `cancelled`) |
-| 30079 | RIDE_OFFER | `e`(request), `p`(rider), `d`, `t` | `{priceSats, mode, rates, mint, tripMiles, tripMinutes, etaMinutes, message, typicalSats, gender, plate}` — the driver's reply. `mode:"flat"`: the rider's flat price (accept) or a higher price (counter); `mode:"metered"`: the driver's standard fare (`priceSats` = their estimate). `rates` = `{base, perMile, perMinute, currency}` (a frozen copy) and `mint` = where the driver is paid; `gender` optional, self-declared; `plate` NIP-44 to the rider. No deposit |
+| 30078 | RIDE_REQUEST | `d`(id), `t`, `p`(driver, once confirmed) | `{pickup, dropoff, time, notes, status, hide?, fareMode, fareSats, suggestedSats, distanceMiles, durationMin, sealed}` — `hide` = hide tokens of the drivers the rider blocked (lib/blocks.js); pickup/dropoff are COARSE; `sealed` = exact trip, NIP-44 to the rider. `fareMode` is always `"standard"` (each driver's rates; `fareSats` is only an estimate); an older app's `"flat"` (the rider's own price) and a missing value are both read as standard; `suggestedSats` is what the app suggested. `status` ∈ `requested \| in_progress \| closed` (old: `cancelled`) |
+| 30079 | RIDE_OFFER | `e`(request), `p`(rider), `d`, `t` | `{priceSats, mode, rates, mint, tripMiles, tripMinutes, etaMinutes, message, typicalSats, gender, plate}` — the driver's reply. `mode:"metered"`: the driver's standard fare (`priceSats` = their estimate); an older app's `"flat"` is read as metered. `rates` = `{base, perMile, perMinute, currency}` (a frozen copy) and `mint` = where the driver is paid; `gender` optional, self-declared; `plate` NIP-44 to the rider. No deposit |
 | 30080 | RIDE_ACCEPT | `e`(offer), `e`(request), `p`(driver), `d`, `t` | `{offerId, requestId, sealed}` — `offerId` names the offer whose rates and mint are FROZEN for the ride; `sealed` = exact trip, NIP-44 to the driver |
 | 30081 | RIDE_FINISH | `e`(request), `p`, `d`="finish-<id>", `t` | `{requestId, reason: rider\|driver\|destination\|unpaid\|silence, role, at, miles?, minutes?, atDestination?}` — by the rider or the assigned driver; ends the ride (NO cancellations, NO fees). `at`/`miles` = the moment and meter the charge runs to |
 | 30082 | RATING | | UNUSED: star ratings and reviews were removed (too easy to fake). Old events are ignored. See 30102 |
@@ -237,8 +238,8 @@ carries `driverPubkey`. Stage is `enroute` (default) → `arrived` → `riding`.
   the agreed meter. The rider's app (`features/payments/rideTicks.js payDue`, run every 3 s by `RiderContext`) pays everything due as ONE token event (30095); a short wallet pays what
   it can and the rest stays due (never lost, never paid twice: `sentSats` counts every non-refused tick). The driver's app (`redeemTicks.js`, run by `DriverContext`, for ALL its rides) redeems
   each token and answers (30096): `ok:false` ONLY on a final refusal, never when the mint is unreachable. "Paid" = what the driver confirmed (`paidSats`). `missedTicks` (due > 30 s
-  and uncovered) ≥ 2 lets the driver finish. The rider may refill and pay what is missed, also after the ride. Flat price: same ticks, scaled to add up to the price and capped at it; finished AT
-  THE DESTINATION the rest is owed; an accepted extra stop converts it to the normal fare from the start (`convertToMetered`). The driver may waive (30097): unpaid forgiven first, the rest
+  and uncovered) ≥ 2 lets the driver finish. The rider may refill and pay what is missed, also after the ride. There is NO flat price and NO counter-offer (removed: `offerLimitsSats`, `replyKind`, `raiseOffer`, `convertToMetered`, `MIN_OFFER_USD`; do not add them back): an
+  old offer that says `flat` is read as the standard fare, and an accepted extra stop just keeps the meter running. The driver may waive (30097): unpaid forgiven first, the rest
   sent back as an ecash token sealed to the rider (`redeemWaivers.js`; `ecash.payUpTo` sends the most the balance allows, because spending proofs costs the mint's input fee, and the waiver records the sats really sent; the modal caps the amount at what the driver still holds at the ride's mint). Never invoice the rider's own wallet. Only `confirmDriver` publishes RIDE_ACCEPT + `in_progress`.
 - **Ecash wallet** (`nostr/ecash.js`): bookkeeping only, over a mint adapter; `nostr/cashuMint.js` is the ONLY file that imports `@cashu/cashu-ts` (loaded on demand by `AppContext`).
   Proofs are saved encrypted (NIP-44 to the user's own key, in pieces). Rules: one money move at a time (`_exclusive`); a token being sent sits in `pending` until its event is
@@ -252,7 +253,7 @@ carries `driverPubkey`. Stage is `enroute` (default) → `arrived` → `riding`.
   with ONE 4-digit code (`lib/startcode.js`): the driver's phone shows it, the RIDER types it (rider confirm `code`), and "Start trip" unlocks on that confirmation; the driver types nothing. A GPS gap ≤ 10 min is filled with a straight line (`odometer.js maxGapMs`).
 - **Local currency** (`lib/currency.js`): each person picks one in Account; `AppContext` exposes `currency`, `prices` (code → BTC price, last good ones kept 24 h), `btcPrice` (the chosen
   currency's), `usdPrice`, `priceFor(code)`. A driver's rates carry their currency (`normalizeRates` adds `currency`, default USD; limits scale with the currency). Never guess a missing price:
-  show sats / wait. Use `formatFiat(x)` (never a literal "$"). The app's own rates and `MIN_OFFER_USD` are dollars (use `usdPrice`).
+  show sats / wait. Use `formatFiat(x)` (never a literal "$"). The app's own rates are dollars (use `usdPrice`).
 - **Ecash recovery phrase (lib/recovery.js, nostr/seedbox.js, nostr/ecashRecovery.js, features/ecash/RecoverySection.jsx)**: every coin the wallet MAKES for itself has a deterministic secret (Cashu NUT-13: seed of a 12-word BIP39 phrase + keyset + counter), so the phrase
   restores the ecash on a new device (NUT-09 `restore`). Rules: (1) the phrase is its OWN secret, never derived from the nsec (a leaked nsec must not drain the wallet); (2) it is made on first open of the wallet, before any coin, and kept ONLY encrypted under `boxKey(sk)` (its own HKDF label);
   it never goes into an event, to a relay, to a mint, into a log, an error message or a URL; (3) counters live in `wallet.state.counters` and are saved BEFORE the mint is asked (`counterSource()`); (4) coins SENT to someone else use random secrets (`send: {type:"random"}` in `cashuMint.js split`),
@@ -262,8 +263,13 @@ carries `driverPubkey`. Stage is `enroute` (default) → `arrived` → `riding`.
   exists and the words are not written down → `rotateAll` (refuse on a failed swap unless `force`) → `wallet.wipe()` + `box.erase()`; `AppContext` keeps `ecashOff` (`nostrride_ecashOff_<pk16>`), `disconnectEcash`, `connectEcash`; while off the wallet is not loaded (no new phrase is made), a driver cannot GO and a rider
   cannot confirm a driver, and it is locked while a ride is running; (7) on "Blinded message is already signed" (10002) the adapter skips its counters ahead and retries once (another device used the numbers) and takes no coins; (8) `@cashu/cashu-ts` is pinned EXACTLY (no `^`) and
   `test/recovery.test.mjs` holds the NUT-13 specification vector: a library change must not alter a derived secret. The phrase counts as safe (`backedUp`) only after the person types three words back. Old random coins (`state.legacy`) are swapped under the phrase when it is confirmed.
-- **Account folds (ui/Fold.jsx)**: every setting on both Account screens is a `<Fold id title>`: closed at first (a driver's vehicle / Lightning address start open while still needed), open state remembered per device (`nostrride_fold_<id>`), content stays mounted while closed (typed text is kept).
+- **Account folds (ui/Fold.jsx)**: every setting on both Account screens is a `<Fold id title>`: closed at first (a driver's vehicle / cash out location start open while still needed; the Lightning address section is titled **Cash out location**), open state remembered per device (`nostrride_fold_<id>`), content stays mounted while closed (typed text is kept).
   A section's own `SectionLabel`/`FoldTitle` draws nothing inside a Fold. E2E scripts open a section with `openFold(page, title)` (scripts/e2e/flow.mjs). New settings go in a Fold.
+- **Dark mode (lib/appearance.js, tailwind.config.js, src/index.css, public/theme-init.js, features/profile/AppearanceSection.jsx)**: Account → Appearance → Dark mode saves and applies AT ONCE (no Save button; `nostrride_dark`). The Tailwind colors `white`, `black`, `neutral-*` and the tints of
+  red / amber / green / blue are CSS variables (`:root` = light, `.dark` = dark; channels as `r g b`, so `bg-black/50` still works), so ordinary classes follow the look with no `dark:` variant. In the dark look `white` and `black` TRADE PLACES (a `bg-black text-white` button becomes a light button with dark text; `bg-white` is the
+  dark surface). A color that must NOT change is written FIXED: white text on a colored button `text-[#fff]`, a dialog or photo backdrop `bg-[#000]/50`, a red or green dot `bg-[#dc2626]`, the plate `bg-[#fff] text-[#000]`. Never write `text-white` on a green/red/amber background, and never `bg-black/NN` for a backdrop. The arbitrary greens
+  (`text-[#05944f]`, `text-[#05683a]`, `bg-[#e6f4ec]`) are re-mapped in index.css. Leaflet's tile pane gets a CSS filter in `.dark`; pins, route and price tags keep their colors. Check a new screen in both looks (`DARK=1`-style script: set `localStorage.nostrride_dark="true"` before load).
+- **Password fields**: use `ui/PasswordField.jsx` (an input with a show/hide eye, hidden at first), never a bare `type="password"` input (the Unlock page and the Remember-me password both use it).
 - **Vouches (lib/vouches.js, nostr/vouchSync.js, ui/VouchBadge.jsx, features/profile/VouchesSection.jsx)**: the ONLY reputation. No stars, no reviews (they are easy to fake): do not add them back. Each person publishes one public list (kind 30102,
   `d`="vouches", a `p` tag per npub, max 100) from Account → Your vouches. A vouch is for the PERSON, in either role. The badge is read for the VIEWER and is ONE hop: `trustFor(target, me)` = the people in MY list who have the target in THEIR list
   ("N of your vouches know and trust this person"; "You know and trust this person" when the target is in my own list). Never count a vouch from a person I did not choose, never go a second hop, and show NOTHING (no "0") when there is none. `syncVouches` asks
@@ -290,9 +296,8 @@ carries `driverPubkey`. Stage is `enroute` (default) → `arrived` → `riding`.
   lat/lng is the car). The share key is only ever in the URL fragment.
 - **Service worker** (`public/sw.js`, production only): caches the shell and hashed assets; never touches
   relays, tiles or APIs. It cannot receive push while the app is closed. Native shell (`native/`) skips it.
-- **Fares** (`lib/fare.js`): the rider chooses `fareMode` `"standard"` (each driver's own rates; the request's `fareSats` is only an estimate; the driver cannot counter) or `"flat"` (the RIDER
-  names ANY amount, in the local currency or sats: `ui/AmountInput`, limits from `offerLimitsSats`: `MIN_OFFER_USD` .. `MAX_OFFER_FACTOR` × suggestion; published as `fareSats`; a driver accepts or
-  counters higher with `acceptRequest(request, priceSats)`; `replyKind(price, offer)` names the reply). The rider can republish a flat request with a new `fareSats` (`raiseOffer`) while no driver is chosen.
+- **Fares** (`lib/fare.js`): one fare, each driver's own rates (`fareMode:"standard"`; the request's `fareSats` is only an estimate). The rider names no price and a driver does not counter (the flat price was removed on purpose: do not add it back).
+  `acceptRequest(request)` sends an offer with `mode:"metered"`. The confirm screen's "Needed to start" is `startParts` in `ActiveTrip.jsx`: base + 2 minutes + 1 mile (a cushion so the first payments are never late; it explains itself on screen).
 - **Driver rates**: each driver may set `rates` {base, perMile, perMinute, currency} (kind 0 and public presence; `normalizeRates` rejects junk; limits `RATE_LIMITS`, scaled per currency). The fare is
   base + per mile × miles + per minute × minutes (`fareAmount`), **no minimum fare**; no rates → `APP_RATES`. The rider's quote suggests the MEDIAN of nearby drivers' fares IN SATS (`typicalSats`)
   (the app's formula if no driver is near); each offer carries `typicalSats`. The rates in an offer are FROZEN once the rider chooses it, and the Account screen locks the rates during a ride.
@@ -300,7 +305,7 @@ carries `driverPubkey`. Stage is `enroute` (default) → `arrived` → `riding`.
 - **Gender preference**: drivers MAY set `gender` ("male" | "female") in kind 0 (copied into offers); anything else is ignored.
   A rider's preference (`getSetting("genderPref")`, local only) only reorders the offers via `rankOffers`; never filter or hide a driver by it.
 - **Drive gating**: `isDriveReady(user)` = `driveGaps(user)` is empty (lib/profile.js): face photo + vehicle year/make/model +
-  vehicle photo + plate state/number + Lightning address (no driver's license photo). Gender is optional. Until then the
+  vehicle photo + plate state/number + cash out location, i.e. a Lightning address (no driver's license photo). Gender is optional. Until then the
   Drive tab shows Onboarding and GO is unavailable. Every message about what is missing comes from `driveGaps`/`gapsText`
   so it names the exact items; keep it that way when adding a requirement.
 - **Tips**: optional and never required. `TipSheet` (opened from the Receipt's quiet link and from Activity → past trip, any time after the ride)
@@ -354,7 +359,7 @@ carries `driverPubkey`. Stage is `enroute` (default) → `arrived` → `riding`.
 - **Paid so far lines**: the fare cards show `Paid so far:` / `Base rate: $` / `Miles: # ($)` / `Minutes: # ($)` (`ui/FareBreakdown.jsx`, from `lib/ticks.js paidBreakdown(ledger, paidSats)`: what the driver confirmed covers the ticks in time order; a tick counts once covered, with missedTicks' slack). Rider `OnTrip` + `Receipt`, driver `DriveTrip` + `DriveSummary`.
 - **Phone screens** (ui/Layout.jsx, index.css, `scripts/e2e` with `E2E_VIEWPORT=360x640`): the app frame is `.nr-frame` (`100dvh`, `100%` where dvh is unknown) with the side safe-area insets; the viewport meta has `interactive-widget=resizes-content` (the keyboard shrinks the page, so a field in a sheet stays visible);
   on touch screens (`pointer: coarse`) every field is at least 16px (iOS zooms the page on a smaller one); the desktop look is unchanged (`max-w-md` column). The main button(s) of a sheet go in `<StickyActions>` (Request ride, Accept, Confirm driver, I've arrived / Start trip / Finish ride): they stay at the bottom of the
-  sheet's scroll area so a short phone never has them below the fold (they scroll normally on a phone held sideways, `max-height: 480px`). Put what a person needs FIRST (the driver's start code) above the sticky bar's reach, at the top of the sheet. Flex rows that hold an input need `min-w-0` on the flex child (the search fields once ran off a 360 px screen);
+  sheet's scroll area so a short phone never has them below the fold (they scroll normally on a phone held sideways, `max-height: 480px`). Put what a person needs FIRST (the driver's start code) above the sticky bar's reach, at the top of the sheet. `Button` is `w-full` by default: next to an input in one flex row it squeezes the input (the 4-digit start code once showed two digits), so stack them or pass `full={false}`. Flex rows that hold an input need `min-w-0` on the flex child (the search fields once ran off a 360 px screen);
   below 380 px wide use `max-[380px]:` to drop icons or labels (`sr-only`, so the accessible name stays). At most two notices show at once (`NoticeBanner`). The map's credit line sits just above the sheet (`--nr-sheet`, set by `MapPage`). Check a new screen at 320×568 and 360×640.
 - **No StrictMode** (see main.jsx): it double-mounts the map in dev and caused crashes.
   Keep every hook above a screen's early `return null`.

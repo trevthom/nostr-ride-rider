@@ -2,7 +2,7 @@
 //  YOUR RATES (driver) — Each driver sets their own rates, in their local currency (chosen in Account):
 //  a base rate (paid when the ride starts), a price per mile and a price per minute. A ride is paid tick
 //  by tick at these rates. Riders see the resulting fare for their trip next to each nearby driver and in
-//  every reply. A rider may instead offer a flat price, which the driver accepts or counters.
+//  every reply.
 //  With no rates set, the app's own rates (config/settings.js FARE_RATES) are used.
 //  The rates are copied into each offer and are frozen once the rider chooses the driver: they cannot
 //  be changed while a ride is running (`locked`).
@@ -71,7 +71,6 @@ export default function TypicalFareSection({ rates, onSave, locked = false }) {
       <SectionLabel>Your rates</SectionLabel>
       <p className="text-sm text-neutral-500 mb-3">
         Set your own rates in {currency}. A ride is paid as it runs: your base rate when it starts, then each mile and each minute. Riders see what you would charge for their trip, next to your name.
-        A rider may offer a flat price instead, which you can accept or counter.
       </p>
       {locked && <p className="text-sm text-amber-800 bg-amber-50 rounded-xl px-3 py-2 mb-3" role="status">Your rates are frozen while a ride is running. You can change them when it ends.</p>}
       {saved && saved.currency !== currency && <p className="text-xs text-amber-700 mb-2" role="status">Your saved rates are in {saved.currency}. Save to use {currency} instead.</p>}

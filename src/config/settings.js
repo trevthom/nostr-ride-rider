@@ -13,13 +13,6 @@ export const FARE_RATES = { base: 2.0, perMile: 1.1, perMinute: 0.25 };
 // quoted in sats. The rider sees a "price estimate" note when it is in use.
 export const FALLBACK_BTC_USD = 100000;
 
-// A rider may offer a FLAT price instead of the driver's standard fare. The suggested price is only a
-// starting point. A flat offer can be any amount (in the rider's currency, or sats), never below
-// MIN_OFFER_USD and never above MAX_OFFER_FACTOR times the suggested price (this stops a typo from
-// costing real money). A driver can accept the offer or counter with a higher price.
-export const MIN_OFFER_USD = 3;
-export const MAX_OFFER_FACTOR = 3;
-
 // Each driver can set their own rates (base + per mile + per minute). These are the highest values
 // they can enter (in dollars; other currencies are scaled, see lib/currency.js), so a typo cannot
 // publish a silly rate.

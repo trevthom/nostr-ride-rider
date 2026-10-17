@@ -1,6 +1,6 @@
 // ════════════════════════════════════════════════════════════
 //  AUTH STEPS — Two small steps used by AuthScreen:
-//    • UnlockView — a key saved on this device: enter the password.
+//    • UnlockView — a key saved on this device: enter the password (the eye button shows or hides it).
 //    • BackupStep — after "Create account": show the new secret key
 //      and make the user confirm they saved it (it can't be reset).
 // ════════════════════════════════════════════════════════════
@@ -8,7 +8,7 @@
 import { useState } from "react";
 import { shortNpub } from "../../nostr/keys.js";
 import Button from "../../ui/Button.jsx";
-import { inputCls } from "../../ui/Parts.jsx";
+import PasswordField from "../../ui/PasswordField.jsx";
 
 export function UnlockView({ saved, busy, error, onUnlock, onSwitch }) {
   const [password, setPassword] = useState("");
@@ -18,15 +18,14 @@ export function UnlockView({ saved, busy, error, onUnlock, onSwitch }) {
         <span className="block text-xl font-bold">Welcome back{saved.name ? `, ${saved.name}` : ""}</span>
         <span className="block text-neutral-500 text-xs font-mono mt-1">{shortNpub(saved.pubkey)}</span>
       </p>
-      <input
-        type="password"
+      <PasswordField
         value={password}
         onChange={(e) => setPassword(e.target.value)}
         onKeyDown={(e) => { if (e.key === "Enter" && password) onUnlock(password); }}
         placeholder="Password"
+        autoComplete="current-password"
         autoFocus
         aria-label="Password"
-        className={inputCls}
       />
       {error && <p className="text-red-600 text-sm">{error}</p>}
       <Button onClick={() => onUnlock(password)} disabled={!password} loading={busy}>{busy ? "Unlocking…" : "Unlock"}</Button>

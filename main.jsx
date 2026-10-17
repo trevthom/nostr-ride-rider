@@ -2,6 +2,7 @@ import ReactDOM from "react-dom/client";
 import App from "./src/rider/App.jsx";
 import "./src/tailwind.css";
 import "./src/index.css";
+import { applyAppearance } from "./src/lib/appearance.js";
 import { registerServiceWorker } from "./src/lib/notify.js";
 
 // Mounts the rider app into the page. (This file sits in the app's own folder
@@ -11,4 +12,5 @@ import { registerServiceWorker } from "./src/lib/notify.js";
 // and destroy each map twice and can crash the map. Leaving it off keeps
 // the maps stable while you run `npm run dev`.
 registerServiceWorker();
+applyAppearance(); // light or dark, as saved on this device
 ReactDOM.createRoot(document.getElementById("root")).render(<App />);

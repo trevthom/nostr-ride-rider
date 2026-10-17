@@ -37,7 +37,7 @@ export default function SafetySheet({ open, onClose, request, destination }) {
 
   return (
     <Modal open={open} title="Safety" onClose={onClose}>
-      <a href={`tel:${EMERGENCY_NUMBER}`} className="flex items-center justify-center gap-2 w-full py-4 rounded-xl bg-red-600 text-white font-semibold text-base">
+      <a href={`tel:${EMERGENCY_NUMBER}`} className="flex items-center justify-center gap-2 w-full py-4 rounded-xl bg-[#dc2626] text-[#fff] font-semibold text-base">
         <Icon name="phone" size={20} /> Call emergency services ({EMERGENCY_NUMBER})
       </a>
 

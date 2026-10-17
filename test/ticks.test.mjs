@@ -14,13 +14,12 @@ const T0 = 1_700_000_000_000;
 const MIN = 60000;
 const PRICE = 100000; // $100,000 per BTC: 1 cent = 10 sats, $1 = 1,000 sats
 const metered = Tk.normalizeTerms({ mode: "metered", currency: "USD", base: 2, perMile: 1.1, perMinute: 0.25 });
-const flat = Tk.normalizeTerms({ mode: "flat", currency: "USD", base: 2, perMile: 1.1, perMinute: 0.25, flatSats: 10000, tripMiles: 5, tripMinutes: 15 });
 
 // ── Terms are checked ──
 assert.equal(Tk.normalizeTerms(null), null);
 assert.equal(Tk.normalizeTerms({ base: 1, perMile: 1 }), null, "a missing rate is junk");
 assert.equal(Tk.normalizeTerms({ base: -1, perMile: 1, perMinute: 1 }), null);
-assert.equal(Tk.normalizeTerms({ mode: "flat", base: 1, perMile: 1, perMinute: 1 }), null, "a flat ride needs a price");
+assert.equal(Tk.normalizeTerms({ mode: "flat", currency: "USD", base: 2, perMile: 1.1, perMinute: 0.25, flatSats: 10000 }).mode, "metered", "there are no flat prices any more: an old flat offer is read as the standard fare");
 assert.deepEqual(Tk.unitSats(metered, PRICE), { base: 2000, mile: 1100, minute: 250 });
 assert.equal(Tk.unitSats(metered, null), null, "no price: no guess");
 
@@ -67,28 +66,6 @@ assert.equal(Tk.settle(fin, { terms: metered, atMs: T0 + 4 * MIN, miles: 3, pric
 assert.equal(Tk.settle(led, { terms: metered, atMs: T0 + 4 * MIN, miles: 3, price: null }), null, "no price: the final tick waits");
 const right = Tk.settle(Tk.advanceLedger(Tk.newLedger(T0), { terms: metered, nowMs: T0, miles: 0, price: PRICE }), { terms: metered, atMs: T0 + 1000, miles: 0, price: PRICE });
 assert.equal(Tk.owedSats(right), 2000 + 4, "finishing right after the start owes the base and a few seconds");
-
-// ── A flat price: same ticks, scaled so the trip adds up to the price, never above it ──
-const per = Tk.unitSats(flat, null);
-// estimate = 2 + 1.1*5 + 0.25*15 = 11.25 -> shares of 10,000 sats
-assert.deepEqual(per, { base: 1777, mile: 977, minute: 222 });
-let fl = Tk.advanceLedger(Tk.newLedger(T0, "flat"), { terms: flat, nowMs: T0 + 15 * MIN, miles: 5, price: null });
-assert.ok(Tk.owedSats(fl) <= 10000, "never above the flat price");
-assert.ok(Tk.owedSats(fl) >= 9900, "a trip as long as priced pays about the whole price: " + Tk.owedSats(fl));
-const traffic = Tk.advanceLedger(Tk.newLedger(T0, "flat"), { terms: flat, nowMs: T0 + 90 * MIN, miles: 40, price: null });
-assert.equal(Tk.owedSats(traffic), 10000, "traffic and detours add nothing past the flat price");
-const early = Tk.settle(Tk.advanceLedger(Tk.newLedger(T0, "flat"), { terms: flat, nowMs: T0 + 3 * MIN, miles: 1, price: null }), { terms: flat, atMs: T0 + 3 * MIN + 30000, miles: 1.5, price: null });
-assert.equal(Tk.owedSats(early), 1777 + 3 * 222 + 977 + 600, "finished early: base + 3 minutes + 1 mile + half a mile and half a minute");
-const arrived = Tk.settle(Tk.advanceLedger(Tk.newLedger(T0, "flat"), { terms: flat, nowMs: T0 + 8 * MIN, miles: 4, price: null }), { terms: flat, atMs: T0 + 8 * MIN, miles: 4, price: null, atDestination: true });
-assert.equal(Tk.owedSats(arrived), 10000, "the driver finishing at the destination is owed the whole flat price");
-
-// ── An extra stop turns a flat ride into the driver's normal fare, counted from the start ──
-const conv = Tk.convertToMetered(traffic, { terms: flat, nowMs: T0 + 90 * MIN, miles: 40, price: PRICE });
-assert.equal(conv.mode, "metered");
-assert.equal(conv.units.filter((u) => u.kind === "minute").length, 90);
-assert.equal(Tk.owedSats(conv), 2000 + 90 * 250 + 40 * 1100, "base + minutes + miles from the initial start");
-assert.equal(Tk.dueSats(conv, 10000), Tk.owedSats(conv) - 10000, "what the rider already paid stays paid");
-assert.equal(Tk.convertToMetered(conv, { terms: flat, nowMs: T0, miles: 0, price: PRICE }), conv, "already metered: unchanged");
 
 // ── Miles at a time (charge up to the last signal) ──
 let sm = Tk.newLedger(T0);

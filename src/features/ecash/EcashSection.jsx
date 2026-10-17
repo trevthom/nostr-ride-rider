@@ -78,7 +78,7 @@ export default function EcashSection({ locked = false }) {
     try {
       const r = await ecash.cashOut(url, async (sats) => (await requestInvoice(user.lud16, sats, "NostrRide cash out")).pr);
       setMsg(`Sent ${moneyText(r.paidSats, btcPrice)} to ${user.lud16}. Mint fee: ${r.feeSats} sats.`);
-      pushNotice("Cash out sent to your Lightning address.");
+      pushNotice("Cash out sent.");
     } catch (e) {
       setMsg(e.message || "The cash out failed. Your ecash is still here.");
     }
@@ -121,11 +121,11 @@ export default function EcashSection({ locked = false }) {
   return (
     <section>
       <SectionLabel>Ecash wallet</SectionLabel>
-      <p className="text-sm text-neutral-500 mb-3">
-        {IS_DRIVER_APP
-          ? "Riders pay you in ecash while the ride runs: your base rate when it starts, then every mile and every minute. It is yours the moment it arrives."
-          : "You pay your driver in ecash while the ride runs: the base rate when it starts, then every mile and every minute. Add money here with Lightning before you ride."}
-      </p>
+      {!IS_DRIVER_APP && (
+        <p className="text-sm text-neutral-500 mb-3">
+          You pay your driver in ecash while the ride runs: the base rate when it starts, then every mile and every minute. Add money here with Lightning before you ride.
+        </p>
+      )}
       {!ecash && <p className="text-sm text-neutral-500" role="status">Loading your wallet…</p>}
       {ecash && (
         <>
@@ -146,7 +146,7 @@ export default function EcashSection({ locked = false }) {
             <div className="flex gap-2 mt-4">
               <Button size="md" onClick={() => setAdding(true)}><Icon name="zap" size={16} /> Add funds</Button>
             </div>
-            {IS_DRIVER_APP && total > 0 && !user.lud16 && <p className="text-xs text-amber-700 mt-2">Set a Lightning address to cash out.</p>}
+            {IS_DRIVER_APP && total > 0 && !user.lud16 && <p className="text-xs text-amber-700 mt-2">Set a cash out location (a Lightning address) in Account to cash out.</p>}
             {IS_DRIVER_APP && locked && <p className="text-xs text-neutral-500 mt-2">Cash out is paused while a ride is running.</p>}
           </div>
 

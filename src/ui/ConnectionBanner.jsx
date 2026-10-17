@@ -63,7 +63,7 @@ export default function ConnectionBanner() {
   else if (outbox > 0 && outboxAge >= OUTBOX_WARN_MS) text = `${outbox} update${outbox === 1 ? " is" : "s are"} waiting to send.`;
   if (!text) return null;
   return (
-    <div role="status" aria-live="polite" className="fixed top-0 inset-x-0 z-[10045] mx-auto max-w-md bg-amber-500 text-black text-[13px] font-semibold text-center px-3 py-1.5 pt-[max(0.375rem,env(safe-area-inset-top))]">
+    <div role="status" aria-live="polite" className="fixed top-0 inset-x-0 z-[10045] mx-auto max-w-md bg-amber-500 text-[#000] text-[13px] font-semibold text-center px-3 py-1.5 pt-[max(0.375rem,env(safe-area-inset-top))]">
       {text}
     </div>
   );

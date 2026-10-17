@@ -87,7 +87,7 @@ export function ConfirmDialog({ open, title, message, confirmLabel = "Confirm", 
   }, [open, onCancel]);
   if (!open) return null;
   return (
-    <div role="dialog" aria-modal="true" aria-label={title} className="fixed inset-0 z-[10000] flex items-center justify-center p-6 bg-black/50 nr-fade" onClick={onCancel}>
+    <div role="dialog" aria-modal="true" aria-label={title} className="fixed inset-0 z-[10000] flex items-center justify-center p-6 bg-[#000]/50 nr-fade" onClick={onCancel}>
       <div className="w-full max-w-sm rounded-2xl bg-white p-5" onClick={(e) => e.stopPropagation()}>
         <h2 className="text-lg font-bold mb-1">{title}</h2>
         {message && <p className="text-[15px] text-neutral-600 mb-5">{message}</p>}
@@ -110,7 +110,7 @@ export function Modal({ open, title, onClose, children }) {
   }, [open, onClose]);
   if (!open) return null;
   return (
-    <div role="dialog" aria-modal="true" aria-label={title} className="fixed inset-0 z-[10000] flex items-end justify-center bg-black/50 nr-fade" onClick={onClose}>
+    <div role="dialog" aria-modal="true" aria-label={title} className="fixed inset-0 z-[10000] flex items-end justify-center bg-[#000]/50 nr-fade" onClick={onClose}>
       <div className="w-full max-w-md bg-white rounded-t-3xl p-5 pb-[max(1.25rem,env(safe-area-inset-bottom))] max-h-[88vh] overflow-y-auto nr-slide-up" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center mb-3">
           <h2 className="text-xl font-bold">{title}</h2>

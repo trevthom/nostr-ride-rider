@@ -34,7 +34,8 @@ function newRide(name, mode, extra = {}) {
   const d = "ride-" + name;
   const trip = { pickup: { name: "P", lat: 38, lng: -84.5 }, dropoff: { name: "D", lat: 38.1, lng: -84.5 }, distanceMiles: 5, durationMin: 15 };
   const req = signAs(rider, K.RIDE_REQUEST, { ...trip, status: "requested", time: "ASAP" }, [["d", d]], T0 - 5 * MIN);
-  const offer = signAs(driver, K.RIDE_OFFER, { priceSats: mode === "flat" ? 8000 : 11250, mode, rates: { base: 2, perMile: 1.1, perMinute: 0.25, currency: "USD" }, mint: MINT, tripMiles: 5, tripMinutes: 15 }, [["e", req.id], ["p", rider.publicKey], ["d", "offer-" + req.id]], T0 - 4 * MIN);
+  const offer = signAs(driver, K.RIDE_OFFER, { priceSats: mode === "flat" ? 8000 : 11250, mode, // "flat": an old offer from before flat prices were removed
+    rates: { base: 2, perMile: 1.1, perMinute: 0.25, currency: "USD" }, mint: MINT, tripMiles: 5, tripMinutes: 15 }, [["e", req.id], ["p", rider.publicKey], ["d", "offer-" + req.id]], T0 - 4 * MIN);
   signAs(rider, K.RIDE_ACCEPT, { offerId: offer.id, requestId: req.id }, [["e", offer.id], ["e", req.id], ["p", driver.publicKey], ["d", "accept-" + req.id]], T0 - 3 * MIN);
   const live = signAs(rider, K.RIDE_REQUEST, { ...trip, status: "in_progress", driverPubkey: driver.publicKey }, [["d", d], ["p", driver.publicKey]], T0 - 2 * MIN);
   signAs(driver, K.RIDE_STAGE, { stage: "arrived", at: T0 - MIN }, [["e", live.id], ["p", rider.publicKey], ["d", "stage-" + d]], T0 - MIN);
@@ -143,19 +144,12 @@ assert.equal(settled.status, "paid", "the rider refilled the wallet and paid wha
 await redeemTicks({ request: ride4, user: driver, ecash: driverW, publish: publishAs(driver), mint: MINT });
 assert.ok(Rm.ledgerSummary(ride4, Rm.currentLedger(ride4, { terms: Tm.rideTerms(ride4), price: PRICE, nowMs: T0 + 32 * MIN, miles: 0.3 })).outstanding <= 2);
 
-// ── 8. A flat price never grows, and finishing at the destination pays the rest ──
+// ── 8. There are no flat prices: an old "flat" offer is paid like the standard fare, with no cap ──
 await topUp(riderW, net, 20000);
 const ride5 = newRide("e", "flat");
-await payDue(ctx(ride5, riderW, rider, T0 + 90 * MIN, 40));
-assert.equal(Pay.sentSats(ride5), 8000, "an hour and a half in traffic: still the flat price");
-signAs(driver, K.RIDE_FINISH, { requestId: ride5.id, reason: "destination", role: "driver", at: T0 + 90 * MIN, miles: 40, minutes: 90, atDestination: true }, [["e", ride5.id], ["p", rider.publicKey], ["d", "finish-" + ride5.id]], T0 + 90 * MIN);
-assert.equal((await payDue(ctx(ride5, riderW, rider, T0 + 91 * MIN, 40))).status, "ok", "already paid in full");
-const ride6 = newRide("f", "flat");
-await payDue(ctx(ride6, riderW, rider, T0 + 2 * MIN, 0.2));
-const early = Pay.sentSats(ride6);
-signAs(driver, K.RIDE_FINISH, { requestId: ride6.id, reason: "destination", role: "driver", at: T0 + 2 * MIN + 1000, miles: 0.2, minutes: 2, atDestination: true }, [["e", ride6.id], ["p", rider.publicKey], ["d", "finish-" + ride6.id]], T0 + 2 * MIN + 1000);
-await payDue(ctx(ride6, riderW, rider, T0 + 3 * MIN, 0.2));
-assert.equal(Pay.sentSats(ride6), 8000, "the driver finished at the destination: the whole flat price is owed (" + early + " before)");
+assert.equal(Tm.rideTerms(ride5).mode, "metered", "an old flat offer reads as the driver's standard fare");
+await payDue(ctx(ride5, riderW, rider, T0 + 20 * MIN, 6));
+assert.equal(Pay.sentSats(ride5), 2000 + 20 * 250 + 6 * 1100, "base + 20 minutes + 6 miles: it grows with time and distance");
 
 // ── 9. The driver waives part of the fare: the unpaid part is forgiven, the rest comes back as ecash ──
 const ride7 = newRide("g", "metered");

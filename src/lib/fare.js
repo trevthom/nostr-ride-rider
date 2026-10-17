@@ -8,14 +8,13 @@
 //  The numbers here are only ESTIMATES shown before the ride:
 //    • the suggested price for a trip comes from the drivers nearby (their MEDIAN; the
 //      app's own rates are the fallback);
-//    • the rider either accepts a driver's standard fare, or names a flat price (any
-//      amount, in their currency or in sats) that a driver can accept or counter
-//      (RIDE_OFFER `priceSats`). A flat price never grows with traffic or detours.
+//    • the rider picks a driver and pays that driver's standard fare, tick by tick (RIDE_OFFER
+//      `priceSats` is the driver's estimate).
 //  Sats are the source of truth. Pure functions, no network: the BTC prices are passed in
 //  (a price is "units of that currency per 1 BTC").
 // ════════════════════════════════════════════════════════════
 
-import { FARE_RATES, FALLBACK_BTC_USD, MIN_OFFER_USD, MAX_OFFER_FACTOR, RATE_LIMITS } from "../config/settings.js";
+import { FARE_RATES, FALLBACK_BTC_USD, RATE_LIMITS } from "../config/settings.js";
 import { CURRENCIES, DEFAULT_CURRENCY, isCurrency, satsFromFiat, fiatFromSats } from "./currency.js";
 
 const AVG_CITY_MPH = 24; // for time/ETA guesses when no routing result exists
@@ -100,26 +99,4 @@ export function satsFromUsd(usd, usdPrice) {
 }
 export function usdFromSats(sats, usdPrice) {
   return fiatFromSats(sats, usdPrice || FALLBACK_BTC_USD, DEFAULT_CURRENCY);
-}
-
-// The lowest and highest flat offer (in sats) for a trip whose suggested price is `suggestedSats`.
-// The lowest is MIN_OFFER_USD at the dollar price.
-export function offerLimitsSats(suggestedSats, usdPrice) {
-  const min = satsFromUsd(MIN_OFFER_USD, usdPrice);
-  return { min, max: Math.max(min, Math.round(suggestedSats * MAX_OFFER_FACTOR)) };
-}
-
-// How an offer compares with the suggested price: "low" | "fair" | "high".
-// "low" means more than 10% under it (drivers are likely to counter).
-export function offerLevel(offer, suggested) {
-  if (offer < suggested * 0.9) return "low";
-  if (offer > suggested * 1.1) return "high";
-  return "fair";
-}
-
-// How a driver's reply relates to the rider's offer:
-// "same" (accepted the price) | "counter" (asked for more) | "lower" (asked for less).
-export function replyKind(priceSats, offeredSats) {
-  if (!offeredSats || priceSats === offeredSats) return "same";
-  return priceSats > offeredSats ? "counter" : "lower";
 }

@@ -316,13 +316,12 @@ export default function OnTrip({ request, trip }) {
             ) : (
               <div>
                 <label className="block text-sm font-semibold mb-1" htmlFor="start-code">Start code</label>
-                <div className="flex gap-2">
-                  <input id="start-code" inputMode="numeric" autoComplete="off" maxLength={4} value={typed}
-                    onChange={(e) => { setTyped(e.target.value.replace(/\D/g, "")); setCodeMsg(""); }}
-                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); enterCode(); } }}
-                    placeholder="0000" className="w-32 bg-neutral-100 rounded-xl px-4 py-3 text-2xl text-center font-bold tracking-widest focus:outline-none focus:ring-2 focus:ring-black" />
-                  <Button size="md" onClick={enterCode} disabled={typed.length !== 4 || !gateState.open}>Confirm</Button>
-                </div>
+                {/* The field gets the whole row and the button sits below it: a button in the same row once squeezed the field to two digits on a phone. */}
+                <input id="start-code" inputMode="numeric" autoComplete="off" maxLength={4} value={typed}
+                  onChange={(e) => { setTyped(e.target.value.replace(/\D/g, "")); setCodeMsg(""); }}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); enterCode(); } }}
+                  placeholder="0000" className="block w-full min-w-0 bg-neutral-100 rounded-xl px-4 py-3 text-3xl text-center font-bold tracking-[0.4em] tabular-nums focus:outline-none focus:ring-2 focus:ring-black" />
+                <Button size="md" className="mt-2" onClick={enterCode} disabled={typed.length !== 4 || !gateState.open}>Confirm</Button>
                 {!gateState.open && <p className="text-xs text-amber-700 mt-1" role="alert">Too many tries. Wait {Math.ceil(gateState.waitMs / 1000)} s.</p>}
                 {codeMsg && gateState.open && <p className="text-xs text-red-600 mt-1" role="alert">{codeMsg}</p>}
               </div>
@@ -379,7 +378,7 @@ export default function OnTrip({ request, trip }) {
           {contentOffer && (
             <div className="text-right">
               <Money sats={contentOffer.priceSats} stacked className="font-bold" />
-              <p className="text-xs text-neutral-500">{money?.ledger?.mode === "metered" || contentOffer.mode !== "flat" ? "estimate" : "flat price"}</p>
+              <p className="text-xs text-neutral-500">estimate</p>
             </div>
           )}
         </div>

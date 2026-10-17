@@ -1,6 +1,6 @@
 // ════════════════════════════════════════════════════════════
 //  RECEIPT — Shown after a ride ends (either person finished it). The fare is what the ride
-//  earned (base + miles + minutes, or the flat price), mostly paid already tick by tick.
+//  earned (base + miles + minutes), mostly paid already tick by tick.
 //  If anything is still open (the wallet ran short), it is shown with "Add funds": the app pays the
 //  rest as soon as the wallet has the money, and it can be paid later from Activity.
 //  Then a quiet "Leave a tip" link (a tip is optional and can be

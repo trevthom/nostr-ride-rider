@@ -4,12 +4,9 @@
 //    idle    map + "Where to?" bar + recent places
 //    search  pickup / dropoff fields with live address results
 //    pin     the pickup OR the drop-off set by dragging the map under a pin (components/PinPicker; plan.pinField says which)
-//    quote   route on the map, the typical fares of the drivers nearby (each
-//            driver sets their own rates), a suggested price, and the choice of fare:
-//              Standard fare  every driver's own rates (base, per mile, per minute), paid tick by tick
-//              Flat price     the rider's own price (any amount, in local money or sats): a driver
-//                             accepts it or counters; traffic and detours never raise it
-//            Now/Later, notes → Request.
+//    quote   route on the map, the typical fares of the drivers nearby (each driver sets their own rates)
+//            and a suggested price. The fare is always each driver's own rates (base, per mile,
+//            per minute), paid tick by tick. Now/Later, notes → Request.
 //  Going back: the back arrow on the search page returns to where it was opened from (plan.from: the
 //  home screen, or the quote). The close button (X) on the search, pin and quote pages cancels the
 //  planning and returns to the home screen (resetPlan).
@@ -18,12 +15,11 @@
 import { useEffect, useRef, useState } from "react";
 import { useApp } from "../../state/AppContext.jsx";
 import { useRider } from "../state/RiderContext.jsx";
-import { median, normalizeRates, offerLevel, offerLimitsSats, quoteFare, typicalFare, typicalSats } from "../../lib/fare.js";
+import { median, normalizeRates, quoteFare, typicalFare, typicalSats } from "../../lib/fare.js";
 import { formatFiat } from "../../lib/currency.js";
 import { FARE_RATES } from "../../config/settings.js";
 import MapView from "../../ui/MapView.jsx";
 import Money, { moneyText } from "../../ui/Money.jsx";
-import AmountInput from "../../ui/AmountInput.jsx";
 import Icon from "../../ui/Icon.jsx";
 import Button from "../../ui/Button.jsx";
 import { MapPage, Sheet, FloatButton, StickyActions } from "../../ui/Layout.jsx";
@@ -123,7 +119,7 @@ function Idle() {
         </ul>
 
         <p className="text-sm text-neutral-500 mt-3 flex items-center gap-2" role="status">
-          <span className={`w-2 h-2 rounded-full ${drivers.length ? "bg-green-600" : "bg-neutral-300"}`} aria-hidden="true" />
+          <span className={`w-2 h-2 rounded-full ${drivers.length ? "bg-[#16a34a]" : "bg-neutral-300"}`} aria-hidden="true" />
           {gps !== "good"
             ? `${gpsMessage(gps, myPosition, geoError)} You can still search for a pickup or pin it on the map.`
             : drivers.length
@@ -164,26 +160,20 @@ function Quote() {
     : [];
   const appSats = quote ? typicalSats(null, trip.miles, trip.minutes, { USD: usdPrice }) ?? quote.sats : 0;
   const suggestedSats = quote ? Math.round(typicals.length ? median(typicals.map((t) => t.sats)) : appSats) : 0;
-  const flat = plan.fareMode === "flat";
-  // A flat price belongs to one route: a new pickup or dropoff starts from the suggestion again.
-  const limits = offerLimitsSats(suggestedSats, usdPrice);
-  const offerSats = quote ? (plan.offerKey === key ? plan.offerSats : suggestedSats) : 0; // null while the field is empty
-  const offerOk = Number.isFinite(offerSats) && offerSats >= limits.min && offerSats <= limits.max;
-  const level = quote && offerOk ? offerLevel(offerSats, suggestedSats) : "fair";
   const eta = nearestDriverEta(pickup);
   const timed = plan.when !== "ASAP";
   const localNow = (offsetMs = 0) =>
     new Date(Date.now() + offsetMs - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 
   const request = () => {
-    if (!quote || (flat && !offerOk)) return;
+    if (!quote) return;
     if (timed) {
       const t = Date.parse(plan.when);
       if (isNaN(t)) return setError("Pick a valid date and time.");
       if (t > Date.now() + 7 * 86400000) return setError("Scheduled rides can be at most 1 week ahead.");
       if (t < Date.now() - 60000) return setError("Pick a time in the future.");
     }
-    requestRide({ pickup, dropoff, when: plan.when, notes: plan.notes.trim(), miles: route.miles, minutes: route.minutes, fareMode: flat ? "flat" : "standard", fareSats: flat ? Math.round(offerSats) : suggestedSats, suggestedSats });
+    requestRide({ pickup, dropoff, when: plan.when, notes: plan.notes.trim(), miles: route.miles, minutes: route.minutes, fareSats: suggestedSats, suggestedSats });
   };
 
   const arrive = new Date(Date.now() + ((eta || 5) + (route?.minutes || 0)) * 60000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
@@ -246,18 +236,7 @@ function Quote() {
           </div>
         </div>
 
-        {/* The fare: each driver's standard fare, or the rider's flat price. */}
         {quote && (
-          <div className="mt-3 flex gap-2" role="group" aria-label="Fare">
-            {[["standard", "Standard fare"], ["flat", "Flat price"]].map(([id, label]) => (
-              <button key={id} type="button" aria-pressed={plan.fareMode === id} onClick={() => setPlan({ fareMode: id })}
-                className={`flex-1 py-2.5 rounded-full text-sm font-semibold ${plan.fareMode === id ? "bg-black text-white" : "bg-neutral-100 text-neutral-700"}`}>
-                {label}
-              </button>
-            ))}
-          </div>
-        )}
-        {quote && !flat && (
           <div className="mt-3 rounded-2xl bg-neutral-100 px-4 py-3">
             <p className="text-sm text-neutral-800">
               You pay the driver's own rates as you ride: a base rate when the ride starts, then every mile and every minute. About <span className="font-semibold">{moneyText(suggestedSats, btcPrice)}</span> for this trip. Traffic can make it cost more.
@@ -279,37 +258,6 @@ function Quote() {
                 {`App rates: ${formatFiat(FARE_RATES.base, "USD")} base + ${formatFiat(FARE_RATES.perMile, "USD")}/mi + ${formatFiat(FARE_RATES.perMinute, "USD")}/min.`}
               </p>
             )}
-          </div>
-        )}
-        {quote && flat && (
-          <div className="mt-3 rounded-2xl bg-neutral-100 px-4 pt-3 pb-3">
-            <p className="text-center text-xs font-semibold uppercase tracking-wider text-neutral-500 mb-2">Your flat price</p>
-            <AmountInput
-              sats={offerSats}
-              rate={btcPrice}
-              min={limits.min}
-              max={limits.max}
-              label="Your flat price"
-              onChange={(v) => setPlan({ offerSats: v, offerKey: key })}
-            />
-            {offerOk && (
-              <p className={`text-center text-sm mt-2 ${level === "low" ? "text-amber-700" : "text-neutral-700"}`} role="status">
-                {level === "low"
-                  ? "Below the suggested price. Drivers may counter with a higher price."
-                  : level === "high"
-                  ? "Above the suggested price. Drivers are likely to accept fast."
-                  : "Close to the suggested price. Drivers are likely to accept."}
-              </p>
-            )}
-            <p className="text-center text-xs text-neutral-500 mt-1">
-              Suggested {moneyText(suggestedSats, btcPrice)}: the {typicals.length ? "middle of what nearby drivers typically charge" : "app's rates"} for this trip.
-              {offerSats !== suggestedSats && (
-                <> <button type="button" onClick={() => setPlan({ offerSats: null, offerKey: null })} className="underline font-semibold">Use suggested</button></>
-              )}
-            </p>
-            <p className="text-center text-xs text-neutral-600 mt-2">
-              Once a driver accepts, the price does not change for traffic or detours. If you add a stop or change the destination during the ride, you pay the driver's normal fare instead, counted from the start.
-            </p>
           </div>
         )}
         {pickup.fromGps && gps !== "good" && (
@@ -374,13 +322,13 @@ function Quote() {
 
         {error && <p className="text-red-600 text-sm mt-2">{error}</p>}
         <StickyActions className="mt-4">
-          <Button onClick={request} disabled={!quote || (flat && !offerOk)}>
-            {!quote ? "Finding route…" : flat ? (offerOk ? <>Request ride · {moneyText(offerSats, btcPrice)} flat</> : "Enter your price") : <>Request ride · about {moneyText(suggestedSats, btcPrice)}</>}
+          <Button onClick={request} disabled={!quote}>
+            {!quote ? "Finding route…" : <>Request ride · about {moneyText(suggestedSats, btcPrice)}</>}
           </Button>
         </StickyActions>
         <Button variant="secondary" className="mt-2" onClick={resetPlan}>Cancel and go home</Button>
         <p className="text-neutral-500 text-xs text-center mt-2">
-          {flat ? "Drivers can accept your price or counter it. " : "Drivers who accept charge their own rates. "}You choose who to ride with, and drivers see only the approximate area until you do.
+          Drivers who accept charge their own rates. You choose who to ride with, and drivers see only the approximate area until you do.
         </p>
       </Sheet>
     </MapPage>

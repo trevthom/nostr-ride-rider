@@ -9,8 +9,8 @@ import { useState, useEffect } from "react";
 import { relay } from "../nostr/relay.js";
 
 const STATES = {
-  connected: { dot: "bg-green-600", label: "Connected" },
-  failed: { dot: "bg-red-600", label: "Can't connect" },
+  connected: { dot: "bg-[#16a34a]", label: "Connected" },
+  failed: { dot: "bg-[#dc2626]", label: "Can't connect" },
   connecting: { dot: "bg-neutral-300", label: "Connecting…" },
 };
 

@@ -14,7 +14,7 @@
 // ════════════════════════════════════════════════════════════
 
 import { getSetting, setSetting } from "../config/relays.js";
-import { advanceLedger, convertToMetered, milesAt, newLedger, owedSats, settle } from "./ticks.js";
+import { advanceLedger, milesAt, newLedger, owedSats, settle } from "./ticks.js";
 import { rideEnding, rideKey, rideTimes } from "./rides.js";
 import { forgivenSats, paidSats, sentSats, signalTimes } from "./payments.js";
 import { bothQuiet } from "./finish.js";
@@ -54,15 +54,14 @@ export function currentLedger(request, { terms, price, nowMs, miles, role }) {
   if (!startedAt || !terms) return null;
   const key = rideKey(request);
   const saved = loadLedger(key);
-  let led = saved && saved.startedAt === startedAt ? saved : newLedger(startedAt, terms.mode);
+  let led = saved && saved.startedAt === startedAt ? saved : newLedger(startedAt);
   const before = led;
-  if (led.mode === "flat" && terms.mode === "metered") led = convertToMetered(led, { terms, nowMs, miles, price });
   const end = rideEnding(request);
   if (end) {
     if (!led.final) {
       const atMs = Math.max(startedAt, end.fin?.at ?? end.at * 1000);
       const miles_ = end.fin?.miles ?? miles ?? 0;
-      led = settle(led, { terms, atMs, miles: miles_, price, atDestination: !!end.fin?.atDestination }) || led;
+      led = settle(led, { terms, atMs, miles: miles_, price }) || led;
     }
   } else {
     const cut = role ? silenceCutoff(request, role, nowMs) : null;

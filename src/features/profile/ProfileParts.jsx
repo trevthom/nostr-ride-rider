@@ -137,7 +137,7 @@ export function AccountHeader({ photoRequired = false }) {
         )}
       </div>
       {lightbox && (
-        <div className="fixed inset-0 flex items-center justify-center p-4 bg-black/90" style={{ zIndex: 10060 }} onClick={() => setLightbox(false)}>
+        <div className="fixed inset-0 flex items-center justify-center p-4 bg-[#000]/90" style={{ zIndex: 10060 }} onClick={() => setLightbox(false)}>
           <img src={user.picture} alt="Your photo" className="max-w-[92vw] max-h-[85vh] object-contain rounded-lg" />
         </div>
       )}

@@ -1,7 +1,7 @@
 // ════════════════════════════════════════════════════════════
 //  PROFILE — Whether a user has the info required to offer rides.
 //  Required to drive: a face photo, a vehicle photo, the license plate
-//  (state & number), the vehicle year/make/model and a Lightning address
+//  (state & number), the vehicle year/make/model and a cash out location (a Lightning address)
 //  (so riders can tip).
 //  Optional: gender (riders may prefer to see drivers of one gender first).
 //
@@ -24,11 +24,11 @@ export function driveGaps(user) {
   const plate = [["state", v.plateState], ["number", v.plateNumber]].filter(([, x]) => !x).map(([n]) => n);
   if (plate.length) gaps.push({ id: "plate", title: "License plate", missing: plate });
 
-  if (!user?.lud16) gaps.push({ id: "lightning", title: "Lightning address", missing: [] });
+  if (!user?.lud16) gaps.push({ id: "lightning", title: "Cash out location", missing: [] });
   return gaps;
 }
 
-// "Vehicle (year, model), Vehicle photo and Lightning address"
+// "Vehicle (year, model), Vehicle photo and Cash out location"
 export function gapsText(gaps) {
   const parts = gaps.map((g) => (g.missing.length ? `${g.title} (${g.missing.join(", ")})` : g.title));
   if (parts.length <= 1) return parts.join("");

@@ -49,7 +49,7 @@ export default function UserModal() {
       role="dialog"
       aria-modal="true"
       aria-label="User profile"
-      className="fixed inset-0 flex items-end sm:items-center justify-center bg-black/50 nr-fade"
+      className="fixed inset-0 flex items-end sm:items-center justify-center bg-[#000]/50 nr-fade"
       style={{ zIndex: 10040 }}
       onClick={closeProfile}
     >
@@ -102,7 +102,7 @@ export default function UserModal() {
       {/* Expanded photo view */}
       {zoom && (
         <div
-          className="fixed inset-0 flex items-center justify-center p-4 bg-black/90"
+          className="fixed inset-0 flex items-center justify-center p-4 bg-[#000]/90"
           style={{ zIndex: 10060 }}
           onClick={(e) => { e.stopPropagation(); setZoom(false); }}
         >

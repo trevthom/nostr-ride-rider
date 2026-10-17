@@ -8,16 +8,13 @@
 //
 //  When a change is accepted:
 //    • a "stop" is added before the destination; a "destination" replaces it;
-//    • a FLAT price becomes the driver's normal fare, counted from the START of
-//      the ride (not from the stop); the rider is told before asking and again
-//      when the driver accepts (lib/ticks.js convertToMetered);
-//    • a ride that was already on the driver's normal fare keeps being charged
-//      by time and distance at the driver's rates.
+//    • the ride keeps being charged by time and distance at the driver's rates, so
+//      the extra distance and time cost the rider the driver's normal fare.
 //
 //    stopChanges(request)              all asks with their answer: [{ id, mode, at, status, event, c }]
 //    stopTrip(request, user)           { stops, dropoff } after the accepted changes, as `user` may read them
 //    fullTrip(request, user)           { pickup, dropoff, stops } with those changes applied
-//    hasAcceptedStop(request)          true once any change was accepted (flat → normal fare)
+//    hasAcceptedStop(request)          true once any change was accepted
 //    nextStop(stops, dropoff, passed)  the place the driver is heading to now
 // ════════════════════════════════════════════════════════════
 
@@ -26,8 +23,6 @@ import { EVENT_KINDS } from "../nostr/eventKinds.js";
 import { rideDriver, rideKey, rideVersions } from "./rides.js";
 import { seal, unseal, exactTrip } from "./privacy.js";
 
-export const STOP_NOTE_FLAT =
-  "Adding a stop or changing the destination turns a flat price into the driver's normal fare (a base rate, plus each mile and each minute), counted from the start of the ride.";
 export const STOP_NOTE_METERED = "You keep paying the driver's normal fare for the extra distance and time.";
 
 const parse = (e) => { try { return JSON.parse(e.content); } catch { return null; } };

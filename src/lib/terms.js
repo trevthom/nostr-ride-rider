@@ -5,12 +5,11 @@
 //  agreed: editing the rates later, or sending a new offer, changes nothing
 //  for a ride that is already running.
 //
-//  An offer carries:  mode   "metered" (the driver's standard fare) or "flat" (the agreed price)
-//                     rates  { base, perMile, perMinute, currency }   (a copy, frozen)
-//                     priceSats  the flat price, or the driver's estimate for a metered ride
+//  An offer carries:  rates  { base, perMile, perMinute, currency }   (a copy, frozen)
+//                     priceSats  the driver's estimate for the ride
 //                     mint   the ecash mint the driver is paid at
-//                     tripMiles / tripMinutes   the trip the price was made for
-//  An accepted extra stop turns a flat ride into a metered one (lib/stops.js).
+//                     tripMiles / tripMinutes   the trip the estimate was made for
+//  (An older offer with mode "flat" is read as the driver's standard fare at its rates: there are no flat prices any more.)
 //
 //    agreedOffer(request)    the offer event the rider chose (null before)
 //    rideTerms(request)      normalized terms for lib/ticks.js (null before a driver is chosen)
@@ -23,7 +22,6 @@ import { rideDriver } from "./rides.js";
 import { acceptFor, offerFrom } from "./trips.js";
 import { normalizeTerms } from "./ticks.js";
 import { normalizeRates } from "./fare.js";
-import { hasAcceptedStop } from "./stops.js";
 import { isMintUrl } from "./mints.js";
 
 const parse = (e) => { try { return JSON.parse(e.content); } catch { return null; } };
@@ -41,20 +39,9 @@ export function rideTerms(request) {
   const offer = agreedOffer(request);
   const c = offer && parse(offer);
   if (!c) return null;
-  const rq = parse(request) || {};
   const rates = normalizeRates(c.rates);
   if (!rates) return null; // an old offer without rates: nothing to meter
-  const flat = c.mode === "flat";
-  const terms = normalizeTerms({
-    mode: flat ? "flat" : "metered",
-    currency: rates.currency,
-    base: rates.base, perMile: rates.perMile, perMinute: rates.perMinute,
-    flatSats: flat ? c.priceSats : undefined,
-    tripMiles: c.tripMiles ?? rq.distanceMiles ?? 0,
-    tripMinutes: c.tripMinutes ?? rq.durationMin ?? 0,
-  });
-  if (!terms) return null;
-  return terms.mode === "flat" && hasAcceptedStop(request) ? { ...terms, mode: "metered" } : terms;
+  return normalizeTerms({ currency: rates.currency, base: rates.base, perMile: rates.perMile, perMinute: rates.perMinute });
 }
 
 export function rideMint(request) {

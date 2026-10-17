@@ -3,6 +3,38 @@
    which each entry page imports BEFORE this file. This file holds only our own styles: the
    font, page basics, and a few small animations. */
 
+/* ── Colors ── Light is the default. `.dark` on <html> (set by lib/appearance.js, and before the first paint by
+   public/theme-init.js) swaps them. The channels are "r g b" so Tailwind can add its opacity (see tailwind.config.js).
+   "black" and "white" trade places in the dark look; keep a color fixed with a value such as text-[#fff]. */
+:root {
+  --c-white: 255 255 255; --c-black: 0 0 0;
+  --c-neutral-50: 250 250 250; --c-neutral-100: 245 245 245; --c-neutral-200: 229 229 229; --c-neutral-300: 212 212 212;
+  --c-neutral-400: 163 163 163; --c-neutral-500: 115 115 115; --c-neutral-600: 82 82 82; --c-neutral-700: 64 64 64;
+  --c-neutral-800: 38 38 38; --c-neutral-900: 23 23 23;
+  --c-red-50: 254 242 242; --c-red-100: 254 226 226; --c-red-600: 220 38 38; --c-red-700: 185 28 28;
+  --c-amber-50: 255 251 235; --c-amber-700: 180 83 9; --c-amber-800: 146 64 14; --c-amber-900: 120 53 15;
+  --c-green-50: 240 253 244; --c-green-200: 187 247 208; --c-green-700: 21 128 61;
+  --c-blue-600: 37 99 235;
+  --page: 243 243 243; --map-bg: 235 235 235; --go-text: 5 148 79; --go-deep: 5 104 58; --go-soft: 230 244 236;
+  color-scheme: light;
+}
+.dark {
+  --c-white: 23 23 23; --c-black: 245 245 245;
+  --c-neutral-50: 28 28 28; --c-neutral-100: 38 38 38; --c-neutral-200: 51 51 51; --c-neutral-300: 69 69 69;
+  --c-neutral-400: 138 138 138; --c-neutral-500: 163 163 163; --c-neutral-600: 184 184 184; --c-neutral-700: 208 208 208;
+  --c-neutral-800: 229 229 229; --c-neutral-900: 240 240 240;
+  --c-red-50: 58 22 25; --c-red-100: 74 28 32; --c-red-600: 248 113 113; --c-red-700: 252 165 165;
+  --c-amber-50: 52 40 12; --c-amber-700: 252 211 77; --c-amber-800: 253 224 130; --c-amber-900: 254 240 180;
+  --c-green-50: 16 41 27; --c-green-200: 31 94 59; --c-green-700: 74 222 128;
+  --c-blue-600: 96 165 250;
+  --page: 10 10 10; --map-bg: 26 26 26; --go-text: 52 199 123; --go-deep: 74 222 128; --go-soft: 16 41 27;
+  color-scheme: dark;
+}
+/* The green used as text and as a soft badge background is written as a fixed value in many places; it follows the look here. */
+.text-\[\#05944f\] { color: rgb(var(--go-text)); }
+.text-\[\#05683a\] { color: rgb(var(--go-deep)); }
+.bg-\[\#e6f4ec\] { background-color: rgb(var(--go-soft)); }
+
 *, *::before, *::after {
   font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
   -webkit-tap-highlight-color: transparent;
@@ -29,8 +61,8 @@ html { -webkit-text-size-adjust: 100%; text-size-adjust: 100%; }
 
 body {
   margin: 0;
-  background: #f3f3f3;
-  color: #000;
+  background: rgb(var(--page));
+  color: rgb(var(--c-black));
   overscroll-behavior: none;
 }
 
@@ -42,7 +74,11 @@ button:disabled { cursor: not-allowed; }
 
 /* The map: neutral background while tiles load, and no Leaflet chrome that
    fights the app's own controls. */
-.leaflet-container { background: #ebebeb; font-family: inherit; }
+.leaflet-container { background: rgb(var(--map-bg)); font-family: inherit; }
+/* Dark look: the map tiles are turned dark (the pins, route and price tags sit above the tile layer and keep their colors). */
+.dark .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.88); }
+.dark .leaflet-control-attribution { background: rgba(23, 23, 23, 0.8) !important; color: #a3a3a3; }
+.dark .leaflet-control-attribution a { color: #d0d0d0; }
 .leaflet-control-attribution { font-size: 9px !important; opacity: 0.8; margin-bottom: 0 !important; }
 /* The credit line stays visible above the bottom sheet (MapPage sets --nr-sheet to the sheet's height). */
 .leaflet-bottom.leaflet-right { bottom: var(--nr-sheet, 0px); }
@@ -65,12 +101,12 @@ button:disabled { cursor: not-allowed; }
 
 /* Indeterminate progress bar ("Finding your driver"). */
 @keyframes nr-indeterminate { 0% { left: -40%; } 100% { left: 100%; } }
-.nr-bar { position: relative; height: 3px; background: #e5e5e5; overflow: hidden; border-radius: 2px; }
-.nr-bar::after { content: ""; position: absolute; top: 0; bottom: 0; width: 40%; background: #000; animation: nr-indeterminate 1.3s ease-in-out infinite; }
+.nr-bar { position: relative; height: 3px; background: rgb(var(--c-neutral-200)); overflow: hidden; border-radius: 2px; }
+.nr-bar::after { content: ""; position: absolute; top: 0; bottom: 0; width: 40%; background: rgb(var(--c-black)); animation: nr-indeterminate 1.3s ease-in-out infinite; }
 
 /* Radar ring around the pickup while searching. */
 @keyframes nr-ring { 0% { transform: scale(0.4); opacity: 0.7; } 100% { transform: scale(2.4); opacity: 0; } }
-.nr-ring { position: absolute; inset: 0; border-radius: 9999px; background: rgba(0,0,0,0.18); animation: nr-ring 2s ease-out infinite; }
+.nr-ring { position: absolute; inset: 0; border-radius: 9999px; background: rgb(var(--c-black) / 0.18); animation: nr-ring 2s ease-out infinite; }
 
 @media (prefers-reduced-motion: reduce) {
   .nr-slide-up, .nr-fade, .nr-ring, .animate-pulse { animation: none; }

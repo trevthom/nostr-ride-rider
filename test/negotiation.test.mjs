@@ -20,13 +20,11 @@ const pub = (kind, content, tags, who) => {
 const now = () => Math.floor(Date.now() / 1000);
 const rider = generateKeypair(), d1 = generateKeypair(), d2 = generateKeypair(), d3 = generateKeypair();
 
-// ── Offers: any amount, in sats, with limits ──
+// ── Prices in sats and dollars ──
 assert.equal(F.satsFromUsd(6.37, 100000), 6370, "$6.37 at $100k/BTC is exactly 6,370 sats");
 assert.equal(F.usdFromSats(6370, 100000), 6.37, "and shows back as $6.37");
 assert.equal(F.usdFromSats(F.satsFromUsd(12.34, 83000), 83000), 12.34, "round trip at another price");
 assert.equal(F.satsFromUsd(5, 0), F.satsFromUsd(5, 100000), "no live price -> the fallback price");
-assert.deepEqual(F.offerLimitsSats(10000, 100000), { min: 3000, max: 30000 }, "$3 .. 3x the suggestion");
-assert.deepEqual(F.offerLimitsSats(100, 100000), { min: 3000, max: 3000 }, "a tiny trip still has a valid range");
 
 // ── Each driver's own rates ──
 assert.deepEqual(F.normalizeRates({ base: 2.5, perMile: 1.25, perMinute: 0.3 }), { base: 2.5, perMile: 1.25, perMinute: 0.3, currency: "USD" });
@@ -52,15 +50,9 @@ assert.equal(F.median([2, 4, 6, 10]), 5);
 assert.equal(F.median([]), null);
 assert.equal(F.median([NaN, 4]), 4);
 
-assert.equal(F.offerLevel(8, 10), "low");
-assert.equal(F.offerLevel(10, 10), "fair");
-assert.equal(F.offerLevel(12, 10), "high");
-assert.equal(F.replyKind(8000, 8000), "same");
-assert.equal(F.replyKind(9000, 8000), "counter");
-assert.equal(F.replyKind(7000, 8000), "lower");
-assert.equal(F.replyKind(7000, undefined), "same", "old requests without an offer");
+assert.equal(F.offerLimitsSats, undefined, "the rider's own price (and the counter-offer) is gone");
 
-// ── A counter-offer is an ordinary offer at a higher price ──
+// ── Several drivers offer to take the same ride ──
 const req = pub(K.RIDE_REQUEST, { pickup: { name: "P", lat: 1, lng: 1 }, dropoff: { name: "D", lat: 2, lng: 2 }, status: "requested", time: "ASAP", fareSats: 8000, suggestedSats: 10000 }, [["d", "ride-n1"]], rider);
 const offer = (who, priceSats, eta, gender) =>
   pub(K.RIDE_OFFER, { priceSats, etaMinutes: eta, gender }, [["e", req.id], ["p", rider.publicKey], ["d", "offer-" + req.id]], who);
@@ -91,10 +83,6 @@ pub(K.METADATA, { name: "D3", gender: "female" }, [], d3);
 assert.equal(T.offerGender(o3), "female", "profile fallback");
 pub(K.METADATA, { name: "D1", gender: "<script>" }, [], d1);
 assert.equal(getProfile(d1.publicKey).gender, "", "junk gender ignored");
-
-// ── A raised offer is a new version of the same request; earlier offers stay valid ──
-const raised = pub(K.RIDE_REQUEST, { ...JSON.parse(req.content), fareSats: 9500 }, [["d", "ride-n1"]], rider);
-assert.equal(T.offersForRide(raised).length, 3, "offers made at the old price still count");
 
 // ── What a driver still has to finish ──
 const none = Prof.driveGaps({});

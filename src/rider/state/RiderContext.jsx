@@ -8,7 +8,7 @@
 //    • the CURRENT ride, derived from signed events (so a reload or
 //      another device shows the same screen) and the receipt to show
 //      after a trip
-//    • actions: requestRide, raiseOffer, proposePickup, confirmDriver, declineOffer, finishRide
+//    • actions: requestRide, proposePickup, confirmDriver, declineOffer, finishRide
 //    • the ride's MONEY: while a ride runs (and after it ended, until it is paid) the rider's app pays
 //      the driver in ecash ticks (features/payments/rideTicks.js) and reports `money` to the screens
 //  Banners: offers arriving, driver arrived, trip done, driver finished the ride, waived fares.
@@ -26,7 +26,7 @@ import { haversineDistance } from "../../lib/geo.js";
 import { pickupEta } from "../../lib/fare.js";
 import { publicPlace, seal, exactTrip } from "../../lib/privacy.js";
 import { PICKUP_CHANGE_NOTE } from "../../lib/pickup.js";
-import { stopRequestEvent, STOP_NOTE_FLAT } from "../../lib/stops.js";
+import { stopRequestEvent } from "../../lib/stops.js";
 import { activeRideFor, isOpenRide, upcomingRidesFor } from "../../lib/trips.js";
 import { rideDriver, rideEnding, rideKey, rideStatus, rideVersions, rideTimes, rideExpiryMs, isRideExpired } from "../../lib/rides.js";
 import { hideList } from "../../lib/blocks.js";
@@ -43,7 +43,7 @@ const RiderContext = createContext(null);
 export const useRider = () => useContext(RiderContext);
 
 const HOUR = 3600000;
-const EMPTY_PLAN = { step: "idle", from: "idle", pinField: "pickup", pickup: null, dropoff: null, when: "ASAP", notes: "", fareMode: "standard", offerSats: null, offerKey: null };
+const EMPTY_PLAN = { step: "idle", from: "idle", pinField: "pickup", pickup: null, dropoff: null, when: "ASAP", notes: "" };
 const parse = (e) => { try { return JSON.parse(e.content); } catch { return null; } };
 
 export function RiderProvider({ children }) {
@@ -224,7 +224,7 @@ export function RiderProvider({ children }) {
   // Publish a ride request. Only an approximate area is public; the exact
   // trip is sealed to the rider (and to the driver after they are chosen).
   const requestRide = useCallback(
-    ({ pickup, dropoff, when, notes, miles, minutes, fareSats, suggestedSats, fareMode = "standard" }) => {
+    ({ pickup, dropoff, when, notes, miles, minutes, fareSats, suggestedSats }) => {
       publish(
         EVENT_KINDS.RIDE_REQUEST,
         {
@@ -234,9 +234,9 @@ export function RiderProvider({ children }) {
           notes,
           status: "requested",
           hide: hideList(me, blocked), // drivers I blocked never see this request (lib/blocks.js)
-          fareMode: fareMode === "flat" ? "flat" : "standard", // "standard": each driver's own rates · "flat": the rider's price
-          fareSats, // flat: the rider's offer (drivers accept or counter) · standard: the estimate
-          suggestedSats, // what the app suggested (so a driver can see how far off the offer is)
+          fareMode: "standard", // every driver's own rates (older apps also knew a "flat" price; it is gone)
+          fareSats, // only an estimate: the fare is each driver's rates, paid tick by tick
+          suggestedSats, // what the app suggested
           distanceMiles: Math.round(miles * 10) / 10,
           durationMin: minutes,
           sealed: seal(user.sk, me, { pickup, dropoff }),
@@ -252,18 +252,6 @@ export function RiderProvider({ children }) {
       }
     },
     [publish, refreshData, resetPlan, user.sk, me, pushNotice, setView, blocked]
-  );
-
-  // Change the offer on a request no driver has been chosen for. The request is
-  // published again (same d-tag) with the new price; offers already made stay valid.
-  const raiseOffer = useCallback(
-    (request, fareSats) => {
-      const latest = rideVersions(request)[0] || request;
-      if (rideStatus(latest) !== "requested") return;
-      publish(EVENT_KINDS.RIDE_REQUEST, { ...parse(latest), fareSats }, latest.tags);
-      refreshData();
-    },
-    [publish, refreshData]
   );
 
   // Keep a signed record of a payment (the proof is sealed to the driver, so only
@@ -350,7 +338,7 @@ export function RiderProvider({ children }) {
   );
 
   // Ask the driver to add a stop or change the destination during the ride. The place is sealed to the driver
-  // and to the rider; it only counts when the driver accepts. A flat price then becomes the driver's normal fare.
+  // and to the rider; it only counts when the driver accepts.
   const proposeStop = useCallback(
     (request, { mode, place }) => {
       const latest = rideVersions(request)[0] || request;
@@ -359,7 +347,7 @@ export function RiderProvider({ children }) {
       const ev = stopRequestEvent(latest, user, driver, { mode, place });
       publish(ev.kind, ev.content, ev.tags);
       refreshData();
-      pushNotice(rideTerms(latest)?.mode === "flat" ? `Sent to your driver. ${STOP_NOTE_FLAT}` : "Sent to your driver, who can accept it or finish the ride.");
+      pushNotice("Sent to your driver, who can accept it or finish the ride.");
       return true;
     },
     [publish, refreshData, user, pushNotice]
@@ -472,7 +460,7 @@ export function RiderProvider({ children }) {
     share, startShare, stopShare, shareUpdate, shareUrl,
     activeRide, focused: !!focused, focusRide: (r) => setFocusId(r ? r.id : null), upcoming, receipt, dismissReceipt,
     genderPref, setGenderPref,
-    requestRide, raiseOffer, proposePickup, confirmDriver, recordPayment, confirmRide, proposeStop, finishRide, declineOffer, recentPlaces,
+    requestRide, proposePickup, confirmDriver, recordPayment, confirmRide, proposeStop, finishRide, declineOffer, recentPlaces,
     money, payNow, reportMiles, payTerms, payMint, screenMayDim,
     nearestDriverEta: (to) => {
       if (!to || !drivers.length) return null;

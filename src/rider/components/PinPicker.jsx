@@ -73,7 +73,7 @@ export default function PinPicker({ field = "pickup", start, me, onConfirm, onBa
       <div className="absolute left-1/2 top-1/2 z-[500] pointer-events-none" style={{ transform: "translate(-50%, -100%)" }} aria-hidden="true">
         <Icon name="pin" size={44} strokeWidth={2} fill="#ffffff" className="text-black" />
       </div>
-      <span className="absolute left-1/2 top-1/2 z-[500] w-2 h-2 -ml-1 -mt-1 rounded-full bg-black/50 pointer-events-none" aria-hidden="true" />
+      <span className="absolute left-1/2 top-1/2 z-[500] w-2 h-2 -ml-1 -mt-1 rounded-full bg-[#000]/50 pointer-events-none" aria-hidden="true" />
 
       <div className="absolute top-0 inset-x-0 z-[500] px-4 pt-[max(1rem,env(safe-area-inset-top))] pointer-events-none">
         <div className="flex items-center gap-3 [&>*]:pointer-events-auto">

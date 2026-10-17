@@ -25,6 +25,7 @@ import Icon from "../../ui/Icon.jsx";
 import RelayEditor from "../../ui/RelayEditor.jsx";
 import ConnectionBanner from "../../ui/ConnectionBanner.jsx";
 import { Field, inputCls } from "../../ui/Parts.jsx";
+import PasswordField from "../../ui/PasswordField.jsx";
 import { UnlockView, BackupStep } from "./AuthSteps.jsx";
 
 const DEFAULT_NAME = IS_DRIVER_APP ? "Anonymous Driver" : "Anonymous Rider";
@@ -148,13 +149,13 @@ export default function AuthScreen({ onLogin }) {
     <div className="nr-frame overflow-y-auto bg-white mx-auto max-w-md sm:border-x sm:border-neutral-200">
       <ConnectionBanner />
       {/* Brand header */}
-      <div className="bg-black text-white px-6 pt-[max(3rem,env(safe-area-inset-top))] pb-10">
+      <div className="bg-[#000] text-[#fff] px-6 pt-[max(3rem,env(safe-area-inset-top))] pb-10">
         <div className="w-12 h-12 rounded-xl bg-white text-black flex items-center justify-center mb-6">
           <Icon name="zap" size={26} fill="currentColor" strokeWidth={1.5} />
         </div>
         <h1 className="text-[32px] leading-9 font-bold tracking-tight">{APP_NAME}</h1>
         <p className="text-xl font-semibold mt-3">{COPY.tagline}</p>
-        <p className="text-white/70 text-[15px] mt-1">{COPY.sub}</p>
+        <p className="text-[#fff]/70 text-[15px] mt-1">{COPY.sub}</p>
       </div>
 
       <div className="px-6 py-6">
@@ -203,15 +204,13 @@ export default function AuthScreen({ onLogin }) {
                 Remember me on this device
               </label>
               {remember && (
-                <input
-                  type="password"
+                <PasswordField
                   value={password}
                   onChange={(e) => { setPassword(e.target.value); setError(""); }}
                   onKeyDown={onEnter}
                   placeholder={`Password to unlock (${MIN_PASSWORD}+ characters)`}
                   autoComplete="new-password"
                   aria-label="Password"
-                  className={inputCls}
                 />
               )}
             </div>

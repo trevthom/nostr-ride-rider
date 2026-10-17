@@ -14,7 +14,7 @@
 
 const VARIANTS = {
   primary: "bg-black text-white active:bg-neutral-700",
-  go: "bg-[#05944f] text-white active:bg-[#047a41]",
+  go: "bg-[#05944f] text-[#fff] active:bg-[#047a41]",
   secondary: "bg-neutral-100 text-black active:bg-neutral-200",
   outline: "bg-white text-black border border-neutral-300 active:bg-neutral-100",
   danger: "bg-red-50 text-red-600 active:bg-red-100",

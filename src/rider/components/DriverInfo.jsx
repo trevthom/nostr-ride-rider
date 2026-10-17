@@ -35,7 +35,7 @@ export function useDriverInfo(pubkey) {
 export function Plate({ plate }) {
   if (!plate?.plateNumber) return null;
   return (
-    <span className="inline-flex items-center gap-1.5 border-2 border-neutral-800 rounded-md px-2 py-0.5 bg-white font-mono text-sm font-bold tracking-wider">
+    <span className="inline-flex items-center gap-1.5 border-2 border-[#262626] rounded-md px-2 py-0.5 bg-[#fff] text-[#000] font-mono text-sm font-bold tracking-wider">
       <span className="text-[10px] text-neutral-500">{plate.plateState}</span>
       {plate.plateNumber}
     </span>

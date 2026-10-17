@@ -12,6 +12,7 @@ import WalletSection from "../../features/profile/WalletSection.jsx";
 import VouchesSection from "../../features/profile/VouchesSection.jsx";
 import EcashSection from "../../features/ecash/EcashSection.jsx";
 import CurrencySection from "../../features/profile/CurrencySection.jsx";
+import AppearanceSection from "../../features/profile/AppearanceSection.jsx";
 import SafetySection from "../components/SafetySection.jsx";
 import KeysSection from "../../features/profile/KeysSection.jsx";
 import Fold from "../../ui/Fold.jsx";
@@ -26,6 +27,7 @@ export default function AccountScreen() {
         <AccountHeader />
         <RecoveryNotice />
         <div>
+          <Fold id="appearance" title="Appearance"><AppearanceSection /></Fold>
           <Fold id="currency" title="Currency"><CurrencySection /></Fold>
           <Fold id="ecash" title="Ecash wallet"><EcashSection locked={!!activeRide} /></Fold>
           <RecoveryFold />

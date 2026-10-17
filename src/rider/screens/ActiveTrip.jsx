@@ -1,9 +1,8 @@
 // ════════════════════════════════════════════════════════════
 //  ACTIVE TRIP (before pickup) — What the rider sees after requesting:
-//    Searching     "Finding your driver…" while no one has replied; with a flat
-//                  price the rider can raise it
-//    ChooseDriver  drivers who accepted (their standard fare, or the flat price)
-//                  or countered it (preferred gender first if the rider asked, then fastest)
+//    Searching     "Finding your driver…" while no one has replied
+//    ChooseDriver  drivers who accepted, each with their own rates (preferred gender first if
+//                  the rider asked, then fastest)
 //    ConfirmDriver the chosen driver's terms and the rider's ecash balance. There is no deposit:
 //                  the rider pays tick by tick once the ride starts.
 //  Once a driver is confirmed the ride is in_progress → OnTrip.jsx.
@@ -17,13 +16,11 @@ import { getProfile } from "../../nostr/profiles.js";
 import { rideStatus } from "../../lib/rides.js";
 import { exactTrip } from "../../lib/privacy.js";
 import { offersForRide, offerGender, rankOffers } from "../../lib/trips.js";
-import { offerLimitsSats, replyKind } from "../../lib/fare.js";
 import { normalizeTerms, unitSats } from "../../lib/ticks.js";
 import Icon from "../../ui/Icon.jsx";
 import { isMintUrl } from "../../lib/mints.js";
 import MapView from "../../ui/MapView.jsx";
 import Money, { moneyText } from "../../ui/Money.jsx";
-import AmountInput from "../../ui/AmountInput.jsx";
 import Button from "../../ui/Button.jsx";
 import { MapPage, Sheet, FloatButton, StickyActions } from "../../ui/Layout.jsx";
 import { ConfirmDialog } from "../../ui/Parts.jsx";
@@ -105,19 +102,10 @@ function TripLines({ trip }) {
 }
 
 function Searching({ request, trip, onCancel, top }) {
-  const { drivers, raiseOffer } = useRider();
+  const { drivers } = useRider();
   // The request is "stuck" only while it is STILL waiting in the outbox after several tries (never a one-time failure that a retry fixed).
   const stuck = useOutboxAge(request.id) >= STUCK_MS;
-  const { btcPrice } = useApp();
   const content = parse(request) || {};
-  const [editing, setEditing] = useState(false);
-  const { usdPrice } = useApp();
-  const flat = content.fareMode === "flat";
-  const offerNow = content.fareSats > 0 ? content.fareSats : 0;
-  const suggestedNow = content.suggestedSats > 0 ? content.suggestedSats : offerNow;
-  const limits = offerLimitsSats(suggestedNow, usdPrice);
-  const [draft, setDraft] = useState(offerNow); // null while the field is empty
-  const draftOk = Number.isFinite(draft) && draft >= limits.min && draft <= limits.max && draft !== offerNow;
   const [now, setNow] = useState(Date.now());
   useEffect(() => { const id = setInterval(() => setNow(Date.now()), 5000); return () => clearInterval(id); }, []);
   const waited = Math.max(0, Math.floor((now - request.created_at * 1000) / 1000));
@@ -147,30 +135,11 @@ function Searching({ request, trip, onCancel, top }) {
           <TripLines trip={trip} />
           {content.fareSats > 0 && (
             <div className="flex items-center justify-between mt-3 text-[15px]">
-              <span className="text-neutral-600">{flat ? "Your flat price" : "Standard fare, about"}</span>
+              <span className="text-neutral-600">Standard fare, about</span>
               <Money sats={content.fareSats} className="font-bold" />
             </div>
           )}
         </div>
-        {flat && content.fareSats > 0 && !scheduled && (
-          editing ? (
-            <div className="mt-3 rounded-2xl bg-neutral-100 px-4 py-3">
-              <AmountInput sats={draft} rate={btcPrice} min={limits.min} max={limits.max} onChange={setDraft} label="New price" />
-              <div className="flex gap-2 mt-3">
-                <Button variant="outline" size="md" onClick={() => { setEditing(false); setDraft(offerNow); }}>Keep {moneyText(offerNow, btcPrice)}</Button>
-                <Button size="md" disabled={!draftOk} onClick={() => { raiseOffer(request, Math.round(draft)); setEditing(false); }}>
-                  Update price
-                </Button>
-              </div>
-            </div>
-          ) : (
-            waited > 30 && (
-              <button type="button" onClick={() => { setDraft(Math.min(limits.max, Math.round(offerNow * 1.15))); setEditing(true); }} className="mt-3 text-sm font-semibold underline">
-                No replies yet? Change your price
-              </button>
-            )
-          )
-        )}
         <Button variant="secondary" className="mt-4" onClick={onCancel}>Close request</Button>
       </Sheet>
     </MapPage>
@@ -179,9 +148,6 @@ function Searching({ request, trip, onCancel, top }) {
 
 function ChooseDriver({ request, trip, offers, onPick, onDecline, onCancel, top }) {
   const { drivers, genderPref } = useRider();
-  const { btcPrice } = useApp();
-  const content = parse(request) || {};
-  const flat = content.fareMode === "flat";
   const etas = offers.map((o) => parse(o).etaMinutes || 0);
   const prices = offers.map((o) => parse(o).priceSats);
   const fastest = offers.length > 1 ? Math.min(...etas) : null;
@@ -191,16 +157,12 @@ function ChooseDriver({ request, trip, offers, onPick, onDecline, onCancel, top 
       <Sheet label="Choose your driver">
         <h2 className="text-2xl font-bold">{offers.length === 1 ? "A driver can take you" : `${offers.length} drivers can take you`}</h2>
         <p className="text-neutral-600 text-[15px] mt-0.5 mb-2">
-          {flat
-            ? <>Your flat price: <span className="font-semibold">{moneyText(content.fareSats, btcPrice)}</span>. Some drivers may ask for more. </>
-            : <>You pay each driver's own rates as you ride. </>}
-          Pick one to continue, or tap "No thanks" to turn a driver down: your request stays open for other drivers. Nothing is paid until the ride starts.
+          You pay each driver's own rates as you ride. Pick one to continue, or tap "No thanks" to turn a driver down: your request stays open for other drivers. Nothing is paid until the ride starts.
         </p>
         <GenderPref className="mb-2" />
         <ul className="divide-y divide-neutral-100">
           {offers.map((o, i) => {
             const c = parse(o);
-            const kind = flat ? replyKind(c.priceSats, content.fareSats) : "same";
             const preferred = !!genderPref && offerGender(o) === genderPref;
             return (
               <li key={o.id} className="py-3">
@@ -214,19 +176,10 @@ function ChooseDriver({ request, trip, offers, onPick, onDecline, onCancel, top 
                       {preferred && <span className="ml-1.5 text-[11px] bg-neutral-100 text-neutral-700 rounded-full px-2 py-0.5 align-middle">Your preference</span>}
                     </p>
                     <p className="text-sm">
-                      {!(c.mode === "flat") && <span className="text-neutral-500 text-xs mr-1">about</span>}
+                      <span className="text-neutral-500 text-xs mr-1">about</span>
                       <Money sats={c.priceSats} className="font-semibold" />
                     </p>
                     <FareTerms offer={c} className="mt-0.5" />
-                    {flat && (
-                      <p className={`text-xs mt-0.5 ${kind === "counter" ? "text-amber-700" : "text-[#05683a]"}`}>
-                        {kind === "counter"
-                          ? `Counter-offer: ${moneyText(c.priceSats - content.fareSats, btcPrice)} more than your price`
-                          : kind === "lower"
-                          ? "Lower than your price"
-                          : "Accepts your price"}
-                      </p>
-                    )}
                   </div>
                   <Button size="sm" variant="secondary" full={false} onClick={() => onDecline(o)} aria-label="Turn down this driver">No thanks</Button>
                   <Button size="sm" full={false} onClick={() => onPick(o)}>Choose</Button>
@@ -241,13 +194,14 @@ function ChooseDriver({ request, trip, offers, onPick, onDecline, onCancel, top 
   );
 }
 
-// What the rider needs in the ecash wallet before the ride can start: the base rate, two minutes and a mile, so the
-// first payments are never late. (The whole ride is not locked away: it is paid as it is used.)
-function startFunds(c, btcPrice) {
+// What the rider needs in the ecash wallet before the ride can start: the base rate, two minutes and a mile (a small
+// cushion, so the first payments are never late). The whole ride is not locked away: it is paid as it is used.
+// Returns the parts too, so the confirm screen can show the sum.
+function startParts(c, price) {
   const rates = offerRates(c);
-  const terms = rates && normalizeTerms({ mode: c.mode === "flat" ? "flat" : "metered", currency: rates.currency, base: rates.base, perMile: rates.perMile, perMinute: rates.perMinute, flatSats: c.priceSats, tripMiles: c.tripMiles, tripMinutes: c.tripMinutes });
-  const per = terms && unitSats(terms, btcPrice);
-  return per ? per.base + 2 * per.minute + per.mile : null;
+  const terms = rates && normalizeTerms({ currency: rates.currency, base: rates.base, perMile: rates.perMile, perMinute: rates.perMinute });
+  const per = terms && unitSats(terms, price);
+  return per ? { base: per.base, minutes: 2 * per.minute, mile: per.mile, total: per.base + 2 * per.minute + per.mile } : null;
 }
 
 function ConfirmDriver({ request, trip, offer, onBack, onDecline }) {
@@ -261,7 +215,8 @@ function ConfirmDriver({ request, trip, offer, onBack, onDecline }) {
   const rates = offerRates(c);
   const mint = isMintUrl(c.mint) ? c.mint : null;
   const price = rates ? priceFor(rates.currency) : null;
-  const need = c.mode === "flat" ? startFunds(c, null) : startFunds(c, price);
+  const parts = startParts(c, price);
+  const need = parts ? parts.total : null;
   const have = ecash && mint ? ecash.balance(mint) : 0;
   const short = need != null ? Math.max(0, need - have) : 0;
   const ready = !!rates && !!mint && need != null && short === 0 && !ecashOff;
@@ -281,17 +236,20 @@ function ConfirmDriver({ request, trip, offer, onBack, onDecline }) {
         <h2 className="text-2xl font-bold mb-3">Confirm your driver</h2>
         <DriverInfo pubkey={offer.pubkey} offerEvent={offer} />
         <dl className="mt-4 rounded-2xl bg-neutral-100 px-4 py-3 space-y-2 text-[15px]">
-          <div className="flex justify-between"><dt className="text-neutral-600">{c.mode === "flat" ? "Flat price" : "Estimated fare"}</dt><dd><Money sats={c.priceSats} className="font-semibold" /></dd></div>
-          {c.mode !== "flat" && rates && (
+          <div className="flex justify-between"><dt className="text-neutral-600">Estimated fare</dt><dd><Money sats={c.priceSats} className="font-semibold" /></dd></div>
+          {rates && (
             <div className="text-xs text-neutral-600"><RatesLine rates={rates} /></div>
           )}
           {need != null && <div className="flex justify-between"><dt className="text-neutral-600">Needed to start</dt><dd><Money sats={need} /></dd></div>}
+          {parts && (
+            <div className="text-xs text-neutral-600">
+              The base rate {moneyText(parts.base, btcPrice)} + 2 minutes {moneyText(parts.minutes, btcPrice)} + 1 mile {moneyText(parts.mile, btcPrice)}. The extra minute is a cushion, so your first payments are never late. Nothing is locked away.
+            </div>
+          )}
           {mint && <div className="flex justify-between"><dt className="text-neutral-600">Your ecash here</dt><dd><Money sats={have} className={short ? "text-amber-700 font-semibold" : ""} /></dd></div>}
         </dl>
         <p className="text-neutral-500 text-xs mt-2">
-          {c.mode === "flat"
-            ? "You pay the flat price tick by tick as you ride, and never more, even in traffic. Adding a stop or changing the destination turns it into the driver's normal fare, counted from the start."
-            : "You pay as you ride: the base rate when the ride starts, then each mile and each minute. You can finish the ride at any time and pay only for what you used."}
+          You pay as you ride: the base rate when the ride starts, then each mile and each minute. You can finish the ride at any time and pay only for what you used.
           {" "}If you miss two payments in a row, the driver may finish the ride. There is no deposit.
         </p>
         {!rates || !mint ? (

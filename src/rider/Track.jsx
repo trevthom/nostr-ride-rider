@@ -50,7 +50,7 @@ export default function Track() {
       >
         <Sheet label="Shared trip">
           {p?.sos && !ended && (
-            <p className="mb-3 rounded-xl bg-red-600 text-white font-semibold px-4 py-3" role="alert">
+            <p className="mb-3 rounded-xl bg-[#dc2626] text-[#fff] font-semibold px-4 py-3" role="alert">
               {p.name || "The rider"} pressed SOS. Call them. If you cannot reach them, call emergency services.
             </p>
           )}

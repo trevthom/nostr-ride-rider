@@ -2,17 +2,14 @@
 //  ADD STOP (rider) — While the ride is under way, ask the driver to add a stop
 //  on the way, or to go to a different destination. Pick a place (search), then
 //  send it. The driver can accept it, or finish the ride instead.
-//  The rider is told, before asking, what it does to the price: a FLAT price turns
-//  into the driver's normal fare (base + miles + minutes), counted from the start of
-//  the ride. A ride that is already on the driver's normal fare simply keeps adding
+//  The rider is told, before asking, what it does to the price: the ride keeps adding
 //  miles and minutes at the driver's rates.
 // ════════════════════════════════════════════════════════════
 
 import { useEffect, useRef, useState } from "react";
 import { useRider } from "../state/RiderContext.jsx";
 import { searchAddress } from "../../lib/geocode.js";
-import { STOP_NOTE_FLAT, STOP_NOTE_METERED } from "../../lib/stops.js";
-import { rideTerms } from "../../lib/terms.js";
+import { STOP_NOTE_METERED } from "../../lib/stops.js";
 import { Modal, Spinner } from "../../ui/Parts.jsx";
 import Button from "../../ui/Button.jsx";
 import Icon from "../../ui/Icon.jsx";
@@ -20,7 +17,6 @@ import Icon from "../../ui/Icon.jsx";
 export default function AddStop({ request, onClose }) {
   const { here, myPosition, proposeStop } = useRider();
   const [mode, setMode] = useState("stop"); // "stop" | "destination"
-  const flat = rideTerms(request)?.mode === "flat";
   const [text, setText] = useState("");
   const [results, setResults] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -98,8 +94,8 @@ export default function AddStop({ request, onClose }) {
         ))}
       </ul>
 
-      <p className={`text-xs rounded-xl px-3 py-2 mt-3 ${flat ? "text-amber-800 bg-amber-50" : "text-neutral-600 bg-neutral-100"}`} role="note">
-        {flat ? STOP_NOTE_FLAT : STOP_NOTE_METERED} Your driver is told this too.
+      <p className="text-xs rounded-xl px-3 py-2 mt-3 text-neutral-600 bg-neutral-100" role="note">
+        {STOP_NOTE_METERED} Your driver is told this too.
       </p>
       <Button className="mt-3" onClick={send} disabled={!picked}>{picked ? "Ask my driver to go there" : "Pick a place first"}</Button>
     </Modal>

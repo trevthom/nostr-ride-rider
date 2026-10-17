@@ -1,8 +1,8 @@
 // ════════════════════════════════════════════════════════════
-//  LIGHTNING ADDRESS — The user's Lightning address (name@domain),
-//  saved as the standard `lud16` field of their profile. Riders pay
-//  drivers here, so it's required to drive. We check that the address
-//  really answers before saving it.
+//  CASH OUT LOCATION — The user's Lightning address (name@domain),
+//  saved as the standard `lud16` field of their profile. A driver cashes
+//  out ecash here and a rider's tip goes here, so it's required to drive.
+//  We check that the address really answers before saving it.
 // ════════════════════════════════════════════════════════════
 
 import { useState, useEffect } from "react";
@@ -31,10 +31,10 @@ export default function LightningAddressSection({ value, onSave }) {
   const error = status && !["checking", "saved"].includes(status) ? status : "";
   return (
     <div className="bg-neutral-100 rounded-xl border border-neutral-200 p-4 space-y-2">
-      <FoldTitle right={!value ? <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-700">Required to drive</span> : null}>Lightning Address</FoldTitle>
-      <p className="text-neutral-500 text-xs">Riders pay you here. Most Lightning wallets give you one (name@domain).</p>
+      <FoldTitle right={!value ? <span className="text-[11px] px-2 py-0.5 rounded-full bg-amber-50 text-amber-700">Required to drive</span> : null}>Cash out location</FoldTitle>
+      <p className="text-neutral-500 text-xs">Lightning address</p>
       <div className="flex gap-2">
-        <input aria-label="Lightning address"
+        <input aria-label="Cash out location (Lightning address)"
           value={draft}
           onChange={(e) => { setDraft(e.target.value); setStatus(""); }}
           onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); save(); } }}
