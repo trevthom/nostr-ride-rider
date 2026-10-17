@@ -4,7 +4,7 @@
 
 > This repository is the **rider** app. The **driver** app is in its own repository, **nostr-ride-driver**. They share no server: they find each other through Nostr relays, so both use the same event formats (see [Nostr events](#nostr-events)).
 
-Last updated with: **dark mode, a password eye, "Cash out location", no flat price or counter-offer, a wide start-code field, phone-sized screens (pinned main buttons), one 4-digit start code typed only by the rider, I've arrived within 150 m, a 12-word recovery phrase for the ecash wallet, collapsible Account sections, vouches ("I know and trust this person") in place of star ratings, pay-as-you-ride ecash payments, Finish ride (no cancellations), start codes, local currency** (see the [changelog](#changelog)).
+Last updated with: **no car-confirmation button (the start-code field is shown at once), dark mode, a password eye, "Cash out location", no flat price or counter-offer, a wide start-code field, phone-sized screens (pinned main buttons), one 4-digit start code typed only by the rider, I've arrived within 150 m, a 12-word recovery phrase for the ecash wallet, collapsible Account sections, vouches ("I know and trust this person") in place of star ratings, pay-as-you-ride ecash payments, Finish ride (no cancellations), start codes, local currency** (see the [changelog](#changelog)).
 
 NostrRide is a decentralized ridesharing system. It is **two web apps** — a rider app and a driver
 app — that find each other through **Nostr relays**. There is no company server and no database.
@@ -155,7 +155,7 @@ only what the ride has earned so far, and most of it is already paid.
 1. The driver taps **I've arrived**. This works only within **150 m** of the pickup, on a good GPS fix (`ARRIVE_MAX_METERS`, `src/lib/arrival.js`).
    The button is off until then and says how far away the driver is. The marker carries the measured distance. The rider's app warns if the driver
    says "arrived" but the car is not near the pin (more than 300 m away: the limit plus room for GPS error on both phones).
-2. The rider checks the car, plate and driver (*It matches*).
+2. The rider checks the car, plate and driver **by eye**. There is nothing to tap: the driver's photo, car and plate are on the rider's screen, and the code field (step 3) is there at once.
 3. **The driver's phone shows a random 4-digit start code.** The driver reads it to the rider, and the **rider** types it on the rider's phone. The driver types
    nothing. The code comes from the two people's shared secret and the ride (HMAC of the NIP-44 conversation key), so nothing travels between
    the phones for it, a third person cannot work it out, and every ride has a new one.
@@ -276,7 +276,7 @@ still calls unspent (NUT-09), and the money is back. No server, no account, no r
   amount but not to the count. After the ride, the receipt (rider) and the summary (driver) show the same lines, plus *End of ride:* for the settled rest of the last mile and minute. (`lib/ticks.js paidBreakdown`, `ui/FareBreakdown.jsx`.)
 - **Nearly full-screen map.** Once a driver is confirmed, the trip card is tucked away: only a handle and one line
   (for example "Driver arriving in 5 min") show at the bottom. Drag the handle up, or tap it, to open the details; drag down or tap to close.
-  The card opens by itself when the user has a step to take: the rider when the driver arrives (check the car), the driver at the arrival
+  The card opens by itself when the user has a step to take: the rider when the driver arrives (the start code is at the top of the card), the driver at the arrival
   and when near the pickup or destination. It tucks away again when the trip stage changes.
 - **The camera follows the vehicle.** The map zooms in to street level on the car and keeps north at the top. Both apps do this
   (the rider follows the driver's car; the driver follows their own).
@@ -393,7 +393,7 @@ More detail for contributors is in `CLAUDE.md` (the file map and every invariant
 | 30084 | Ride complete | assigned driver | Older apps' way to end a ride at the destination (still read as a finish) |
 | 30085 | Ride stage | assigned driver | `arrived` / `riding` |
 | 30086 | Payment record | rider | Lightning payment proof (invoice, preimage, LUD-21 URL) sealed to the driver; phase `tip` (older rides: `deposit`, `rest`) |
-| 30087 | Rider confirmation | rider | `boarded`, `code` (typed the 4-digit start code shown on the driver's phone), `ended`, or `problem` (with a note) |
+| 30087 | Rider confirmation | rider | `code` (typed the 4-digit start code shown on the driver's phone), `ended`, or `problem` (with a note); older rider apps also sent `boarded` |
 | 30093 | Pickup change | rider | A new pickup while the driver is on the way; the exact place sealed to the driver and the rider |
 | 30094 | Pickup change answer | assigned driver | Accept or decline that change |
 | 30095 | Tick | rider | One ecash payment while the ride runs: amount and what it was for (public), the Cashu token (sealed to the driver) |
@@ -448,7 +448,7 @@ Payments are **peer to peer, with no escrow and no deposit.** The full rules are
 
 ## Safety
 Rider app, on a trip, behind the **Safety** button:
-- **Check before you get in.** When the driver arrives, the rider sees the plate, car and driver photo and taps *It matches* or *Doesn't match*. Either answer is a signed confirmation (kind 30087). The driver is told.
+- **Check before you get in.** When the driver arrives, the rider sees the plate, car and driver photo and checks them by eye; the screen says what to do if they do not match (do not get in, use *Safety*). There is no *It matches* button any more. (An older rider app may still send a `boarded` confirmation, kind 30087; the driver app still reads it and will not start a trip after a "did not match".)
 - **Call emergency services.** Dials `EMERGENCY_NUMBER` (default 911, in `src/config/settings.js`).
 - **Share my trip.** Makes a link. A friend opens it in any browser (`track.html`, no account) and sees **the rider's own position live** (the rider's phone, a blue dot; the car too until the ride starts), the driver, the car and plate, the destination, and the stage. The rider's app sends a position **every 6 seconds** (`LOCATION_PING_MS` in `src/config/settings.js`), the same pace as the driver's app sends the car's position to the rider. A position that is stale (no fresh GPS fix) is left out, so a friend never sees an old position as if it were now. How it works: the rider's app makes a throwaway key for the trip and publishes the state encrypted with that key; the key lives only in the link's `#fragment`, which browsers never send to a server. Updates expire after 2 hours. Sharing stops by itself when the trip ends, or when the rider taps Stop.
 - **SOS.** Starts sharing and marks the trip red for anyone following. It does not call anyone, so the sheet says to also call emergency services.
@@ -606,6 +606,7 @@ To switch, copy `env.example` to `.env`, set `VITE_TILE_URL` (and `VITE_PHOTON_U
   and a cancel rate on profiles.
 
 ## Changelog
+- **No "It matches" button; the start-code field is at the top; apps say which commit they came from** — the rider no longer taps *It matches* / *Doesn't match* to confirm the car: the driver's photo, car and plate are on the screen and the rider checks them by eye (the screen says: if they do not match, do not get in; use *Safety*). The 4-digit start-code field is now on the arrived screen at once, at the top of the sheet (it was hidden behind that button and below the fold on a small phone). The driver app still reads a `boarded` confirmation from an older rider app. The service worker cache is renamed (`nostrride-v2`) and a page reload asks the server for a fresh page, so no phone keeps an old copy of the app. The exported apps now show *version <time> · from nostr-ride <commit>* at the bottom of Account, so a person can see at once whether the rider and the driver app are from the same commit (a rider app from before the single 4-digit code shows a 2-digit code on both phones and a narrow box: that is an old build, not this code).
 - **Dark mode, a password eye, "Cash out location", no flat price, a wide start-code field** — (1) *Account → Appearance → Dark mode* in both apps, saved the moment it is flipped; the colors are CSS variables, the map is darkened, a first-paint script avoids a white flash. (2) Every password field
   has a show/hide eye (the Unlock page too). (3) The driver's *Lightning address* section is now **Cash out location** (its helper line is just "Lightning address"; the onboarding list says the same); the *Ecash wallet* section no longer opens with "Riders pay you in ecash…" on the
   driver app. (4) **The flat price and the counter-offer are gone**: the rider no longer names a price, a driver no longer counters, and an extra stop no longer converts anything (the fare is always the driver's rates, tick by tick). Removed: `offerLimitsSats`,

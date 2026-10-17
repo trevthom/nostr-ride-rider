@@ -5,8 +5,9 @@ import tailwindcss from "tailwindcss";
 import autoprefixer from "autoprefixer";
 import { cspPlugin } from "./csp.mjs";
 
-// "2026-10-12 21:30 UTC": the build time (shown in Account, so a person can tell which version is running).
-const buildId = () => new Date().toISOString().slice(0, 16).replace("T", " ") + " UTC";
+// "2026-10-12 21:30 UTC · from nostr-ride 9dbe842": the build time and the nostr-ride commit this app was exported from (shown in Account,
+// so a person can tell which version is running: the rider and the driver app must come from the same commit).
+const buildId = () => new Date().toISOString().slice(0, 16).replace("T", " ") + " UTC · from nostr-ride 5d59c6c";
 
 // The rider app of NostrRide, as its own project (generated; see scripts/export-apps.mjs in nostr-ride).
 // `__APP_ROLE__` is read in src/config/app.js. `base: "./"` lets the built

@@ -55,7 +55,7 @@ Each screen is wrapped in an `ErrorBoundary`.
 | 3 | list of replies with each driver's rates + mint (preferred gender first if asked, then fastest) | RIDE_OFFER 30079 (`mode` metered, `priceSats` = the driver's estimate, frozen `rates`, `mint`, trip miles/minutes, ETA, `gender`, sealed plate; good 5 min) | "Waiting for rider…" |
 | 4 | **Choose** → confirm (needs ecash at the driver's mint for the start; NO deposit) | RIDE_ACCEPT 30080 (names the offer; exact trip sealed to driver) + RIDE_REQUEST `in_progress`+`driverPubkey` | drive starts: route to pickup. Nothing is charged yet |
 | 5 | car moves live, "arriving in N min" | RIDE_LOCATION 21100 every 6 s (NIP-44 to rider) | **I've arrived** works only within 150 m (good fix) → RIDE_STAGE 30085 `arrived` (+`distM`) |
-| 6 | "Your driver has arrived", checks the car (RIDE_CONFIRM `boarded`), types the 4-digit start code shown on the driver's phone (RIDE_CONFIRM `code`) | shows the start code; the driver types nothing | **Start trip** (after the rider's code) → RIDE_STAGE `riding` (+`codes`) |
+| 6 | "Your driver has arrived", checks the car by eye (no button), types the 4-digit start code shown on the driver's phone (RIDE_CONFIRM `code`) | shows the start code; the driver types nothing | **Start trip** (after the rider's code) → RIDE_STAGE `riding` (+`codes`) |
 | 7 | "On the way to …"; the rider's app pays ticks: base, each mile, each minute | RIDE_TICK 30095 (token sealed to driver) | redeems each tick at the mint, answers RIDE_TICK_REPLY 30096; sees fare so far, missed payments |
 | 8 | **Finish ride** (confirm) → pays the final tick; receipt | RIDE_FINISH 30081 (either person; time + meter) | **Finish ride** (confirm) or after 2 missed payments; summary; may waive (RIDE_WAIVER 30097) |
 **There are no cancellations and no cancel fees.** Either person finishes the ride (RIDE_FINISH 30081). Before the ride
@@ -166,7 +166,7 @@ test/*.test.mjs
 | 30084 | RIDE_COMPLETE | `e`(request), `p`(rider), `d`, `t` | `{requestId}` — by the assigned driver. Older apps only; read as "finished at the destination" |
 | 30085 | RIDE_STAGE | `e`(request), `p`(rider), `d`="stage-<rideKey>", `t` | `{stage: "arrived" \| "riding", at, arrivedAt?, distM?, codes?}` — by the assigned driver; `at` = ms now, the "riding" marker recalls `arrivedAt` (a relay keeps only the newest marker); `distM` = the driver's measured metres from the pickup (≤ 150); `codes` = the start code was checked (the field keeps its old name) |
 | 30086 | RIDE_PAYMENT | `e`(request), `p`(driver), `d`="pay-<rideKey>-<phase>" (`-tip-<ms>` for a tip), `t` | `{phase:"tip" (old rides: "deposit"\|"rest"), amountSats, level, sealed}` — by the rider; `sealed` = `{pr, preimage, verify}` NIP-44 to the driver. Tips only |
-| 30087 | RIDE_CONFIRM | `e`(request), `p`(driver), `d`="confirm-<rideKey>-<phase>", `t` | `{phase:"boarded"\|"code"\|"ended"\|"problem", ok, note}` — by the rider (`code` = typed the 4-digit start code shown on the driver's phone) |
+| 30087 | RIDE_CONFIRM | `e`(request), `p`(driver), `d`="confirm-<rideKey>-<phase>", `t` | `{phase:"boarded"\|"code"\|"ended"\|"problem", ok, note}` — by the rider (`code` = typed the 4-digit start code shown on the driver's phone; `boarded` = older rider apps only: the current rider app has no "It matches" button, the driver app still reads it) |
 | 30093 | RIDE_PICKUP_CHANGE (addressable) | `e`(request), `p`(driver), `d`="pickup-<rideKey>-<changeId>", `t` | `{changeId, sealedDriver, sealedSelf}` — the new pickup `{pickup:{name,lat,lng}}` NIP-44 to the driver and to the rider; only the ride's rider |
 | 30094 | RIDE_PICKUP_REPLY (addressable) | `e`(request), `p`(rider), `d`="pickup-reply-<changeId>", `t` | `{changeId, accepted}` — only the assigned driver |
 | 30095 | RIDE_TICK (addressable) | `e`(request), `p`(driver), `d`="tick-<rideKey>-<seq>-<nonce>", `t` | `{seq, trigger, amountSats, mint, at, sealed}` — one ecash payment by the ride's rider; `sealed` = `{token}` (a cashuB token) NIP-44 to the driver; the amount is public |
@@ -350,7 +350,7 @@ carries `driverPubkey`. Stage is `enroute` (default) → `arrived` → `riding`.
   (keep the return shapes; URLs come from `config/services.js` / `.env`).
 - **Trip screens** (rider `OnTrip`, driver `DriveTrip`): the `Sheet` is given a `peek` line, so it starts nearly collapsed and is dragged/tapped
   open (`openKey` pops it open when the user has a step; `closeKey` = the stage tucks it away). Anything a test or a user must click
-  inside it (I've arrived, Start trip, Finish ride, Safety, It matches, the code fields) is hidden (`visibility`) while collapsed. The trip headline is also
+  inside it (I've arrived, Start trip, Finish ride, Safety, the code fields) is hidden (`visibility`) while collapsed. The trip headline is also
   in the peek line. `MapView navigation follow={{lat,lng,id}}` is trip mode: street-zoom camera on the vehicle, north-up by default,
   compass button = heading-up, user drag/zoom stops following and shows **Re-center**. In trip mode the Leaflet map sits in an
   oversized box turned with CSS; Leaflet's own drag is off and panning is done in MapView (its mouse maths ignores the turn); icons that

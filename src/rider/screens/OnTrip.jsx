@@ -224,11 +224,35 @@ export default function OnTrip({ request, trip }) {
           </p>
         )}
 
+        {/* Starting the ride: the rider types the 4-digit code shown on the driver's phone. It comes FIRST, so a small phone shows it without scrolling. */}
+        {stage === "arrived" && (
+          <div className="mt-3 rounded-2xl border-2 border-black p-4" role="group" aria-label="Start code">
+            <p className="font-bold">Start the ride</p>
+            <p className="text-xs text-neutral-600 mb-3">Once you are at the car, ask your driver for the <span className="whitespace-nowrap">4-digit</span> start code on their phone and type it here.</p>
+            {confirm.code?.ok ? (
+              <p className="text-sm text-[#05944f] font-medium flex items-center gap-1"><Icon name="check" size={16} /> Code accepted. Waiting for your driver to start the trip.</p>
+            ) : (
+              <div>
+                <label className="block text-sm font-semibold mb-1" htmlFor="start-code">Start code</label>
+                {/* The field gets the whole row and the button sits below it: a button in the same row once squeezed the field to two digits on a phone. */}
+                <input id="start-code" inputMode="numeric" autoComplete="off" maxLength={4} value={typed}
+                  onChange={(e) => { setTyped(e.target.value.replace(/\D/g, "")); setCodeMsg(""); }}
+                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); enterCode(); } }}
+                  placeholder="0000" className="block w-full min-w-0 bg-neutral-100 rounded-xl px-4 py-3 text-3xl text-center font-bold tracking-[0.4em] tabular-nums focus:outline-none focus:ring-2 focus:ring-black" />
+                <Button size="md" className="mt-2" onClick={enterCode} disabled={typed.length !== 4 || !gateState.open}>Confirm</Button>
+                {!gateState.open && <p className="text-xs text-amber-700 mt-1" role="alert">Too many tries. Wait {Math.ceil(gateState.waitMs / 1000)} s.</p>}
+                {codeMsg && gateState.open && <p className="text-xs text-red-600 mt-1" role="alert">{codeMsg}</p>}
+              </div>
+            )}
+          </div>
+        )}
+
         <TripMeter view={view} className="mt-3" />
 
         <div className="mt-4 pt-4 border-t border-neutral-100">
           {driverPubkey ? <DriverInfo pubkey={driverPubkey} offerEvent={offer} /> : <p className="text-neutral-500">Driver details are loading…</p>}
-          {stage !== "riding" && car && <p className="text-xs text-neutral-500 mt-2">Look for a {car}.</p>}
+          {stage === "arrived" && <p className="text-xs text-neutral-500 mt-2">Check that the plate, car and driver match before you get in. If they do not, do not get in: use Safety.</p>}
+          {stage === "enroute" && car && <p className="text-xs text-neutral-500 mt-2">Look for a {car}.</p>}
         </div>
 
         {/* What the ride costs, tick by tick */}
@@ -275,60 +299,11 @@ export default function OnTrip({ request, trip }) {
           </p>
         )}
 
-        {/* Check the car before getting in (a common safety step) */}
-        {stage === "arrived" && !confirm.boarded && (
-          <div className="mt-4 rounded-2xl border-2 border-black p-4" role="group" aria-label="Check before you get in">
-            <p className="font-bold mb-2">Check before you get in</p>
-            <div className="flex items-center gap-3 mb-2">
-              <Avatar src={profile?.picture} name={profile?.name} size={44} />
-              <div className="min-w-0">
-                <p className="font-semibold truncate">{profile?.name}</p>
-                <p className="text-sm text-neutral-600 truncate">{carName}</p>
-              </div>
-              <div className="ml-auto"><Plate plate={plateInfo} /></div>
-            </div>
-            <p className="text-xs text-neutral-600 mb-3">Does the plate, car and driver match? Ask the driver to say your name.</p>
-            <div className="flex gap-2">
-              <Button size="md" variant="go" onClick={() => confirmRide(request, "boarded", true)}>It matches</Button>
-              <Button size="md" variant="danger" onClick={() => confirmRide(request, "boarded", false, "Plate, car or driver did not match")}>Doesn't match</Button>
-            </div>
-          </div>
-        )}
-        {confirm.boarded && !confirm.boarded.ok && (
-          <p className="mt-4 text-sm text-red-700 bg-red-50 rounded-xl px-3 py-3" role="alert">
-            Do not get in. Finish the ride below, and use Safety if you feel unsafe.
-          </p>
-        )}
         {mismatch && (
           <p className="mt-3 text-sm text-amber-800 bg-amber-50 rounded-xl px-3 py-2" role="alert">
             Your driver says they have arrived, but their location is not at your pickup. Check where they are before you go.
           </p>
         )}
-        {confirm.boarded?.ok && stage === "arrived" && <p className="mt-3 text-sm text-[#05944f] font-medium">You confirmed the car matches.</p>}
-
-        {/* Starting the ride: the rider types the 4-digit code shown on the driver's phone */}
-        {stage === "arrived" && confirm.boarded?.ok && !confirm.boarded.note?.includes("did not match") && (
-          <div className="mt-4 rounded-2xl border-2 border-black p-4" role="group" aria-label="Start code">
-            <p className="font-bold">Start the ride</p>
-            <p className="text-xs text-neutral-600 mb-3">Once you are at the car, ask your driver for the <span className="whitespace-nowrap">4-digit</span> start code on their phone and type it here.</p>
-            {confirm.code?.ok ? (
-              <p className="text-sm text-[#05944f] font-medium flex items-center gap-1"><Icon name="check" size={16} /> Code accepted. Waiting for your driver to start the trip.</p>
-            ) : (
-              <div>
-                <label className="block text-sm font-semibold mb-1" htmlFor="start-code">Start code</label>
-                {/* The field gets the whole row and the button sits below it: a button in the same row once squeezed the field to two digits on a phone. */}
-                <input id="start-code" inputMode="numeric" autoComplete="off" maxLength={4} value={typed}
-                  onChange={(e) => { setTyped(e.target.value.replace(/\D/g, "")); setCodeMsg(""); }}
-                  onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); enterCode(); } }}
-                  placeholder="0000" className="block w-full min-w-0 bg-neutral-100 rounded-xl px-4 py-3 text-3xl text-center font-bold tracking-[0.4em] tabular-nums focus:outline-none focus:ring-2 focus:ring-black" />
-                <Button size="md" className="mt-2" onClick={enterCode} disabled={typed.length !== 4 || !gateState.open}>Confirm</Button>
-                {!gateState.open && <p className="text-xs text-amber-700 mt-1" role="alert">Too many tries. Wait {Math.ceil(gateState.waitMs / 1000)} s.</p>}
-                {codeMsg && gateState.open && <p className="text-xs text-red-600 mt-1" role="alert">{codeMsg}</p>}
-              </div>
-            )}
-          </div>
-        )}
-
         <div className="flex gap-3 mt-4">
           <button type="button" onClick={() => setContact(true)} className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl bg-neutral-100 font-semibold text-[15px] active:bg-neutral-200">
             <Icon name="phone" size={18} className="max-[380px]:hidden" /> Contact

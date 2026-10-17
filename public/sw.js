@@ -12,7 +12,8 @@
 //  push server (see docs/index.md, "Reliability").
 // ════════════════════════════════════════════════════════════
 
-const CACHE = "nostrride-v1:" + self.registration.scope;
+// v2: a new cache name makes every phone drop its saved copies of the app and fetch them again.
+const CACHE = "nostrride-v2:" + self.registration.scope;
 const CDN = ["fonts.googleapis.com", "fonts.gstatic.com"];
 
 // On install, keep the page and its script/style files, so the first OFFLINE start works too.
@@ -45,7 +46,8 @@ self.addEventListener("activate", (event) => {
 async function networkFirst(request) {
   const cache = await caches.open(CACHE);
   try {
-    const res = await fetch(request);
+    // "no-cache": ask the server whether the page changed, even when the host says it may be kept for a while.
+    const res = await fetch(request, { cache: "no-cache" });
     if (res.ok) cache.put(request, res.clone());
     return res;
   } catch {
