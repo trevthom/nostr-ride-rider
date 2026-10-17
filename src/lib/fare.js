@@ -14,7 +14,7 @@
 //  (a price is "units of that currency per 1 BTC").
 // ════════════════════════════════════════════════════════════
 
-import { FARE_RATES, FALLBACK_BTC_USD, RATE_LIMITS } from "../config/settings.js";
+import { FARE_RATES, FALLBACK_BTC_USD, RATE_LIMITS, LOW_BALANCE_USD } from "../config/settings.js";
 import { CURRENCIES, DEFAULT_CURRENCY, isCurrency, satsFromFiat, fiatFromSats } from "./currency.js";
 
 const AVG_CITY_MPH = 24; // for time/ETA guesses when no routing result exists
@@ -99,4 +99,21 @@ export function satsFromUsd(usd, usdPrice) {
 }
 export function usdFromSats(sats, usdPrice) {
   return fiatFromSats(sats, usdPrice || FALLBACK_BTC_USD, DEFAULT_CURRENCY);
+}
+
+// ── During a ride ──
+
+// A rider's ecash is "low" at LOW_BALANCE_USD or less (US dollars at the live price; the fallback price when it is unknown).
+export const lowBalanceSats = (usdPrice) => satsFromUsd(LOW_BALANCE_USD, usdPrice);
+export const isLowBalance = (sats, usdPrice) => Number.isFinite(sats) && sats <= lowBalanceSats(usdPrice);
+
+// How much the fare changes when the REST of the trip goes from `before` to `after` ({ miles, minutes } each), at one driver's rates:
+// per mile × the change in miles + per minute × the change in minutes. The base rate does not change. Signed, in sats at `price`
+// (the BTC price in the currency of the rates); null when the rates or the price are not known. This is an ESTIMATE: the road and the traffic decide.
+export function fareChangeSats(rates, before, after, price) {
+  const r = normalizeRates(rates);
+  if (!r || !before || !after || !(price > 0)) return null;
+  const fiat = r.perMile * (after.miles - before.miles) + r.perMinute * (after.minutes - before.minutes);
+  if (!Number.isFinite(fiat)) return null;
+  return Math.sign(fiat) * satsFromFiat(Math.abs(fiat), price);
 }

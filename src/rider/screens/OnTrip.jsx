@@ -18,6 +18,7 @@ import { useEffect, useRef, useState } from "react";
 import { startCode, checkCode, attemptGate, recordAttempt } from "../../lib/startcode.js";
 import { arrivalMismatch } from "../../lib/arrival.js";
 import { fullTrip, nextStop, stopChanges, readStop } from "../../lib/stops.js";
+import { rideTerms } from "../../lib/terms.js";
 import { milesAtTime } from "../../lib/ridemoney.js";
 import { rideKey } from "../../lib/rides.js";
 import { ARRIVE_RADIUS_METERS, LOCATION_PING_MS } from "../../config/settings.js";
@@ -30,7 +31,7 @@ import { useApp } from "../../state/AppContext.jsx";
 import { useRider } from "../state/RiderContext.jsx";
 import { subscribeRideLocation } from "../../nostr/live.js";
 import { haversineDistance } from "../../lib/geo.js";
-import { pickupEta } from "../../lib/fare.js";
+import { pickupEta, isLowBalance } from "../../lib/fare.js";
 import { rideConfirm, rideDriver, rideStage, rideTimes } from "../../lib/rides.js";
 import { offerPlate } from "../../lib/privacy.js";
 import { offerFrom } from "../../lib/trips.js";
@@ -48,6 +49,7 @@ import ChangePickup from "../components/ChangePickup.jsx";
 import { pickupChange, PICKUP_CHANGE_NOTE } from "../../lib/pickup.js";
 import { meterView } from "../../lib/meter.js";
 import FareBreakdown from "../../ui/FareBreakdown.jsx";
+import { EstimatedTotal, ChangeEstimate } from "../../ui/FareEstimate.jsx";
 import { publishMeter } from "../../nostr/live.js";
 import TripMeter, { peekMeter } from "../../ui/TripMeter.jsx";
 import { useRiderMeter } from "../state/useRiderMeter.js";
@@ -57,7 +59,7 @@ const r3 = (n) => Math.round(n * 1000) / 1000; // ~110 m: limits how often the r
 const miles = (a, b) => haversineDistance(a.lat, a.lng, b.lat, b.lng);
 
 export default function OnTrip({ request, trip }) {
-  const { user, pushNotice, btcPrice } = useApp();
+  const { user, pushNotice, btcPrice, usdPrice, ecash } = useApp();
   const { finishRide, myPosition, gps, share, shareUpdate, confirmRide, money, reportMiles, payMint, screenMayDim } = useRider();
   const driverPubkey = rideDriver(request);
   const stage = rideStage(request);
@@ -84,8 +86,8 @@ export default function OnTrip({ request, trip }) {
     });
   }, [user, driverPubkey]);
 
-  // Re-render every 10 s so "updated Xs ago" and ETAs stay current.
-  useEffect(() => { const id = setInterval(() => setNow((n) => n + 1), 10000); return () => clearInterval(id); }, []);
+  // Re-render every second: the trip clock and the waiting clock show seconds ("updated Xs ago" and the ETAs ride along).
+  useEffect(() => { const id = setInterval(() => setNow((n) => n + 1), 1000); return () => clearInterval(id); }, []);
 
   // Tell the rider if the driver changes their car mid-ride.
   const vehicleKey = JSON.stringify(profile?.vehicle || null);
@@ -185,6 +187,14 @@ export default function OnTrip({ request, trip }) {
   const route = loc ? [{ lat: r3(loc.lat), lng: r3(loc.lng) }, ...waypoints] : stage === "riding" ? [pickup, ...stops, dropoff] : null;
   const car = carText(profile?.vehicle);
   const contentOffer = offer ? JSON.parse(offer.content) : null;
+  // The rider's ecash at the mint that pays this ride, live (the wallet tells the app on every change). Red at LOW_BALANCE_USD or less.
+  const walletSats = ecash && payMint ? ecash.balance(payMint) : null;
+  const lowWallet = walletSats != null && isLowBalance(walletSats, usdPrice);
+  // The estimated total: the driver's own estimate, or (after an accepted stop / new destination) the whole new route at the driver's rates.
+  const terms = rideTerms(request);
+  const accepted = stopChanges(request).filter((c) => c.status === "accepted");
+  const changeKinds = [...new Set(accepted.map((c) => c.mode))];
+  const pendingPlace = pendingStop ? readStop(pendingStop, request, user) : null;
 
   return (
     <MapPage
@@ -258,6 +268,12 @@ export default function OnTrip({ request, trip }) {
         {/* What the ride costs, tick by tick */}
         {(riding || money?.owed > 0) && (
           <div className="mt-4 rounded-2xl bg-neutral-100 px-4 py-3" role="group" aria-label="Fare so far">
+            {riding && walletSats != null && (
+              <div className="flex items-baseline justify-between mb-2 pb-2 border-b border-neutral-200" role="status" aria-label="Your ecash balance">
+                <span className={`text-sm ${lowWallet ? "text-red-600 font-semibold" : "text-neutral-600"}`}>Your ecash</span>
+                <Money sats={walletSats} className={`text-xl font-extrabold ${lowWallet ? "text-red-600" : ""}`} subClassName={lowWallet ? "text-red-600 text-xs" : "text-neutral-500 text-xs"} />
+              </div>
+            )}
             <div className="flex items-baseline justify-between">
               <span className="text-sm text-neutral-600">Fare so far</span>
               <Money sats={money?.owed || 0} className="text-xl font-extrabold" />
@@ -266,6 +282,9 @@ export default function OnTrip({ request, trip }) {
               <span className="text-neutral-600">Paid</span>
               <Money sats={money?.paid || 0} />
             </div>
+            {riding && contentOffer && (
+              <EstimatedTotal className="mt-2" baseSats={contentOffer.priceSats} trip={full} changed={accepted.length > 0} changeKinds={changeKinds} terms={terms} />
+            )}
             <FareBreakdown ledger={money?.ledger} paidSats={money?.paid || 0} className="mt-3 pt-3 border-t border-neutral-200" />
             <p className="text-xs text-neutral-500 mt-2">
               You pay as you ride: the base rate at the start, then each mile and each minute{money?.status === "paid" ? ". A payment just went out." : "."}
@@ -294,9 +313,12 @@ export default function OnTrip({ request, trip }) {
           </div>
         )}
         {pendingStop && (
-          <p className="mt-3 text-sm text-amber-800 bg-amber-50 rounded-xl px-3 py-2" role="status">
-            Waiting for your driver to accept {pendingStop.mode === "destination" ? "the new destination" : "the extra stop"}: {readStop(pendingStop, request, user)?.name || ""}.
-          </p>
+          <div className="mt-3" role="status">
+            <p className="text-sm text-amber-800 bg-amber-50 rounded-xl px-3 py-2">
+              Waiting for your driver to accept {pendingStop.mode === "destination" ? "the new destination" : "the extra stop"}: {pendingPlace?.name || ""}.
+            </p>
+            <ChangeEstimate className="mt-2" from={loc || myPosition} ahead={waypoints} mode={pendingStop.mode} place={pendingPlace} terms={terms} />
+          </div>
         )}
 
         {mismatch && (
@@ -316,7 +338,7 @@ export default function OnTrip({ request, trip }) {
           </button>
         </div>
         {riding && !pendingStop && (
-          <button type="button" onClick={() => setStopping(true)} className="mt-3 text-sm font-semibold underline">Add a stop or change the destination</button>
+          <button type="button" onClick={() => setStopping(true)} className="mt-3 text-sm font-semibold underline">Add stop / update fare</button>
         )}
 
         {/* Changing the pickup (only while the driver is still on the way) */}
@@ -350,7 +372,7 @@ export default function OnTrip({ request, trip }) {
             <p className="text-[15px] truncate">{pickup.name}</p>
             <p className="text-[15px] truncate">{dropoff.name}</p>
           </div>
-          {contentOffer && (
+          {contentOffer && !riding && (
             <div className="text-right">
               <Money sats={contentOffer.priceSats} stacked className="font-bold" />
               <p className="text-xs text-neutral-500">estimate</p>
@@ -360,7 +382,7 @@ export default function OnTrip({ request, trip }) {
       </Sheet>
 
       {changing && <ChangePickup request={request} onClose={() => setChanging(false)} />}
-      {stopping && <AddStop request={request} onClose={() => setStopping(false)} />}
+      {stopping && <AddStop request={request} from={loc || myPosition} ahead={waypoints} terms={terms} onClose={() => setStopping(false)} />}
       {adding && payMint && <AddFunds mint={payMint} needSats={Math.max(1, money?.shortSats || money?.due || 0)} onClose={() => setAdding(false)} />}
       <SafetySheet open={safety} onClose={() => setSafety(false)} request={request} destination={dropoff.name} />
       <ContactSheet open={contact} onClose={() => setContact(false)} pubkey={driverPubkey} name={profile?.name} />

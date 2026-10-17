@@ -4,7 +4,7 @@
 
 > This repository is the **rider** app. The **driver** app is in its own repository, **nostr-ride-driver**. They share no server: they find each other through Nostr relays, so both use the same event formats (see [Nostr events](#nostr-events)).
 
-Last updated with: **no car-confirmation button (the start-code field is shown at once), dark mode, a password eye, "Cash out location", no flat price or counter-offer, a wide start-code field, phone-sized screens (pinned main buttons), one 4-digit start code typed only by the rider, I've arrived within 150 m, a 12-word recovery phrase for the ecash wallet, collapsible Account sections, vouches ("I know and trust this person") in place of star ratings, pay-as-you-ride ecash payments, Finish ride (no cancellations), start codes, local currency** (see the [changelog](#changelog)).
+Last updated with: **a live ecash balance, the estimate below Paid, Add stop / update fare with an estimated change, seconds on the trip clock, default rates $1.50 / $1.10 / $0.20, no car-confirmation button (the start-code field is shown at once), dark mode, a password eye, "Cash out location", no flat price or counter-offer, a wide start-code field, phone-sized screens (pinned main buttons), one 4-digit start code typed only by the rider, I've arrived within 150 m, a 12-word recovery phrase for the ecash wallet, collapsible Account sections, vouches ("I know and trust this person") in place of star ratings, pay-as-you-ride ecash payments, Finish ride (no cancellations), start codes, local currency** (see the [changelog](#changelog)).
 
 NostrRide is a decentralized ridesharing system. It is **two web apps** — a rider app and a driver
 app — that find each other through **Nostr relays**. There is no company server and no database.
@@ -64,7 +64,7 @@ Needs internet for fonts, the map, and the relays. Location needs `https://` or 
 | Account | Every setting is a section that opens and closes (closed at first; what you opened is remembered on the device) | The same |
 | Tab bar | Always visible, on every screen | Always visible, on every screen |
 | Home | "Where to?" → the suggested fare → request | GO button → request cards (accept or decline) |
-| During a trip | Live car, ETA, fare so far, start code, contact, **Finish ride**, add a stop | Route, arrived (within 150 m) / start code / **Finish ride**, fare and payments so far |
+| During a trip | Live car, ETA, **your ecash balance**, fare so far, paid, estimated total, start code, contact, **Finish ride**, **Add stop / update fare** | Route, arrived (within 150 m) / start code / **Finish ride**, fare and payments so far |
 | After a trip | Receipt (anything still owed), tip | Summary, waive part of the fare |
 
 **Phone screens.** Both apps are laid out for a phone first: the page fills the screen (without the browser bars), keeps clear of the notch and the home bar, and the keyboard shrinks the page instead of covering a field. The main button of a sheet
@@ -95,7 +95,7 @@ reverse. The Vite *mode* picks the app (`vite --mode rider|driver`).
 1. The driver taps **GO** (needs a good or an *approximate* GPS fix, see [Location and GPS](#location-and-gps)). The app shares an approximate location.
 2. The rider sets the pickup and the destination. **The app never fills in the pickup by itself.** The rider types an address or the name of a business or landmark (the search page says so), or **pins the spot on the map** (*Set pickup on the map*, always shown: drag the map under the pin), or taps *Your location* on the pickup field. **The drop-off can be pinned the same way** (*Set drop-off on the map*, also always shown); with both places set the quote opens. The rider picks a **standard fare** (each driver's own rates) or a **flat price** and taps **Request**.
 3. Nearby drivers get a **request card** with a countdown. A driver **accepts** (or declines). The reply carries the driver's rates and ecash mint.
-4. The rider **chooses a driver**. The rider needs enough ecash at the driver's mint for the start: the base rate, two minutes and a mile (with the default rates $2.00 + $0.50 + $1.10 = **$3.60**).
+4. The rider **chooses a driver**. The rider needs enough ecash at the driver's mint for the start: the base rate, two minutes and a mile (with the default rates $1.50 + $0.40 + $1.10 = **$3.00**).
    The confirm screen shows the sum. The second minute is a small cushion, so the first payments are never late (a minute is due after 60 seconds and the app checks every 3 seconds). It is **not locked away**:
    the ride is paid as it is used. There is **no deposit**.
 5. The driver drives to the pickup. The rider sees the car move live (end-to-end encrypted). **Nothing is charged yet.**
@@ -145,8 +145,11 @@ only what the ride has earned so far, and most of it is already paid.
 - **There is one fare: each driver's own rates**, paid tick by tick. The quote screen shows an estimate and the drivers nearby; traffic can raise the cost.
   The rider does not name a price and a driver does not counter (the *flat price* and the counter-offer were removed; see the changelog).
 - **Old requests and offers.** A request that says `fareMode: "flat"` and an offer that says `mode: "flat"` (from an older app) are read as the standard fare at the driver's rates.
-- **Adding a stop or changing the destination during the ride.** The rider asks (kind 30099) and is told first what it does to the price. The driver
-  can **accept** the stop (kind 30100) or **finish the ride** instead. If the driver accepts, the ride keeps being charged by distance and time at the driver's rates.
+- **Add stop / update fare (a stop, or a new destination, during the ride).** The rider asks (kind 30099) and sees first the **estimated change in the fare**: a dashed box with
+  "≈", for example *≈ +$2.40* and *+1.8 mi · +4 min* (or *≈ −$11.52* for a shorter way). The driver sees the same estimate on the request, and can **accept** the stop (kind 30100) or **finish the ride**
+  instead. If the driver accepts, the ride keeps being charged by distance and time at the driver's rates, and the **estimated total** in the fare card is priced again for the new route
+  (see *During a trip*). How it is estimated: the route from the car through the places still ahead is compared with the same route with the new place in it (OSRM, like the map);
+  the fare change is per mile × the change in miles + per minute × the change in minutes at the driver's frozen rates. The base rate does not change. No route or no price: no number is shown.
 - **The driver's rates cannot change after the ride has started.** The rates and the ecash mint are copied into the driver's offer. When the rider
   chooses that offer, they are frozen for the ride. The Account screen locks the rates while a ride runs, and a new offer sent later changes nothing
   (the app reads the offer the rider chose).
@@ -271,8 +274,17 @@ still calls unspent (NUT-09), and the money is back. No server, no account, no r
   closed, a dispute arbiter.
 
 ## During a trip (both apps)
+- **The rider's ecash balance, live, above "Fare so far".** While riding, the rider's fare card starts with *Your ecash*: the wallet's balance at the mint that pays this ride, in the rider's currency (sats small). It
+  changes by itself as each tick is paid. At **$5.00 or less** (US dollars at the live price; `LOW_BALANCE_USD`) the label and the amount turn **red**. It is a warning only: the ride is never stopped by it, and
+  the "wallet is short" notice (when a payment cannot be made) is separate. (`lib/fare.js isLowBalance`, `rider/screens/OnTrip.jsx`.)
+- **The estimated total sits below "Paid", on both screens.** The ride's estimated fare (the driver's own estimate for the trip) is a **dashed box with "≈"** under *Paid* (*Paid by the rider* on the driver's
+  screen): the look says "estimate" before any word does. It used to be at the bottom of the sheet next to the route. Before the ride starts (while the driver is on the way) it still shows there. After a stop or a
+  new destination is accepted, the box shows the new estimated total and a second muted line, for example *from the added stop ≈ +$2.67* (or *from the new destination*, or *from your changes*).
+  (`ui/FareEstimate.jsx EstimatedTotal`, `lib/useFareEstimate.js`.) The exact numbers (fare so far, paid) never use the dashed look.
+- **"Trip so far" counts the seconds** on both screens: `1.1 mi · 5 min 03 s` (under a minute `45 s`, over an hour `1 h 05 min 03 s`), also on the collapsed sheet's one line. The rider's screen redraws every second for it
+  (`lib/meter.js fmtDurationSec`). The drive to the pickup and the waiting clock keep their own forms.
 - **"Paid so far" lines next to the fare.** Under *Fare so far* and *Paid*, both apps show what has been paid until now, split by kind, and it grows through the ride:
-  `Paid so far:` · `Base rate: $2.00` · `Miles: 3 ($3.30)` · `Minutes: 7 ($1.75)`. A mile or a minute counts once its payment is covered; one only partly paid adds the part that was paid to its
+  `Paid so far:` · `Base rate: $1.50` · `Miles: 3 ($3.30)` · `Minutes: 7 ($1.40)`. A mile or a minute counts once its payment is covered; one only partly paid adds the part that was paid to its
   amount but not to the count. After the ride, the receipt (rider) and the summary (driver) show the same lines, plus *End of ride:* for the settled rest of the last mile and minute. (`lib/ticks.js paidBreakdown`, `ui/FareBreakdown.jsx`.)
 - **Nearly full-screen map.** Once a driver is confirmed, the trip card is tucked away: only a handle and one line
   (for example "Driver arriving in 5 min") show at the bottom. Drag the handle up, or tap it, to open the details; drag down or tap to close.
@@ -287,7 +299,7 @@ still calls unspent (NUT-09), and the money is back. No server, no account, no r
 - **Fare so far.** While the ride runs, both screens show what the ride has earned and what the rider has paid. The rider also sees a warning with
   **Add funds** when the wallet is short. The driver sees a card after two missed payments.
 - **Finish ride.** One button on both screens. It always asks for confirmation first. There is no *Cancel* button.
-- **Add a stop or change the destination** (rider, while riding): the driver accepts, or finishes the ride.
+- **Add stop / update fare** (rider, while riding): the rider sees the estimated change in the fare; the driver accepts, or finishes the ride.
 
 ## Driver rates (each driver sets their own)
 - In *Account → Your rates* a driver sets a **base rate** (paid when the ride starts), a **price per mile** and a **price per minute**, in the driver's
@@ -514,7 +526,7 @@ A web page cannot read the location with the screen off. `native/` wraps the **d
 ## Configuration
 | What | Where |
 |---|---|
-| App rates (the fallback), driver-rate limits, timers, demo data | `src/config/settings.js` |
+| App rates (the fallback: base $1.50, $1.10 per mile, $0.20 per minute), driver-rate limits, the low-balance warning (`LOW_BALANCE_USD`, $5), timers, demo data | `src/config/settings.js` |
 | Tick rules: grace time for a missed payment (30 s), missed-payment limit (2) | `src/lib/ticks.js` |
 | Silence rules (10 minutes), arrival distance (150 m), start-code lock | `src/lib/finish.js`, `src/lib/arrival.js`, `src/lib/startcode.js` |
 | The ecash mint a new driver starts with | `VITE_DEFAULT_MINT` in `.env` (default in `src/config/services.js`) |
@@ -606,6 +618,7 @@ To switch, copy `env.example` to `.env`, set `VITE_TILE_URL` (and `VITE_PHOTON_U
   and a cancel rate on profiles.
 
 ## Changelog
+- **A live ecash balance, the estimate below "Paid", "Add stop / update fare" with an estimated change, seconds on the trip clock, new default rates** — (1) The rider's fare card starts with *Your ecash* (the wallet's balance at the ride's mint, live), red at $5.00 or less. (2) The estimated total moved from the bottom of the sheet to a dashed "≈" row below *Paid* on both screens; the old place shows it only before the ride starts. (3) *Add a stop or change the destination* is now **Add stop / update fare**: after the rider picks a place the modal shows the estimated change in the fare (dashed, ≈, for example *≈ +$2.40 · +1.8 mi · +4 min*; negative for a shorter way), the driver's request card shows the same, the rider's pending note shows it, and after the driver accepts the estimated total is priced again for the new route with a muted *from the added stop ≈ +$…* line. (4) *Trip so far* shows seconds on both screens. (5) The app's default rates are now **$1.50 base, $1.10 per mile, $0.20 per minute** (were $2.00 / $1.10 / $0.25): `FARE_RATES` in `config/settings.js`; the start amount with the defaults is $1.50 + 2 × $0.20 + $1.10 = **$3.00**. New: `lib/useFareEstimate.js`, `ui/FareEstimate.jsx`, `fareChangeSats`, `isLowBalance`, `fmtDurationSec`, `test/tripcard.test.mjs`; the `ride` and `stop` browser runs check all of it.
 - **No "It matches" button; the start-code field is at the top; apps say which commit they came from** — the rider no longer taps *It matches* / *Doesn't match* to confirm the car: the driver's photo, car and plate are on the screen and the rider checks them by eye (the screen says: if they do not match, do not get in; use *Safety*). The 4-digit start-code field is now on the arrived screen at once, at the top of the sheet (it was hidden behind that button and below the fold on a small phone). The driver app still reads a `boarded` confirmation from an older rider app. The service worker cache is renamed (`nostrride-v2`) and a page reload asks the server for a fresh page, so no phone keeps an old copy of the app. The exported apps now show *version <time> · from nostr-ride <commit>* at the bottom of Account, so a person can see at once whether the rider and the driver app are from the same commit (a rider app from before the single 4-digit code shows a 2-digit code on both phones and a narrow box: that is an old build, not this code).
 - **Dark mode, a password eye, "Cash out location", no flat price, a wide start-code field** — (1) *Account → Appearance → Dark mode* in both apps, saved the moment it is flipped; the colors are CSS variables, the map is darkened, a first-paint script avoids a white flash. (2) Every password field
   has a show/hide eye (the Unlock page too). (3) The driver's *Lightning address* section is now **Cash out location** (its helper line is just "Lightning address"; the onboarding list says the same); the *Ecash wallet* section no longer opens with "Riders pay you in ecash…" on the

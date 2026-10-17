@@ -20,10 +20,10 @@ const trip = { pickup: { name: "P", lat: 1, lng: 1 }, dropoff: { name: "D", lat:
 const now = () => Math.floor(Date.now() / 1000);
 
 // ── Fare ──
-assert.equal(F.fareAmount(0.5, 2), 3.05, "no minimum fare: base + per mile + per minute exactly"); // 2 + 0.55 + 0.5
-assert.equal(F.fareAmount(10, 20), 18); // 2 + 11 + 5
+assert.equal(F.fareAmount(0.5, 2), 2.45, "no minimum fare: base + per mile + per minute exactly"); // 1.50 + 0.55 + 0.40 (the app's default rates)
+assert.equal(F.fareAmount(10, 20), 16.5); // 1.50 + 11 + 4
 const q = F.quoteFare({ miles: 10, minutes: 20 }, 100000);
-assert.equal(q.usd, 18); assert.equal(q.sats, 18000); assert.equal(q.live, true);
+assert.equal(q.usd, 16.5); assert.equal(q.sats, 16500); assert.equal(q.live, true);
 assert.equal(F.quoteFare({ miles: 10, minutes: 20 }, null).live, false, "fallback price flagged");
 
 // ── Stages: only the assigned driver, only forward ──

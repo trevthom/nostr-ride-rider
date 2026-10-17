@@ -3,9 +3,9 @@
 //  paid until now, so the total can be followed all through the ride.
 //
 //      Paid so far:
-//      Base rate: $2.00
+//      Base rate: $1.50
 //      Miles: 3 ($3.30)
-//      Minutes: 7 ($1.75)
+//      Minutes: 7 ($1.40)
 //
 //  `ledger` is the ride's saved ledger (lib/ridemoney.js) and `paidSats` what the driver confirmed (lib/ticks.js paidBreakdown
 //  splits it by kind). Once the ride is over, a fifth line "End of ride:" shows the settled part of the last mile and minute.

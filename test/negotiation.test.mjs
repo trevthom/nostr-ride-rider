@@ -44,7 +44,7 @@ assert.equal(F.normalizeRates({ base: 300, perMile: 150, perMinute: 40 }), null,
 assert.equal(F.normalizeRates({ base: 1, perMile: 1, perMinute: 1, currency: "XXX" }), null, "unknown currency");
 assert.equal(F.typicalSats({ base: 1, perMile: 1, perMinute: 1, currency: "EUR" }, 2, 3, { EUR: 50000 }), 12000, "$6 equivalent: 6 EUR at 50,000 = 12,000 sats");
 assert.equal(F.typicalSats({ base: 1, perMile: 1, perMinute: 1, currency: "EUR" }, 2, 3, {}), null, "no price for that currency: not guessed");
-assert.equal(F.typicalSats(null, 10, 20, {}), 18000, "the app's rates are in dollars: the fallback price applies when none is known");
+assert.equal(F.typicalSats(null, 10, 20, {}), 16500, "the app's rates are in dollars: the fallback price applies when none is known");
 assert.equal(F.median([7, 3, 5]), 5);
 assert.equal(F.median([2, 4, 6, 10]), 5);
 assert.equal(F.median([]), null);

@@ -7,7 +7,7 @@
 // (lib/ticks.js): the base when the ride starts, then each mile and each minute at these rates.
 // There is no minimum fare. The rider app shows the estimate before requesting; the driver
 // app shows the same number on the incoming request. Tune freely.
-export const FARE_RATES = { base: 2.0, perMile: 1.1, perMinute: 0.25 };
+export const FARE_RATES = { base: 1.5, perMile: 1.1, perMinute: 0.2 };
 
 // Used ONLY when the live BTC price can't be fetched, so a fare can still be
 // quoted in sats. The rider sees a "price estimate" note when it is in use.
@@ -17,6 +17,10 @@ export const FALLBACK_BTC_USD = 100000;
 // they can enter (in dollars; other currencies are scaled, see lib/currency.js), so a typo cannot
 // publish a silly rate.
 export const RATE_LIMITS = { base: 50, perMile: 20, perMinute: 5 };
+
+// The rider's ecash balance turns red during a ride when it is this many US dollars (or the same value in sats) or less.
+// It is a warning only: a ride is never stopped by it.
+export const LOW_BALANCE_USD = 5;
 
 // How long an incoming request card stays on the driver's screen before it
 // is set aside (the request itself stays open for other drivers).

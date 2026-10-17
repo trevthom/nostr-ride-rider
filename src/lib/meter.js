@@ -41,6 +41,15 @@ export function fmtDuration(ms) {
   return min < 60 ? `${min} min` : `${Math.floor(min / 60)} h ${String(min % 60).padStart(2, "0")} min`;
 }
 
+// The same with the seconds, for the clock of a ride that is running: "45 s", "5 min 03 s", "1 h 05 min 03 s". Input in milliseconds.
+export function fmtDurationSec(ms) {
+  if (!Number.isFinite(ms) || ms < 0) return "–";
+  const t = Math.floor(ms / 1000), h = Math.floor(t / 3600), m = Math.floor((t % 3600) / 60), s = t % 60;
+  const ss = String(s).padStart(2, "0");
+  if (h > 0) return `${h} h ${String(m).padStart(2, "0")} min ${ss} s`;
+  return m > 0 ? `${m} min ${ss} s` : `${s} s`;
+}
+
 // A waiting clock, "2:05".
 export function fmtClock(ms) {
   if (!Number.isFinite(ms) || ms < 0) return "0:00";

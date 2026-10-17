@@ -72,7 +72,7 @@ src/
   index.css  theme.js             # font, animations; few colors (THEME)
   config/
     app.js                        # APP_ROLE / IS_DRIVER_APP / APP_NAME / BUILD_ID (build time + commit, shown in Account)
-    settings.js                   # tunables: FARE_RATES (USD, no minimum), FALLBACK_BTC_USD,
+    settings.js                   # tunables: FARE_RATES (USD, no minimum: base 1.50, 1.10/mi, 0.20/min), FALLBACK_BTC_USD, LOW_BALANCE_USD (5),
                                   #   RATE_LIMITS, REQUEST_CARD_SECONDS, OFFER_TTL_SECONDS, DEFAULT_REQUEST_RADIUS_MILES,
                                   #   USE_DEMO_DATA (dev only), CONTACT_PLATFORMS
     services.js                   # tile / Photon / OSRM URLs + DEFAULT_MINT, overridable by VITE_* env (see env.example)
@@ -108,15 +108,16 @@ src/
     mints.js      # cleanMintUrl/isMintUrl/mintLabel
     trips.js      # derive current state: activeRideFor, activeDriveFor, offersForRide, rankOffers/offerGender, offerFrom, pendingOfferFor, acceptFor, upcomingRidesFor, isScheduledLater
     odometer.js   # stepOdo/newOdo: miles of a GPS track (skips wobble, bad fixes, glitches) (pure)
-    meter.js      # referenceMiles (driver's distance unless the rider's differs >5%), meterView, fmt* (pure)
+    meter.js      # referenceMiles (driver's distance unless the rider's differs >5%), meterView, fmt* incl. fmtDurationSec (pure)
     pickup.js     # pickupChange(request): pending|accepted|declined; PICKUP_CHANGE_NOTE (the exact place logic is in privacy.js)
-    fare.js       # quoteFare/fareAmount/usdToSats/pickupEta + normalizeRates (incl. currency)/typicalFare/typicalSats/median/satsFromUsd/usdFromSats (pure)
+    fare.js       # quoteFare/fareAmount/usdToSats/pickupEta + normalizeRates (incl. currency)/typicalFare/typicalSats/median/satsFromUsd/usdFromSats/lowBalanceSats/isLowBalance/fareChangeSats (pure)
     earnings.js   # completedDrives (paid ticks + tips), summarizeEarnings
     privacy.js    # publicPlace, seal/unseal, exactTrip, sealVehicle/myVehicle/offerPlate
     contact.js    # contactHref (safe links from untrusted handles)
     evidence.js   # tip records (30086) + proofLevel + driver-side verifyPayment + disputeRecord (ticks, replies, waivers, finishes); rideConfirm is in rides.js
     bolt11.js     # paymentHash / preimageMatches
     blocks.js     # local block list helpers
+    useFareEstimate.js # estimates during a ride: changeRoutes (pure), useChangeEstimate (a new stop / destination: the fare change), useTotalEstimate (the whole ride, re-priced after an accepted change); routes via OSRM (routing.js)
     appearance.js # light/dark look: isDark/setDark (saved AT ONCE in localStorage `nostrride_dark`), applyAppearance (the `dark` class on <html> + <meta theme-color>), useDark
     recovery.js   # the 12-word recovery phrase (pure): newPhrase/cleanPhrase/checkPhrase/seedOf/pickCheckPositions/checkAnswers/boxKey (@scure/bip39; HKDF)
     vouches.js    # "I know and trust this person": parsePubkey (npub; an nsec is refused), vouchEvent/vouchList (kind 30102), trustFor(target, me) = {direct, via} (ONE hop, only through people I vouch for), trustHeadline/trustDetail (the badge words)
@@ -129,6 +130,7 @@ src/
   ui/                             # shared UI kit
     Layout.jsx    # AppFrame, MapPage (+ measures the Sheet so the map pads for it), Sheet (collapsible with `peek`/openKey/closeKey), FloatButton, Screen, TabBar
     MapView.jsx   # Leaflet + OpenStreetMap tiles; pins, OSRM route, cars, "me" dot, price pills, ref.fit(); trip mode (`navigation` + `follow`)
+    FareEstimate.jsx # the ESTIMATE look (dashed outline, ≈, muted italic): EstimatedTotal (fare card, both apps), ChangeEstimate (a proposed stop / destination)
     Button.jsx Icon.jsx Avatar.jsx Money.jsx Parts.jsx (Row, Toggle, Field, ConfirmDialog, Modal, Spinner)
     Fold.jsx      # a section that opens and closes (Account); openFold(id); FoldTitle/SectionLabel draw nothing inside a Fold (the header has the title)
     AmountInput.jsx (local currency or sats, unit swap; tips, funds, waivers)  PasswordField.jsx (password input with a show/hide eye)  TripMeter.jsx (time + distance card, peekMeter)  VouchBadge.jsx ContactSheet.jsx UserModal.jsx NoticeBanner.jsx ErrorBoundary.jsx RelayEditor.jsx QRCode.jsx SatsAmount.jsx
@@ -356,6 +358,11 @@ carries `driverPubkey`. Stage is `enroute` (default) → `arrived` → `riding`.
   oversized box turned with CSS; Leaflet's own drag is off and panning is done in MapView (its mouse maths ignores the turn); icons that
   must stay upright carry the `nr-up` class. Never animate a zoom the app starts itself: Leaflet reports an animated zoom's start
   later, so it would look like the user zoomed. Do not add `leaflet-rotate` (GPL-3 licence; it also patches Leaflet core).
+- **The trip card (fare card, both apps)**: top to bottom, rider: `Your ecash` (live wallet balance at the ride's mint, `ecash.balance(payMint)`; the wallet notifies `AppContext`, which re-renders; RED at `LOW_BALANCE_USD` (5 US dollars at `usdPrice`) or less, `isLowBalance`), `Fare so far`, `Paid`, the ESTIMATED total (`ui/FareEstimate.jsx`), then the `Paid so far` lines.
+  Driver: `Fare so far`, `Paid by the rider`, the estimated total, the lines. **Estimates use one look: a dashed outline, "≈" in front, muted italic text; exact numbers never do.** The estimated total is the driver's offer estimate until a stop / new destination is accepted, then the whole route
+  (pickup → stops → destination) priced at the driver's FROZEN rates (`useTotalEstimate`), with a muted "from the added stop ≈ +$…" line. Before the ride starts the estimate stays at the bottom of the sheet next to the route; while riding it is only in the card. The rider's link is **Add stop / update fare** (modal `AddStop`): after a place is picked, `ChangeEstimate` shows the
+  estimated change in the fare (route from the car through the places ahead vs the same with the new place: `fareChangeSats` = per mile × Δmiles + per minute × Δminutes; negative for a shorter way; nothing at all when a route or a price is missing, never a made-up number). The driver's pending-stop card and the rider's pending note show it too.
+  "Trip so far" counts seconds (`fmtDurationSec`); the rider's `OnTrip` re-renders every second for it.
 - **Paid so far lines**: the fare cards show `Paid so far:` / `Base rate: $` / `Miles: # ($)` / `Minutes: # ($)` (`ui/FareBreakdown.jsx`, from `lib/ticks.js paidBreakdown(ledger, paidSats)`: what the driver confirmed covers the ticks in time order; a tick counts once covered, with missedTicks' slack). Rider `OnTrip` + `Receipt`, driver `DriveTrip` + `DriveSummary`.
 - **Phone screens** (ui/Layout.jsx, index.css, `scripts/e2e` with `E2E_VIEWPORT=360x640`): the app frame is `.nr-frame` (`100dvh`, `100%` where dvh is unknown) with the side safe-area insets; the viewport meta has `interactive-widget=resizes-content` (the keyboard shrinks the page, so a field in a sheet stays visible);
   on touch screens (`pointer: coarse`) every field is at least 16px (iOS zooms the page on a smaller one); the desktop look is unchanged (`max-w-md` column). The main button(s) of a sheet go in `<StickyActions>` (Request ride, Accept, Confirm driver, I've arrived / Start trip / Finish ride): they stay at the bottom of the

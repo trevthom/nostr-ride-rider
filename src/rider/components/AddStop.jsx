@@ -1,9 +1,10 @@
 // ════════════════════════════════════════════════════════════
-//  ADD STOP (rider) — While the ride is under way, ask the driver to add a stop
+//  ADD STOP / UPDATE FARE (rider) — While the ride is under way, ask the driver to add a stop
 //  on the way, or to go to a different destination. Pick a place (search), then
 //  send it. The driver can accept it, or finish the ride instead.
-//  The rider is told, before asking, what it does to the price: the ride keeps adding
-//  miles and minutes at the driver's rates.
+//  The rider sees, before asking, the ESTIMATED change in the fare (a dashed "≈" box, ui/FareEstimate.jsx):
+//  the ride keeps adding miles and minutes at the driver's rates, so a longer route costs more and a shorter one less.
+//  `from` = where the car is now, `ahead` = the places still ahead (the destination last), `terms` = the driver's frozen rates.
 // ════════════════════════════════════════════════════════════
 
 import { useEffect, useRef, useState } from "react";
@@ -13,8 +14,9 @@ import { STOP_NOTE_METERED } from "../../lib/stops.js";
 import { Modal, Spinner } from "../../ui/Parts.jsx";
 import Button from "../../ui/Button.jsx";
 import Icon from "../../ui/Icon.jsx";
+import { ChangeEstimate } from "../../ui/FareEstimate.jsx";
 
-export default function AddStop({ request, onClose }) {
+export default function AddStop({ request, from, ahead, terms, onClose }) {
   const { here, myPosition, proposeStop } = useRider();
   const [mode, setMode] = useState("stop"); // "stop" | "destination"
   const [text, setText] = useState("");
@@ -49,7 +51,7 @@ export default function AddStop({ request, onClose }) {
   const send = () => { if (picked && proposeStop(request, { mode, place: picked })) onClose(); };
 
   return (
-    <Modal open title="Add a stop or change the destination" onClose={onClose}>
+    <Modal open title="Add stop / update fare" onClose={onClose}>
       <div className="flex gap-2 mb-3" role="group" aria-label="What to change">
         {[["stop", "Add a stop"], ["destination", "New destination"]].map(([id, label]) => (
           <button key={id} type="button" aria-pressed={mode === id} onClick={() => setMode(id)}
@@ -94,6 +96,7 @@ export default function AddStop({ request, onClose }) {
         ))}
       </ul>
 
+      {picked && <ChangeEstimate className="mt-3" from={from} ahead={ahead} mode={mode} place={picked} terms={terms} />}
       <p className="text-xs rounded-xl px-3 py-2 mt-3 text-neutral-600 bg-neutral-100" role="note">
         {STOP_NOTE_METERED} Your driver is told this too.
       </p>
