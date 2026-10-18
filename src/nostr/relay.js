@@ -25,6 +25,7 @@ import { probeRelay } from "./reachable.js";
 import { normalizeURL } from "nostr-tools/utils";
 import { EVENT_KINDS, APP_TAG } from "./eventKinds.js";
 import { getRelays, onRelaysChange } from "../config/relays.js";
+import { GIFT_WRAP, SEALED_KINDS, wrap, unwrap, recipientsOf } from "./sealing.js";
 
 // The app's kinds we sync from relays (NOT kind 0 / presence).
 const APP_KINDS = [
@@ -82,7 +83,10 @@ class NostrRelay {
     this.health = new Map(); // url -> { ok, at } from the last connection probe
     this.probing = new Set();
     this.listeners = new Set();
+    this.me = null; // { sk, pk }: who may open the wraps addressed to this device (setIdentity)
+    this.seenWraps = new Set(); // wrap ids already opened (or found unreadable)
     this.sub = null;
+    this.wrapSub = null;
     this.syncing = false;
     this.historyAt = new Map(); // pubkey -> ms of last fetchHistory
     this.historyJobs = []; // queued fetchHistory runs (see _queue)
@@ -111,6 +115,26 @@ class NostrRelay {
     } catch (e) {
       console.error("Relay sync failed (running local-only):", e);
     }
+    try { this.wrapSub && this.wrapSub.close(); } catch { /* ignore */ }
+    this.wrapSub = null;
+    if (!this.me) return;
+    try {
+      this.wrapSub = this.pool.subscribeMany(
+        getRelays(),
+        { kinds: [GIFT_WRAP], "#p": [this.me.pk], since: nowSec() - 86400 },
+        { onevent: (ev) => this._ingest(ev) }
+      );
+    } catch (e) {
+      console.error("Wrap sync failed:", e);
+    }
+  }
+
+  // Who this device opens wraps for. Called at login (and with null at logout). Opens the wrap subscription.
+  setIdentity(sk, pk) {
+    const same = this.me && pk && this.me.pk === pk;
+    this.me = sk && pk ? { sk, pk } : null;
+    if (!same) this.seenWraps = new Set();
+    if (this.syncing && !same) this._resubscribe();
   }
 
   // Put an event fetched from the relays into the cache (the same checks as the live subscription). True if it was new.
@@ -167,6 +191,10 @@ class NostrRelay {
       // 1) Everything they wrote, and everything addressed to them.
       const first = (await Promise.all([q({ kinds: APP_KINDS, authors: [pubkey] }), q({ kinds: APP_KINDS, "#p": [pubkey] })])).flat();
       take(first);
+      // Our own sealed jobs: the wraps addressed to us. (Another person's wraps are not ours to open.)
+      if (this.me && pubkey === this.me.pk) {
+        take(await this.pool.querySync(getRelays(), { kinds: [GIFT_WRAP], "#p": [pubkey], limit: 1000 }).catch(() => []));
+      }
       // 2) The rides those events point at, then every version of each.
       const missing = tagVals(first, "e").filter((id) => !this.seen.has(id));
       for (const ids of chunks(missing)) take(await q({ ids }));
@@ -195,14 +223,19 @@ class NostrRelay {
   // 2 min for clock skew), so polls don't re-download the whole day.
   async fetchRecent() {
     const started = nowSec();
+    const since = Math.max(started - 86400, this.recentSince - 120);
     try {
       const events = await this.pool.querySync(getRelays(), {
         kinds: APP_KINDS,
         "#t": [APP_TAG],
-        since: Math.max(started - 86400, this.recentSince - 120),
+        since,
       });
       this.recentSince = started;
       let added = 0;
+      if (this.me) {
+        const wraps = await this.pool.querySync(getRelays(), { kinds: [GIFT_WRAP], "#p": [this.me.pk], since }).catch(() => []);
+        wraps.forEach((w) => { if (this._ingest(w)) added++; });
+      }
       events.forEach((e) => { if (this._ingest(e)) added++; });
       return added;
     } catch (e) {
@@ -215,24 +248,47 @@ class NostrRelay {
   // soon as ANY relay accepts the event, or false once all have failed.
   // Every relay's promise gets a handler, so a dead relay never throws an
   // unhandled rejection.
-  publish(event) {
+  publish(event, { to = [] } = {}) {
     this._store(event);
+    if (SEALED_KINDS.has(event.kind)) return this._publishSealed(event, recipientsOf(event, to));
     return this._send(event).then((ok) => {
       if (!ok) this._enqueue(event);
       return ok;
     });
   }
 
+  // A job event goes out ONLY inside gift wraps, one for each person who must read it (nostr/sealing.js). True when any wrap was accepted.
+  _publishSealed(inner, recipients) {
+    return Promise.all(recipients.map((pk) => this._sendWrap(inner, wrap(inner, pk)))).then((r) => r.some(Boolean));
+  }
+
+  async _sendWrap(inner, w) {
+    const ok = await this._send(w);
+    if (!ok) this._enqueue(w, inner);
+    return ok;
+  }
+
+  // Send a job event that was already published to more people (a driver who came online after the request, say).
+  sealTo(inner, recipients) {
+    if (!SEALED_KINDS.has(inner.kind)) return Promise.resolve(false);
+    return this._publishSealed(inner, recipients.filter((pk) => pk !== inner.pubkey));
+  }
+
   // ── Outbox: events no relay has accepted yet ──
   outboxSize() { return this.outbox.size; }
   // How long (ms) this event has been waiting in the outbox; 0 if it is not waiting (sent, or never failed).
-  outboxAge(id) { const o = this.outbox.get(id); return o ? Date.now() - o.at : 0; }
+  // `id` is a plain event's id or the id of a sealed event (the oldest of its waiting wraps counts).
+  outboxAge(id) {
+    let at = 0;
+    for (const [k, o] of this.outbox) if ((k === id || o.inner?.id === id) && (!at || o.at < at)) at = o.at;
+    return at ? Date.now() - at : 0;
+  }
   oldestOutboxAge() { let m = 0; for (const o of this.outbox.values()) m = Math.max(m, Date.now() - o.at); return m; }
   onOutbox(fn) { this.outboxListeners.add(fn); return () => this.outboxListeners.delete(fn); }
 
-  _enqueue(event) {
+  _enqueue(event, inner = null) {
     if (event.kind >= 20000 && event.kind < 30000) return; // ephemeral: stale by the time it could be re-sent
-    if (!this.outbox.has(event.id)) this.outbox.set(event.id, { event, tries: 0, at: Date.now() });
+    if (!this.outbox.has(event.id)) this.outbox.set(event.id, { event, inner, tries: 0, at: Date.now() });
     this._saveOutbox();
     this._schedule();
   }
@@ -259,14 +315,18 @@ class NostrRelay {
   }
 
   _saveOutbox() {
-    try { localStorage.setItem("nostrride_outbox", JSON.stringify([...this.outbox.values()].map((o) => ({ event: o.event, at: o.at })))); } catch { /* no storage */ }
+    try { localStorage.setItem("nostrride_outbox", JSON.stringify([...this.outbox.values()].map((o) => ({ event: o.event, inner: o.inner, at: o.at })))); } catch { /* no storage */ }
     this.outboxListeners.forEach((fn) => { try { fn(this.outbox.size); } catch { /* ignore */ } });
   }
 
   _loadOutbox() {
     try {
       const saved = JSON.parse(localStorage.getItem("nostrride_outbox") || "[]");
-      saved.forEach((s) => { if (s?.event?.id) { this._store(s.event); this.outbox.set(s.event.id, { event: s.event, tries: 0, at: s.at || Date.now() }); } });
+      saved.forEach((s) => {
+        if (!s?.event?.id) return;
+        this._store(s.inner || s.event); // a wrap carries its inner event: that is what the screens read
+        this.outbox.set(s.event.id, { event: s.event, inner: s.inner || null, tries: 0, at: s.at || Date.now() });
+      });
       if (this.outbox.size) setTimeout(() => this.flushOutbox(), 1500);
     } catch { /* no storage or bad data */ }
   }
@@ -408,9 +468,18 @@ class NostrRelay {
   // UNTRUSTED add (relay-sourced). Validated before storing so other
   // apps' events on the same kinds can never reach the screens.
   _ingest(event) {
+    if (event.kind === GIFT_WRAP) return this._ingestWrap(event);
     if (this.seen.has(event.id)) return false;
     if (event.kind !== EVENT_KINDS.METADATA && !isOurs(event)) return false;
     return this._store(event);
+  }
+
+  // A gift wrap from a relay: open it with our key; the inner event goes through the same checks as any relay event.
+  _ingestWrap(w) {
+    if (!this.me || this.seenWraps.has(w.id)) return false;
+    this.seenWraps.add(w.id);
+    const inner = unwrap(w, this.me.sk);
+    return inner ? this._ingest(inner) : false;
   }
 
   _matches(event, filter) {

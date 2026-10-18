@@ -7,6 +7,7 @@
 import { relay } from "./relay.js";
 import { EVENT_KINDS } from "./eventKinds.js";
 import { normalizeRates } from "../lib/fare.js";
+import { statsOf } from "../lib/mileage.js";
 
 // The raw content of the user's NEWEST kind-0 (or null). Kind 0 is
 // shared by every Nostr app, so writes must merge into this, not
@@ -41,6 +42,7 @@ export function getProfile(pubkey) {
     picture: str(meta.picture),
     lud16: str(meta.lud16).trim(), // Lightning address: where riders pay this user
     rates: normalizeRates(meta.rates), // the driver's own "typical fare" rates, or null
+    stats: statsOf(meta), // self-reported totals (miles driven), or null
     gender: meta.gender === "male" || meta.gender === "female" ? meta.gender : "", // optional, self-declared
     vehicle: v && {
       picture: str(v.picture),

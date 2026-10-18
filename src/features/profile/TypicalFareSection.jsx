@@ -15,21 +15,24 @@ import { useApp } from "../../state/AppContext.jsx";
 import { APP_RATES, normalizeRates, typicalFare } from "../../lib/fare.js";
 import { CURRENCIES, formatFiat } from "../../lib/currency.js";
 import { SectionLabel } from "../../ui/Parts.jsx";
+import { getUnits, ratePerUnit, perMileFrom, formatDistance } from "../../lib/units.js";
 
-const FIELDS = [
+// The distance rate is typed and shown per mile or per kilometer (Account → Units); it is saved per mile.
+const fields = () => [
   ["base", "Base fare", "Charged on every ride"],
-  ["perMile", "Per mile", "For each mile driven"],
+  getUnits() === "km" ? ["perMile", "Per kilometer", "For each kilometer driven"] : ["perMile", "Per mile", "For each mile driven"],
   ["perMinute", "Per minute", "For each minute of the trip"],
 ];
 const inputCls = "w-full bg-white border border-neutral-300 rounded-lg py-2 pl-6 pr-2 text-black text-sm focus:outline-none focus:border-black";
 
 const formOf = (rates) => {
   const r = normalizeRates(rates) || APP_RATES;
-  return { base: r.base.toFixed(2), perMile: r.perMile.toFixed(2), perMinute: r.perMinute.toFixed(2) };
+  return { base: r.base.toFixed(2), perMile: ratePerUnit(r.perMile).toFixed(2), perMinute: r.perMinute.toFixed(2) };
 };
 
 export default function TypicalFareSection({ rates, onSave, locked = false }) {
   const { currency } = useApp();
+  const FIELDS = fields();
   const saved = normalizeRates(rates);
   const symbol = CURRENCIES[currency].symbol;
   const scale = CURRENCIES[currency].scale;
@@ -50,7 +53,7 @@ export default function TypicalFareSection({ rates, onSave, locked = false }) {
   };
 
   // Parsed values (null while a field is empty or out of range).
-  const parsed = normalizeRates({ base: form.base === "" ? NaN : Number(form.base), perMile: form.perMile === "" ? NaN : Number(form.perMile), perMinute: form.perMinute === "" ? NaN : Number(form.perMinute), currency });
+  const parsed = normalizeRates({ base: form.base === "" ? NaN : Number(form.base), perMile: form.perMile === "" ? NaN : Math.round(perMileFrom(Number(form.perMile)) * 100) / 100, perMinute: form.perMinute === "" ? NaN : Number(form.perMinute), currency });
   const example = parsed ? typicalFare(parsed, 5, 15) : 0;
 
   const save = () => {
@@ -70,7 +73,7 @@ export default function TypicalFareSection({ rates, onSave, locked = false }) {
     <section>
       <SectionLabel>Your rates</SectionLabel>
       <p className="text-sm text-neutral-500 mb-3">
-        Set your own rates in {currency}. A ride is paid as it runs: your base rate when it starts, then each mile and each minute. Riders see what you would charge for their trip, next to your name.
+        Set your own rates in {currency}. A ride is paid as it runs: your base rate when it starts, then each {getUnits() === "km" ? "kilometer" : "mile"} and each minute. Riders see what you would charge for their trip, next to your name.
       </p>
       {locked && <p className="text-sm text-amber-800 bg-amber-50 rounded-xl px-3 py-2 mb-3" role="status">Your rates are frozen while a ride is running. You can change them when it ends.</p>}
       {saved && saved.currency !== currency && <p className="text-xs text-amber-700 mb-2" role="status">Your saved rates are in {saved.currency}. Save to use {currency} instead.</p>}
@@ -88,7 +91,7 @@ export default function TypicalFareSection({ rates, onSave, locked = false }) {
       </div>
       <p className="text-sm text-neutral-700 mt-3" role="status">
         {parsed
-          ? <>A 5 mile, 15 minute trip: <span className="font-semibold">{formatFiat(example, currency)}</span>.</>
+          ? <>A {formatDistance(5, { digits: 0 })}, 15 minute trip: <span className="font-semibold">{formatFiat(example, currency)}</span>.</>
           : "Enter all three rates."}
       </p>
       <p className="text-xs text-neutral-500">There is no minimum fare: the ride costs exactly the base rate plus the miles and minutes.</p>

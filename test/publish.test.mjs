@@ -2,8 +2,10 @@
 // Run with: npm test
 import assert from "node:assert/strict";
 const { relay } = await import("../src/nostr/relay.js");
+const { generateSecretKey, getPublicKey } = await import("nostr-tools");
+const author = getPublicKey(generateSecretKey()); // job events are sealed to a real key: the author gets a copy
 const delay = (ms, ok) => new Promise((res, rej) => setTimeout(() => (ok ? res("ok") : rej(new Error("connection failed"))), ms));
-let n = 0; const ev = () => ({ id: "x" + ++n, pubkey: "a", kind: 30078, created_at: 1, tags: [], content: "{}" });
+let n = 0; const ev = () => ({ id: "x" + ++n, pubkey: author, kind: 30078, created_at: 1, tags: [], content: "{}" });
 let unhandled = 0; process.on("unhandledRejection", () => unhandled++);
 relay.pool.publish = () => [delay(50, false), delay(20, true), delay(5000, true)];
 let t = Date.now(); assert.equal(await relay.publish(ev()), true); assert.ok(Date.now() - t < 1000, "resolves on first ack, not the slowest relay");

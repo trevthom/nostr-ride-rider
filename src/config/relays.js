@@ -47,6 +47,7 @@ export function setRelays(list) {
     /* ignore */
   }
   listeners.forEach((fn) => { try { fn(current); } catch { /* ignore */ } });
+  writeListeners.forEach((fn) => { try { fn("relays"); } catch { /* ignore */ } });
 }
 
 // Re-open every relay subscription (after the network came back, or the tab woke up).
@@ -77,10 +78,15 @@ export function getSetting(key, fallback) {
   return fallback;
 }
 
+// Anyone (the encrypted backup, lib/backup.js) may ask to hear about every saved setting.
+const writeListeners = new Set();
+export const onSettingWrite = (fn) => { writeListeners.add(fn); return () => writeListeners.delete(fn); };
+
 export function setSetting(key, value) {
   try {
     localStorage.setItem("nostrride_" + key, JSON.stringify(value));
   } catch {
     /* ignore */
   }
+  writeListeners.forEach((fn) => { try { fn(key); } catch { /* ignore */ } });
 }

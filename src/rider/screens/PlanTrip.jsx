@@ -12,6 +12,7 @@
 //  planning and returns to the home screen (resetPlan).
 // ════════════════════════════════════════════════════════════
 
+import { formatDistance, ratePerUnit, unitName } from "../../lib/units.js";
 import { useEffect, useRef, useState } from "react";
 import { useApp } from "../../state/AppContext.jsx";
 import { useRider } from "../state/RiderContext.jsx";
@@ -219,7 +220,7 @@ function Quote() {
           <div className="flex-1 min-w-0">
             <p className="font-bold text-[17px] leading-tight">NostrRide</p>
             <p className="text-sm text-neutral-600">
-              {route ? `${route.minutes} min · ${route.miles.toFixed(1)} mi${route.straight ? " (est.)" : ""}` : "Finding the best route…"}
+              {route ? `${route.minutes} min · ${formatDistance(route.miles)}${route.straight ? " (est.)" : ""}` : "Finding the best route…"}
             </p>
             <p className="text-xs text-neutral-500">
               {timed ? "Scheduled" : eta ? `Driver about ${eta} min away` : "No drivers online yet"}
@@ -255,7 +256,7 @@ function Quote() {
               </div>
             ) : (
               <p className="text-xs text-neutral-500 mt-2">
-                {`App rates: ${formatFiat(FARE_RATES.base, "USD")} base + ${formatFiat(FARE_RATES.perMile, "USD")}/mi + ${formatFiat(FARE_RATES.perMinute, "USD")}/min.`}
+                {`App rates: ${formatFiat(FARE_RATES.base, "USD")} base + ${formatFiat(ratePerUnit(FARE_RATES.perMile), "USD")}/${unitName()} + ${formatFiat(FARE_RATES.perMinute, "USD")}/min.`}
               </p>
             )}
           </div>

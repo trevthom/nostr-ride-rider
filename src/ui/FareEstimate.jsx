@@ -8,13 +8,14 @@
 //    signedMoney(sats, btcPrice)                      "+$2.40" / "−$1.10" (a plain string)
 // ════════════════════════════════════════════════════════════
 
+import { formatDistance } from "../lib/units.js";
 import { useApp } from "../state/AppContext.jsx";
 import Money, { moneyText } from "./Money.jsx";
 import { useChangeEstimate, useTotalEstimate } from "../lib/useFareEstimate.js";
 
 export const signedMoney = (sats, btcPrice) => (sats < 0 ? "−" : sats > 0 ? "+" : "") + moneyText(Math.abs(sats), btcPrice);
 const sign = (n) => (n < 0 ? "−" : "+");
-const milesText = (m) => `${sign(m)}${Math.abs(m).toFixed(1)} mi`;
+const milesText = (m) => `${sign(m)}${formatDistance(Math.abs(m))}`;
 const minutesText = (m) => `${sign(m)}${Math.round(Math.abs(m))} min`;
 
 const Approx = () => <span className="text-neutral-400 mr-1" aria-hidden="true">≈</span>;

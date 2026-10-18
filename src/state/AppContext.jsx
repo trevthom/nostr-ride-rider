@@ -12,13 +12,20 @@
 //      const { user, setView, publish } = useApp();
 // ════════════════════════════════════════════════════════════
 
-import { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
+import { createContext, useContext, useState, useEffect, useCallback, useRef, Fragment } from "react";
 import { relay } from "../nostr/relay.js";
 import { EVENT_KINDS, APP_TAG } from "../nostr/eventKinds.js";
 import { buildSignedEvent } from "../nostr/events.js";
 import { latestVersions } from "../nostr/replaceable.js";
 import { emptyWalletState } from "../nostr/wallet.js";
 import { syncVouches } from "../nostr/vouchSync.js";
+import MilesSync from "../features/profile/MilesSync.jsx";
+import AudienceSync from "./AudienceSync.jsx";
+import { audienceFor } from "../lib/audience.js";
+import { getPeople, getAudience, addAudience, answerersOf } from "../lib/audienceStore.js";
+import { useBackup } from "./useBackup.js";
+import { applyAppearance, isDark } from "../lib/appearance.js";
+import { setUnits, getUnits } from "../lib/units.js";
 import { getProfile } from "../nostr/profiles.js";
 import { myVehicle } from "../lib/privacy.js";
 import { forgetKey } from "../nostr/keystore.js";
@@ -68,6 +75,7 @@ export function AppProvider({ initialView, children }) {
   const [notices, setNotices] = useState([]); // transient swipe-away banners
   const [liveTick, setLiveTick] = useState(0); // bumped on incoming relay events to re-render
   const [wallet, setWallet] = useState(emptyWalletState()); // connected NWC wallet
+  const [settingsEpoch, setSettingsEpoch] = useState(0); // bumped when a backup is put back: the screens are drawn again with the restored settings
 
   // Show a transient banner. Also fires a system notification when the app
   // isn't the focused tab, so users hear about it off-screen.
@@ -90,6 +98,19 @@ export function AppProvider({ initialView, children }) {
   const blockUser = useCallback((pubkey, name) => setBlocked((l) => { const n = addBlock(l, pubkey, name); setSetting("blocked", n); return n; }), []);
   const unblockUser = useCallback((pubkey) => setBlocked((l) => { const n = removeBlock(l, pubkey); setSetting("blocked", n); return n; }), []);
   const isBlockedPk = useCallback((pubkey) => isBlocked(blocked, pubkey), [blocked]);
+
+  // The encrypted backup of vouches, blocks and settings (lib/backup.js): checked at login, kept up to date, restored on a new phone.
+  const backup = useBackup({
+    user,
+    publish: (...a) => publishRef.current(...a),
+    onRestored: () => {
+      setBlocked(getSetting("blocked", []));
+      saveCurrency(getSetting("currency", getCurrency()));
+      setUnits(getUnits());
+      applyAppearance(isDark());
+      setSettingsEpoch((n) => n + 1);
+    },
+  });
 
   // The local currency (chosen in Account) and the BTC price in every supported currency (code → price).
   // Charges are stated in the local currency and turned into sats at the price of the moment. The last good
@@ -134,6 +155,12 @@ export function AppProvider({ initialView, children }) {
     relay.startSync();
     link.start();
   }, []);
+
+  // Who may open the gift wraps addressed to this device (nostr/sealing.js): the logged-in user.
+  useEffect(() => {
+    relay.setIdentity(user?.sk || null, user?.publicKey || null);
+    return () => relay.setIdentity(null, null);
+  }, [user?.sk, user?.publicKey]);
 
   // The ecash wallet of the logged-in user. Its code is loaded on demand (a separate chunk), proofs are
   // opened with the user's key, and anything paid but not yet claimed is claimed. `ecashTick` re-renders screens.
@@ -241,10 +268,24 @@ export function AppProvider({ initialView, children }) {
         relay.publishLocal(event);
         return Promise.resolve(false);
       }
-      return relay.publish(event);
+      // Job events go out sealed (nostr/sealing.js). A request is also sent to the drivers who may take it,
+      // and later versions of it (accepted, closed) go to everyone who already holds it or answered it.
+      const to = [];
+      if (kind === EVENT_KINDS.RIDE_REQUEST) {
+        const d = (tagged.find((t) => t[0] === "d") || [])[1];
+        let c = null;
+        try { c = typeof content === "string" ? JSON.parse(content) : content; } catch { /* no audience */ }
+        const asked = c && c.status === "requested" ? audienceFor(c, getPeople(), { me: user.publicKey, blocked }) : [];
+        to.push(...asked, ...getAudience(d), ...answerersOf(d, user.publicKey));
+        addAudience(d, asked);
+      }
+      return relay.publish(event, { to });
     },
-    [user]
+    [user, blocked]
   );
+
+  const publishRef = useRef(null);
+  publishRef.current = publish;
 
   // New relay events refresh the UI. A relay fetch can deliver hundreds of
   // events at once, so refreshes are coalesced: at most one refreshData +
@@ -334,7 +375,7 @@ export function AppProvider({ initialView, children }) {
     (async () => {
       await relay.fetchProfile(user.publicKey);
       const p = getProfile(user.publicKey);
-      if (alive && p && (p.picture || p.vehicle || p.lud16 || p.gender || p.rates)) {
+      if (alive && p && (p.picture || p.vehicle || p.lud16 || p.gender || p.rates || p.stats)) {
         setUser((u) => u && ({
           ...u,
           picture: u.picture || p.picture || "",
@@ -342,6 +383,7 @@ export function AppProvider({ initialView, children }) {
           vehicle: u.vehicle || myVehicle(u.publicKey, u.sk),
           gender: u.gender ?? p.gender ?? "",
           rates: u.rates ?? p.rates ?? null,
+          stats: u.stats ?? p.stats ?? null,
         }));
       }
     })();
@@ -387,7 +429,8 @@ export function AppProvider({ initialView, children }) {
     unblockUser,
     isBlockedPk,
     liveTick,
+    backup,
   };
 
-  return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
+  return <AppContext.Provider value={value}><Fragment key={settingsEpoch}><MilesSync /><AudienceSync />{children}</Fragment></AppContext.Provider>;
 }

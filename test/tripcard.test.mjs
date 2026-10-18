@@ -60,3 +60,15 @@ assert.equal(M.fmtDurationSec(NaN), "–");
 assert.equal(M.fmtDuration(5 * 60000 + 3000), "5 min", "the other clocks (the drive to the pickup) keep whole minutes");
 
 console.log("tripcard ok");
+
+// ── Miles or kilometers: only the display changes ──
+{
+  const U = await import(`${new URL("../src", import.meta.url).pathname}/lib/units.js`);
+  assert.equal(U.getUnits(), "mi", "miles until changed");
+  assert.equal(U.formatDistance(7.3), "7.3 mi");
+  assert.equal(U.formatDistance(10, { unit: "km" }), "16.1 km");
+  assert.equal(U.formatDistance(10, { digits: 0, unit: "km" }), "16 km");
+  assert.ok(Math.abs(U.ratePerUnit(1.1, "km") - 0.6835) < 0.001, "$1.10 per mile is about $0.68 per kilometer");
+  assert.ok(Math.abs(U.milesFrom(U.distanceIn(3.7, "km"), "km") - 3.7) < 1e-9, "the round trip is exact");
+  assert.equal(U.distanceIn(5, "mi"), 5);
+}

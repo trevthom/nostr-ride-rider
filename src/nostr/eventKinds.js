@@ -33,6 +33,7 @@ export const EVENT_KINDS = {
   RIDE_STOP_CHANGE: 30099, // Rider asks to add a stop or change the destination mid-ride (place sealed)
   VOUCH_LIST: 30102, // "Your vouches": the people this person knows and trusts (public, replaceable, one p tag each)
   RIDE_OFFER_DECLINE: 30101, // The rider turns down ONE driver's offer; the request stays open for everyone else
+  SETTINGS_BACKUP: 30111, // The person's own backup of vouches, blocks and settings, encrypted to their own key (lib/backup.js)
   RIDE_STOP_REPLY: 30100, // The assigned driver accepts the extra stop (or finishes the ride instead)
   RATING: 30082, // UNUSED: star ratings and reviews were removed (too easy to fake); see VOUCH_LIST
   DRIVER_ROUTE: 30083, // (removed feature; kept for back-compat)

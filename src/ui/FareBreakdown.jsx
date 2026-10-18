@@ -11,6 +11,7 @@
 //  splits it by kind). Once the ride is over, a fifth line "End of ride:" shows the settled part of the last mile and minute.
 // ════════════════════════════════════════════════════════════
 
+import { formatDistance, getUnits } from "../lib/units.js";
 import { useApp } from "../state/AppContext.jsx";
 import { paidBreakdown } from "../lib/ticks.js";
 import { moneyText } from "./Money.jsx";
@@ -19,6 +20,7 @@ export default function FareBreakdown({ ledger, paidSats, className = "" }) {
   const { btcPrice } = useApp();
   if (!ledger) return null;
   const b = paidBreakdown(ledger, paidSats);
+  const units = getUnits();
   const m = (sats) => moneyText(sats, btcPrice);
   const row = "flex justify-between gap-3";
   return (
@@ -26,7 +28,7 @@ export default function FareBreakdown({ ledger, paidSats, className = "" }) {
       <p className="font-semibold">Paid so far:</p>
       <dl className="mt-1 space-y-0.5 tabular-nums">
         <div className={row}><dt className="text-neutral-600">Base rate:</dt><dd>{m(b.base)}</dd></div>
-        <div className={row}><dt className="text-neutral-600">Miles:</dt><dd>{b.miles.n} ({m(b.miles.sats)})</dd></div>
+        <div className={row}><dt className="text-neutral-600">{units === "km" ? "Distance:" : "Miles:"}</dt><dd>{units === "km" ? formatDistance(b.miles.n) : b.miles.n} ({m(b.miles.sats)})</dd></div>
         <div className={row}><dt className="text-neutral-600">Minutes:</dt><dd>{b.minutes.n} ({m(b.minutes.sats)})</dd></div>
         {b.end > 0 && <div className={row}><dt className="text-neutral-600">End of ride:</dt><dd>{m(b.end)}</dd></div>}
       </dl>

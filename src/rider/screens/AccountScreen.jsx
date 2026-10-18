@@ -16,6 +16,8 @@ import AppearanceSection from "../../features/profile/AppearanceSection.jsx";
 import SafetySection from "../components/SafetySection.jsx";
 import KeysSection from "../../features/profile/KeysSection.jsx";
 import Fold from "../../ui/Fold.jsx";
+import BackupSection from "../../features/profile/BackupSection.jsx";
+import UnitsSection from "../../features/profile/UnitsSection.jsx";
 import { RecoveryFold, RecoveryNotice } from "../../features/ecash/RecoverySection.jsx";
 
 export default function AccountScreen() {
@@ -29,8 +31,10 @@ export default function AccountScreen() {
         <div>
           <Fold id="appearance" title="Appearance"><AppearanceSection /></Fold>
           <Fold id="currency" title="Currency"><CurrencySection /></Fold>
+          <Fold id="units" title="Units"><UnitsSection /></Fold>
           <Fold id="ecash" title="Ecash wallet"><EcashSection locked={!!activeRide} /></Fold>
           <RecoveryFold />
+          <Fold id="backup" title="Backup"><BackupSection /></Fold>
           <Fold id="wallet" title="Lightning wallet"><WalletSection /></Fold>
           <Fold id="safety" title="Trusted contacts"><SafetySection /></Fold>
           <Fold id="contacts" title="Contact methods"><ContactMethods /></Fold>

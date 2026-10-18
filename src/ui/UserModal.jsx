@@ -12,6 +12,7 @@ import { relay } from "../nostr/relay.js";
 import { getProfile } from "../nostr/profiles.js";
 import { fullNpub } from "../nostr/keys.js";
 import { tripCounts } from "../lib/rides.js";
+import { useUnits, formatDistance } from "../lib/units.js";
 import Avatar from "./Avatar.jsx";
 import VouchBadge from "./VouchBadge.jsx";
 import Icon from "./Icon.jsx";
@@ -20,6 +21,7 @@ import BlockButton from "./BlockButton.jsx";
 export default function UserModal() {
   const { profileModalPubkey, closeProfile } = useApp();
   const [zoom, setZoom] = useState(false);
+  const [units] = useUnits();
 
   // Escape closes the modal.
   useEffect(() => {
@@ -77,6 +79,7 @@ export default function UserModal() {
           <div>
             <p className="text-neutral-500 text-[11px] font-semibold uppercase tracking-wider">As driver</p>
             <p className="font-medium">{rep.drives} trip{rep.drives === 1 ? "" : "s"}</p>
+            {p?.stats?.miles > 0 && <p className="text-neutral-500 text-xs">{formatDistance(p.stats.miles, { unit: units })} driven</p>}
           </div>
         </div>
 

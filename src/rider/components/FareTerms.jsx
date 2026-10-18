@@ -5,6 +5,7 @@
 //  the driver is paid at. Used on the driver list and on the confirm screen.
 // ════════════════════════════════════════════════════════════
 
+import { ratePerUnit, unitName } from "../../lib/units.js";
 import { normalizeRates } from "../../lib/fare.js";
 import { formatFiat } from "../../lib/currency.js";
 import { mintLabel } from "../../lib/mints.js";
@@ -16,7 +17,7 @@ export function offerRates(c) {
 export const RatesLine = ({ rates }) =>
   rates ? (
     <span>
-      {formatFiat(rates.base, rates.currency)} base · {formatFiat(rates.perMile, rates.currency)}/mi · {formatFiat(rates.perMinute, rates.currency)}/min
+      {formatFiat(rates.base, rates.currency)} base · {formatFiat(ratePerUnit(rates.perMile), rates.currency)}/{unitName()} · {formatFiat(rates.perMinute, rates.currency)}/min
     </span>
   ) : null;
 

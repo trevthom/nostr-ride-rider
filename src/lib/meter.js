@@ -18,6 +18,8 @@
 //  both screens show the same number.
 // ════════════════════════════════════════════════════════════
 
+import { formatDistance } from "./units.js";
+
 export const METER_TOLERANCE = 0.05; // 5% of the driver's distance
 export const METER_FLOOR_MILES = 0.05;
 
@@ -31,7 +33,7 @@ export function referenceMiles(driverMiles, riderMiles, { pct = METER_TOLERANCE,
   return Math.abs(driverMiles - riderMiles) <= Math.max(driverMiles * pct, floor) + 1e-9 ? driverMiles : riderMiles;
 }
 
-export const fmtMiles = (m) => (num(m) ? `${m.toFixed(1)} mi` : "–");
+export const fmtMiles = (m) => (num(m) ? formatDistance(m) : "–"); // in the chosen unit (lib/units.js)
 
 // "12 min", "1 h 05 min", "<1 min". Input in milliseconds.
 export function fmtDuration(ms) {

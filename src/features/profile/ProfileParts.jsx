@@ -13,6 +13,7 @@ import { getMetadata } from "../../nostr/profiles.js";
 import { shortNpub } from "../../nostr/keys.js";
 import { sealVehicle } from "../../lib/privacy.js";
 import { tripCounts } from "../../lib/rides.js";
+import { useUnits, formatDistance } from "../../lib/units.js";
 import { resizeImage } from "../../lib/image.js";
 import { useRelays, setRelays } from "../../config/relays.js";
 import { CONTACT_PLATFORMS, } from "../../config/settings.js";
@@ -49,6 +50,7 @@ export function useSaveProfile() {
             ...(next.lud16 !== undefined && { lud16: next.lud16 }),
             ...(next.gender !== undefined && { gender: next.gender }),
             ...(next.rates !== undefined && { rates: next.rates }), // null = back to the app's rates
+            ...(next.stats !== undefined && { stats: next.stats }), // self-reported miles driven
             // Plate is sealed to ourselves; riders get it privately in offers.
             vehicle: sealVehicle(next.vehicle, next.sk, next.publicKey),
           },
@@ -90,6 +92,8 @@ export function AccountHeader({ photoRequired = false }) {
   };
 
   const trips = IS_DRIVER_APP ? rep.drives : rep.rides;
+  const [units] = useUnits();
+  const miles = IS_DRIVER_APP ? user.stats?.miles : 0;
 
   return (
     <div className="flex items-center gap-4 py-2">
@@ -126,7 +130,7 @@ export function AccountHeader({ photoRequired = false }) {
             </button>
           </div>
         )}
-        <p className="text-sm text-neutral-500">{trips} trip{trips === 1 ? "" : "s"}</p>
+        <p className="text-sm text-neutral-500">{trips} trip{trips === 1 ? "" : "s"}{miles > 0 && ` · ${formatDistance(miles, { unit: units })} driven`}</p>
         {photoRequired && !user.picture && <p className="text-amber-700 text-xs mt-1">A face photo is required to drive.</p>}
         {err && <p className="text-red-600 text-xs mt-1">{err}</p>}
         {user.picture && (

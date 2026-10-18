@@ -389,6 +389,13 @@ carries `driverPubkey`. Stage is `enroute` (default) → `arrived` → `riding`.
 - **Public visibility**: requests/offers are public on the relays (anyone on those relays can read
   them). That is why exact points and plates are sealed; notes, fares and approximate areas are public.
 
+## Sealed jobs
+- **Every job event is sent only inside a gift wrap** (`nostr/sealing.js`: kind 1059, throwaway signer, NIP-44 of the signed inner event to ONE recipient). `SEALED_KINDS` lists them (the ride kinds 30078–30101). Presence, kind 0, vouches, trip share, settings backup and the 21100/21101 pings keep their shape.
+- `relay.publish(event, {to})` wraps for: the author, every `p` tag, and `to`. `relay._ingest` opens a wrap with `relay.setIdentity(sk, pk)` (AppContext, at login), checks the inner signature and kind, and stores the INNER event, so `lib/rides.js` is unchanged. Raw (old) job events are still read. The outbox stores wraps with their inner event; `outboxAge(id)` accepts an inner id.
+- **Audience** (`lib/audience.js`, `lib/audienceStore.js`, `state/AudienceSync.jsx`): a new request goes to the online drivers near the pickup, nearest 60. `AudienceSync` subscribes to presence and sends waiting requests to people who appear later (`relay.sealTo`). Later versions of a request go to the audience + every driver who sent an offer.
+- Other people's job history is not readable any more: the profile carries self-reported `stats.miles` (`lib/mileage.js`, `features/profile/MilesSync.jsx`).
+- Test relays must keep kind 1059 and answer `#p` filters. Tests: `test/sealing.test.mjs`.
+
 ## "Going live" swap points
 - Relays: already real (`nostr/relay.js`, `nostr/live.js`). To harden: scope relays/geography,
   add reconnection, fetch remote kind-0 for display names beyond the ones we pull on demand.
