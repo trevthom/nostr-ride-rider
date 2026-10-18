@@ -33,6 +33,7 @@ import { hideList } from "../../lib/blocks.js";
 import { declineEvent } from "../../lib/trips.js";
 import { rideTerms, rideMint } from "../../lib/terms.js";
 import { ledgerSummary } from "../../lib/ridemoney.js";
+import { rideSpendCap, allowMoreSpend } from "../../lib/spendcap.js";
 import { payDue } from "../../features/payments/rideTicks.js";
 import { redeemWaiversFor } from "../../features/payments/redeemWaivers.js";
 import { moneyText } from "../../ui/Money.jsx";
@@ -47,7 +48,7 @@ const EMPTY_PLAN = { step: "idle", from: "idle", pinField: "pickup", pickup: nul
 const parse = (e) => { try { return JSON.parse(e.content); } catch { return null; } };
 
 export function RiderProvider({ children }) {
-  const { user, rideRequests, publish, refreshData, pullRecent, pushNotice, liveTick, setView, isBlockedPk, blocked, onLogout, ecash, priceFor, btcPrice } = useApp();
+  const { user, rideRequests, publish, refreshData, pullRecent, pushNotice, liveTick, setView, isBlockedPk, blocked, onLogout, ecash, priceFor, btcPrice, usdPrice } = useApp();
   const me = user.publicKey;
   const { pos: myPosition, error: geoError, status: gps } = useGeolocation(true);
 
@@ -70,7 +71,7 @@ export function RiderProvider({ children }) {
 
   // ── Online drivers nearby (public, coarsened presence) ──
   const [allDrivers, setAllDrivers] = useState([]);
-  useEffect(() => subscribePresence(setAllDrivers, { excludePubkey: me, viewerPubkey: me }), [me]);
+  useEffect(() => subscribePresence(setAllDrivers, { excludePubkey: me, viewerSk: user.sk }), [me]);
   const drivers = (myPosition
     ? allDrivers.filter((d) => haversineDistance(myPosition.lat, myPosition.lng, d.lat, d.lng) <= 25)
     : allDrivers).filter((d) => !isBlockedPk(d.pubkey));
@@ -185,9 +186,12 @@ export function RiderProvider({ children }) {
   const run = useCallback(async (request) => {
     const terms = rideTerms(request);
     if (!terms || !rideTimes(request).startedAt) return null;
-    const res = await payDue({ request, user, ecash, publish, terms, mint: rideMint(request), price: priceFor(terms.currency), nowMs: Date.now(), miles: milesRef.current });
+    const price = priceFor(terms.currency);
+    // The app pays by itself, so each ride has a cap (lib/spendcap.js): at the cap it stops and asks the rider.
+    const capSats = rideSpendCap(request, { terms, price, usdPrice });
+    const res = await payDue({ request, user, ecash, publish, terms, mint: rideMint(request), price, nowMs: Date.now(), miles: milesRef.current, capSats });
     return res;
-  }, [user, ecash, publish, priceFor]);
+  }, [user, ecash, publish, priceFor, usdPrice]);
   useEffect(() => { setMoney(null); }, [payKey]);
   useEffect(() => {
     if (!payRide || !payTerms) return;
@@ -210,6 +214,8 @@ export function RiderProvider({ children }) {
   }, [payKey, !!ecash, !!payTerms, run]); // eslint-disable-line react-hooks/exhaustive-deps
   // Pay now, outside the timer (after adding funds): resolves to the result.
   const payNow = useCallback(async (request) => run(request || payRide), [run, payRide]);
+  // The rider says: yes, pay more than the cap (one more cap's worth), then pay what was held back.
+  const allowMore = useCallback(async (request) => { allowMoreSpend(request || payRide); return run(request || payRide); }, [run, payRide]);
 
   // Money the driver sent back (a waived fare) goes into the wallet by itself, for any ride.
   useEffect(() => {
@@ -233,7 +239,7 @@ export function RiderProvider({ children }) {
           time: when,
           notes,
           status: "requested",
-          hide: hideList(me, blocked), // drivers I blocked never see this request (lib/blocks.js)
+          hide: hideList(user.sk, blocked), // drivers I blocked never see this request (lib/blocks.js)
           fareMode: "standard", // every driver's own rates (older apps also knew a "flat" price; it is gone)
           fareSats, // only an estimate: the fare is each driver's rates, paid tick by tick
           suggestedSats, // what the app suggested
@@ -404,9 +410,9 @@ export function RiderProvider({ children }) {
   );
 
   // Blocking a driver while a request is open: publish the request again with the new hide list, so that driver's app stops showing it.
-  const hideNow = hideList(me, blocked).join(",");
+  const hideNow = hideList(user.sk, blocked).join(",");
   useEffect(() => {
-    const want = hideList(me, blocked);
+    const want = hideList(user.sk, blocked);
     const seen = new Set();
     reqsRef.current
       .filter((r) => r.pubkey === me && rideStatus(r) === "requested" && isOpenRide(r) && !seen.has(rideKey(r)) && seen.add(rideKey(r)))
@@ -461,7 +467,7 @@ export function RiderProvider({ children }) {
     activeRide, focused: !!focused, focusRide: (r) => setFocusId(r ? r.id : null), upcoming, receipt, dismissReceipt,
     genderPref, setGenderPref,
     requestRide, proposePickup, confirmDriver, recordPayment, confirmRide, proposeStop, finishRide, declineOffer, recentPlaces,
-    money, payNow, reportMiles, payTerms, payMint, screenMayDim,
+    money, payNow, allowMore, reportMiles, payTerms, payMint, screenMayDim,
     nearestDriverEta: (to) => {
       if (!to || !drivers.length) return null;
       const miles = Math.min(...drivers.map((d) => haversineDistance(to.lat, to.lng, d.lat, d.lng)));

@@ -18,7 +18,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { newOdo, stepOdo } from "../../lib/odometer.js";
-import { referenceMiles } from "../../lib/meter.js";
+import { referenceMiles, routeCapMiles } from "../../lib/meter.js";
 import { rideKey } from "../../lib/rides.js";
 import { getSetting, setSetting } from "../../config/relays.js";
 
@@ -28,7 +28,7 @@ const dist = (x) => (typeof x === "number" && Number.isFinite(x) && x >= 0 && x 
 
 // request: the ride; stage: "enroute" | "arrived" | "riding"; loc: the driver's latest position
 // update ({lat,lng,ts,pm,tm}); pos: the rider's own GPS fix.
-export function useRiderMeter({ request, stage, loc, pos }) {
+export function useRiderMeter({ request, stage, loc, pos, quotedMiles = null }) {
   const key = rideKey(request);
   const ref = useRef({ key: null, sp: newOdo(), st: newOdo(), ot: newOdo(), drv: { pm: null, tm: null }, savedAt: 0 });
   const [out, setOut] = useState({ pickupMiles: null, tripMiles: null });
@@ -37,7 +37,13 @@ export function useRiderMeter({ request, stage, loc, pos }) {
     const r = ref.current;
     const riderPickup = r.sp.last ? r.sp.miles : null;
     const riderTrip = r.ot.last ? r.ot.miles : r.st.last ? r.st.miles : null;
-    const next = { pickupMiles: referenceMiles(r.drv.pm, riderPickup), tripMiles: referenceMiles(r.drv.tm, riderTrip) };
+    // With no measure of our own, the driver's number is all there is: it is held to the quoted route (lib/meter.js).
+    const cap = routeCapMiles(quotedMiles);
+    const alone = (x) => (x != null ? Math.min(x, cap) : x);
+    const next = {
+      pickupMiles: referenceMiles(r.drv.pm, riderPickup),
+      tripMiles: riderTrip == null ? alone(referenceMiles(r.drv.tm, riderTrip)) : referenceMiles(r.drv.tm, riderTrip),
+    };
     setOut((prev) => (prev.pickupMiles === next.pickupMiles && prev.tripMiles === next.tripMiles ? prev : next));
   };
   const save = (force = false) => {

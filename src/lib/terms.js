@@ -18,7 +18,7 @@
 
 import { relay } from "../nostr/relay.js";
 import { EVENT_KINDS } from "../nostr/eventKinds.js";
-import { rideDriver } from "./rides.js";
+import { rideDriver, rideVersions } from "./rides.js";
 import { acceptFor, offerFrom } from "./trips.js";
 import { normalizeTerms } from "./ticks.js";
 import { normalizeRates } from "./fare.js";
@@ -30,9 +30,15 @@ export function agreedOffer(request) {
   const driver = rideDriver(request);
   if (!driver) return null;
   const accept = acceptFor(request, driver);
-  const id = accept && parse(accept)?.offerId;
-  const chosen = id ? relay.query({ kinds: [EVENT_KINDS.RIDE_OFFER], ids: [id] }).find((o) => o.pubkey === driver) : null;
-  return chosen || offerFrom(request, driver);
+  if (!accept) return null; // no accept from the rider yet: nothing is agreed
+  const id = parse(accept)?.offerId;
+  if (!id) return offerFrom(request, driver); // an accept from an older app did not name the offer
+  // The accept names ONE offer. If that offer is not in hand (not synced yet), nothing is agreed yet. The driver's
+  // NEWEST offer is never used instead: a driver could replace the offer after the rider chose it, with higher rates
+  // or another mint, and the replacement would reach the rider after a reload.
+  const ids = new Set(rideVersions(request).map((e) => e.id));
+  const chosen = relay.query({ kinds: [EVENT_KINDS.RIDE_OFFER], ids: [id] }).find((o) => o.pubkey === driver && o.tags.some((t) => t[0] === "e" && ids.has(t[1])));
+  return chosen || null;
 }
 
 export function rideTerms(request) {

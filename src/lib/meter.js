@@ -33,6 +33,28 @@ export function referenceMiles(driverMiles, riderMiles, { pct = METER_TOLERANCE,
   return Math.abs(driverMiles - riderMiles) <= Math.max(driverMiles * pct, floor) + 1e-9 ? driverMiles : riderMiles;
 }
 
+// ── How far a distance may be believed ──
+// A distance that the OTHER person reports (the driver's odometer in a location update, the miles in a finish event) is a
+// claim. It is held to what this phone can believe, so it cannot be used to charge for miles that were not driven:
+//   • with this phone's own measure (`own`): within the usual tolerance of it (plus, if the measure is old, the miles a car
+//     could have driven since: a rider whose app was closed for a while does not lose the driver's real miles);
+//   • with no measure of its own: at most what the clock allows (no ride averages more than MAX_AVG_MPH) and twice the
+//     quoted route plus 3 miles.
+// Nothing here ever raises a number above the claim.
+export const MAX_AVG_MPH = 70;
+export const routeCapMiles = (quotedMiles) => (Number.isFinite(quotedMiles) && quotedMiles > 0 ? quotedMiles * 2 + 3 : Infinity);
+export function boundedMiles(claim, { own = null, ownAt = null, startedAt = null, atMs = null, quotedMiles = null } = {}) {
+  const hasClaim = Number.isFinite(claim) && claim >= 0;
+  const speedCap = Number.isFinite(startedAt) && Number.isFinite(atMs) ? (Math.max(0, atMs - startedAt) / 3600000) * MAX_AVG_MPH : Infinity;
+  if (Number.isFinite(own) && own >= 0) {
+    if (!hasClaim) return Math.min(own, speedCap);
+    const slack = Math.max(own * METER_TOLERANCE, METER_FLOOR_MILES);
+    const blind = Number.isFinite(ownAt) && Number.isFinite(atMs) ? (Math.max(0, atMs - ownAt) / 3600000) * MAX_AVG_MPH : 0;
+    return Math.min(Math.min(Math.max(claim, own - slack), own + slack + blind), speedCap);
+  }
+  return Math.min(hasClaim ? claim : 0, speedCap, routeCapMiles(quotedMiles));
+}
+
 export const fmtMiles = (m) => (num(m) ? formatDistance(m) : "–"); // in the chosen unit (lib/units.js)
 
 // "12 min", "1 h 05 min", "<1 min". Input in milliseconds.

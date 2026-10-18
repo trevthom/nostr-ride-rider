@@ -4,6 +4,8 @@
 //   • the rider can turn down ONE driver's offer; the request stays open for everyone else
 // Run with: npm test
 import assert from "node:assert/strict";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { bytesToHex, utf8ToBytes } from "@noble/hashes/utils.js";
 const R = new URL("../src", import.meta.url).pathname;
 const { relay } = await import(`${R}/nostr/relay.js`);
 const Rides = await import(`${R}/lib/rides.js`);
@@ -41,21 +43,27 @@ assert.equal(T.isOpenRide(soonish), true);
 assert.equal(T.upcomingRidesFor([late], rider.publicKey).length, 0, "and not listed under Upcoming");
 
 // ── Blocking works both ways: hide tokens ──
-const tok = B.hideToken(rider.publicKey, d1.publicKey);
+// A token comes from the secret the blocker and the blocked person SHARE: the blocker makes it with their own key, the blocked
+// person's app makes the same with theirs, and nobody else can.
+const tok = B.hideToken(rider.sk, d1.publicKey);
 assert.match(tok, /^[0-9a-f]{16}$/);
-assert.equal(B.hideToken(rider.publicKey, d1.publicKey), tok, "stable");
-assert.notEqual(B.hideToken(rider.publicKey, d2.publicKey), tok, "one per person");
-assert.notEqual(B.hideToken(d1.publicKey, rider.publicKey), tok, "the direction matters");
-const list = B.hideList(rider.publicKey, [{ pubkey: d1.publicKey }]);
+assert.equal(B.hideToken(rider.sk, d1.publicKey), tok, "stable");
+assert.equal(B.hideToken(d1.sk, rider.publicKey), tok, "both sides work out the same token");
+assert.notEqual(B.hideToken(rider.sk, d2.publicKey), tok, "one per person");
+const list = B.hideList(rider.sk, [{ pubkey: d1.publicKey }]);
 assert.deepEqual(list, [tok]);
 assert.ok(!JSON.stringify(list).includes(d1.publicKey.slice(0, 16)), "the list does not name the person");
-assert.equal(B.hidesMe(list, rider.publicKey, d1.publicKey), true, "the blocked driver's app hides the rider's request");
-assert.equal(B.hidesMe(list, rider.publicKey, d2.publicKey), false, "other drivers still see it");
-assert.equal(B.hidesMe(list, rider.publicKey, rider.publicKey), false);
-for (const junk of [undefined, null, "x", 5, {}, [null]]) assert.equal(B.hidesMe(junk, rider.publicKey, d1.publicKey), false, "junk hides nobody");
-assert.equal(B.hideList(rider.publicKey, Array.from({ length: 150 }, (_, i) => ({ pubkey: "k" + i }))).length, 100, "capped at 100");
+assert.equal(B.hidesMe(list, rider.publicKey, d1.sk), true, "the blocked driver's app hides the rider's request");
+assert.equal(B.hidesMe(list, rider.publicKey, d2.sk), false, "other drivers still see it");
+assert.equal(B.hidesMe(list, rider.publicKey, rider.sk), false);
+// A stranger who knows both public keys cannot work the token out: the old token was a plain hash of the two keys.
+assert.notEqual(B.hideToken(stranger.sk, d1.publicKey), tok, "a third person's guess is a different token");
+assert.notEqual(bytesToHex(sha256(utf8ToBytes(`nostrride-hide:${rider.publicKey}:${d1.publicKey}`))).slice(0, 16), tok, "and so is the old public hash");
+for (const junk of [undefined, null, "x", 5, {}, [null]]) assert.equal(B.hidesMe(junk, rider.publicKey, d1.sk), false, "junk hides nobody");
+assert.deepEqual(B.hideList(rider.sk, [{ pubkey: "not-a-key" }]), [], "a bad key makes no token");
+assert.equal(B.hideList(rider.sk, Array.from({ length: 150 }, () => ({ pubkey: generateKeypair().publicKey }))).length, 100, "capped at 100");
 // a driver's blocked riders work the same way, from the driver's side
-assert.equal(B.hidesMe(B.hideList(d1.publicKey, [{ pubkey: rider.publicKey }]), d1.publicKey, rider.publicKey), true, "a blocked rider does not see the driver's car");
+assert.equal(B.hidesMe(B.hideList(d1.sk, [{ pubkey: rider.publicKey }]), d1.publicKey, rider.sk), true, "a blocked rider does not see the driver's car");
 
 // ── "Not this driver": the request stays open, the offer is gone ──
 const req = request("ASAP", "ride-decline");

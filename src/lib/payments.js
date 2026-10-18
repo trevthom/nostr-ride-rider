@@ -15,13 +15,15 @@
 //    alive — the rider or the assigned driver.
 //
 //  paidSats(request)  = ticks the driver CONFIRMED (this is what counts as paid)
-//  sentSats(request)  = every valid tick the rider sent (the rider's app uses it so it never pays twice)
+//  sentSats(request)  = every valid tick the rider sent (the rider's app uses it so it never pays twice). A tick the driver
+//                       calls "refused" still counts, until the rider's app has taken the token back from the mint
 // ════════════════════════════════════════════════════════════
 
 import { relay } from "../nostr/relay.js";
 import { EVENT_KINDS } from "../nostr/eventKinds.js";
 import { rideDriver, rideKey, rideVersions, RIDER_SIGNAL_KINDS, DRIVER_SIGNAL_KINDS } from "./rides.js";
 import { seal, unseal } from "./privacy.js";
+import { getSetting, setSetting } from "../config/relays.js";
 
 const parse = (e) => { try { return JSON.parse(e.content); } catch { return null; } };
 const etags = (e) => e.tags.filter((t) => t[0] === "e").map((t) => t[1]);
@@ -108,9 +110,32 @@ export function paidSats(request) {
   }, 0);
 }
 export function sentSats(request) {
-  const replies = tickReplies(request);
-  // A refused tick (the token was bad) was not paid, so it does not count as sent.
-  return ticksOf(request).reduce((s, t) => s + (replies.get(t.id)?.ok === false ? 0 : t.amountSats), 0);
+  // A tick counts as sent unless the rider's own app got its money back. The driver's word "refused" is NOT enough: a
+  // driver could redeem the token, say "refused", and have the rider pay the same tick again and again. The rider's app
+  // takes the token back from the mint (features/payments/recoverRefused.js); only if that works was the tick unpaid.
+  return ticksOf(request).reduce((s, t) => s + (tickVerdict(t.id) === "recovered" ? 0 : t.amountSats), 0);
+}
+
+// What the rider's app found out about a tick the driver called refused: "recovered" (the token was still unspent
+// and is back in the wallet: the tick was not paid) or "spent" (the mint says the driver took it: the tick was paid).
+// Kept on this device, a few hundred at most.
+const VERDICTS = "tickRefusal";
+export function tickVerdict(tickId) {
+  const all = getSetting(VERDICTS, {});
+  const v = all && typeof all === "object" ? all[tickId] : null;
+  return v === "r" ? "recovered" : v === "s" ? "spent" : null;
+}
+export function setTickVerdict(tickId, verdict) {
+  const all = getSetting(VERDICTS, {}) || {};
+  setSetting(VERDICTS, Object.fromEntries(Object.entries({ ...all, [tickId]: verdict === "recovered" ? "r" : "s" }).slice(-300)));
+}
+
+// The ecash token inside a tick, for the RIDER who sent it (null if it can't be opened).
+export function ownTickToken(tick, request, user) {
+  const driver = rideDriver(request);
+  if (!driver || user.publicKey !== request.pubkey) return null;
+  const v = unseal(user.sk, driver, parse(tick.event)?.sealed);
+  return typeof v?.token === "string" ? v.token : null;
 }
 
 // The driver's waivers, oldest first: [{ id, forgivenSats, refundSats, reason, at, hasToken, event }].

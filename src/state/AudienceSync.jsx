@@ -9,7 +9,8 @@ import { useEffect, useRef, useState } from "react";
 import { useApp } from "./AppContext.jsx";
 import { relay } from "../nostr/relay.js";
 import { subscribePresence } from "../nostr/live.js";
-import { audienceFor } from "../lib/audience.js";
+import { audienceFor, AUDIENCE_LIMIT } from "../lib/audience.js";
+import { trustFor } from "../lib/vouches.js";
 import { setPeople, getPeople, getAudience, addAudience, answerersOf } from "../lib/audienceStore.js";
 import { rideStatus, rideExpiryMs } from "../lib/rides.js";
 
@@ -29,7 +30,7 @@ export default function AudienceSync() {
       setPeople(list);
       const key = list.map((p) => p.pubkey).sort().join(",");
       if (key !== last.current) { last.current = key; setSeen(key); }
-    }, { excludePubkey: me, viewerPubkey: me });
+    }, { excludePubkey: me, viewerSk: user.sk });
   }, [me]);
 
   // A person we have not sent a waiting request to yet gets it now.
@@ -42,7 +43,8 @@ export default function AudienceSync() {
       const c = parse(r);
       if (!d || !c) continue;
       const have = new Set([...getAudience(d), ...answerersOf(d, me)]);
-      const fresh = audienceFor(c, getPeople(), { me, blocked }).filter((pk) => !have.has(pk));
+      // Only the places not yet taken: a request is sent to at most AUDIENCE_LIMIT people in all.
+      const fresh = audienceFor(c, getPeople().filter((x) => !have.has(x.pubkey)), { me, blocked, limit: AUDIENCE_LIMIT - have.size, trusted: (pk) => !!trustFor(pk, me) });
       if (!fresh.length) continue;
       addAudience(d, fresh);
       relay.sealTo(r, fresh);

@@ -18,7 +18,9 @@ import { advanceLedger, milesAt, newLedger, owedSats, settle } from "./ticks.js"
 import { rideEnding, rideKey, rideTimes } from "./rides.js";
 import { forgivenSats, paidSats, sentSats, signalTimes } from "./payments.js";
 import { bothQuiet } from "./finish.js";
+import { boundedMiles } from "./meter.js";
 
+const parseContent = (e) => { try { return JSON.parse(e.content); } catch { return null; } };
 const STORE = "rideLedger";
 const KEEP = 8;
 export const SIGNAL_STORE = "rideLastSignal"; // this device's own last signal per ride (written by features/payments/useRideLink.js)
@@ -57,15 +59,23 @@ export function currentLedger(request, { terms, price, nowMs, miles, role }) {
   let led = saved && saved.startedAt === startedAt ? saved : newLedger(startedAt);
   const before = led;
   const end = rideEnding(request);
+  const quoted = Number(parseContent(request)?.distanceMiles);
   if (end) {
     if (!led.final) {
       const atMs = Math.max(startedAt, end.fin?.at ?? end.at * 1000);
-      const miles_ = end.fin?.miles ?? miles ?? 0;
+      // The miles in a finish event are a CLAIM by whoever finished (the driver could write 5,000). This phone's own measure
+      // decides: the live meter, else the last miles the saved ledger saw (lib/meter.js boundedMiles).
+      const last = led.samples[led.samples.length - 1];
+      const own = Number.isFinite(miles) ? { own: miles, ownAt: nowMs } : last ? { own: last.miles, ownAt: last.t } : {};
+      const miles_ = boundedMiles(end.fin?.miles, { ...own, startedAt, atMs, quotedMiles: quoted });
       led = settle(led, { terms, atMs, miles: miles_, price }) || led;
     }
   } else {
     const cut = role ? silenceCutoff(request, role, nowMs) : null;
-    led = advanceLedger(led, { terms, nowMs: cut != null ? Math.min(nowMs, cut) : nowMs, miles, price });
+    const at = cut != null ? Math.min(nowMs, cut) : nowMs;
+    // A distance can never be more than the clock allows, whoever reported it.
+    const live = Number.isFinite(miles) ? boundedMiles(miles, { startedAt, atMs: at }) : miles;
+    led = advanceLedger(led, { terms, nowMs: at, miles: live, price });
   }
   if (led !== before || !saved) saveLedger(key, led);
   return led;

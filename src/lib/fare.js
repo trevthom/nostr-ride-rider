@@ -84,6 +84,17 @@ export function typicalSats(rates, miles, minutes, prices) {
   return satsFromFiat(fareAmount(miles, minutes, r), price);
 }
 
+// The rider's OWN estimate of what an offer will cost: the driver's rates applied to the trip in the request, at the current price.
+// An offer's `priceSats` is only the driver's word. The charge follows the rates, so the number a rider sees (and ranks drivers by)
+// must come from the rates too; a driver could write a low `priceSats` next to high rates. null when rates, trip or price are missing.
+export function offerEstimate(offerContent, requestContent, prices) {
+  const rates = normalizeRates(offerContent?.rates);
+  const miles = Number(requestContent?.distanceMiles), minutes = Number(requestContent?.durationMin);
+  if (!rates || !Number.isFinite(miles) || miles < 0 || !Number.isFinite(minutes) || minutes < 0) return null;
+  const price = prices?.[rates.currency];
+  return price ? satsFromFiat(fareAmount(miles, minutes, rates), price) : null;
+}
+
 export function median(values) {
   const v = values.filter((x) => Number.isFinite(x)).sort((a, b) => a - b);
   if (!v.length) return null;

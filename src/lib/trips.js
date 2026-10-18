@@ -61,11 +61,19 @@ export function upcomingRidesFor(requests, me) {
     .sort((a, b) => Date.parse(parse(a).time) - Date.parse(parse(b).time));
 }
 
+// A driver is on a ride only if they asked for it: they sent an offer for this request and the rider's
+// signed accept names them. A request that merely NAMES a driver (anyone can sign one) is not a ride.
+// Without this, a stranger could put any driver on a made-up ride, and the driver's app would start
+// sending its live position to the stranger.
+export function consentedDrive(request, me) {
+  return !!offerFrom(request, me) && !!acceptFor(request, me);
+}
+
 // The ride this driver is driving right now (accepted and paid, not ended).
 export function activeDriveFor(requests, me) {
   return (
     requests
-      .filter((r) => parse(r)?.driverPubkey === me && rideStatus(r) === "in_progress" && fresh(r))
+      .filter((r) => parse(r)?.driverPubkey === me && rideStatus(r) === "in_progress" && fresh(r) && consentedDrive(r, me))
       .sort((a, b) => b.created_at - a.created_at)[0] || null
   );
 }

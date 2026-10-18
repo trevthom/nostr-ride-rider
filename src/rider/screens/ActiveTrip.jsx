@@ -16,9 +16,11 @@ import { getProfile } from "../../nostr/profiles.js";
 import { rideStatus } from "../../lib/rides.js";
 import { exactTrip } from "../../lib/privacy.js";
 import { offersForRide, offerGender, rankOffers } from "../../lib/trips.js";
+import { offerEstimate } from "../../lib/fare.js";
 import { normalizeTerms, unitSats } from "../../lib/ticks.js";
 import Icon from "../../ui/Icon.jsx";
-import { isMintUrl } from "../../lib/mints.js";
+import { isMintUrl, mintLabel } from "../../lib/mints.js";
+import { isKnownMint, trustMint } from "../../features/ecash/myMint.js";
 import MapView from "../../ui/MapView.jsx";
 import Money, { moneyText } from "../../ui/Money.jsx";
 import Button from "../../ui/Button.jsx";
@@ -148,10 +150,14 @@ function Searching({ request, trip, onCancel, top }) {
 
 function ChooseDriver({ request, trip, offers, onPick, onDecline, onCancel, top }) {
   const { drivers, genderPref } = useRider();
+  const { prices: btcPrices } = useApp();
+  const requestContent = parse(request);
+  // The price shown is OUR estimate from the driver's rates and the trip, never the driver's own `priceSats` (lib/fare.js offerEstimate).
+  const estimates = new Map(offers.map((o) => [o.id, offerEstimate(parse(o), requestContent, btcPrices)]));
   const etas = offers.map((o) => parse(o).etaMinutes || 0);
-  const prices = offers.map((o) => parse(o).priceSats);
+  const prices = offers.map((o) => estimates.get(o.id)).filter((x) => x != null);
   const fastest = offers.length > 1 ? Math.min(...etas) : null;
-  const cheapest = offers.length > 1 && new Set(prices).size > 1 ? Math.min(...prices) : null;
+  const cheapest = prices.length > 1 && new Set(prices).size > 1 ? Math.min(...prices) : null;
   return (
     <MapPage map={<MapView pickup={trip.pickup} cars={drivers} fitKey={request.id} padBottom={420} />} top={top}>
       <Sheet label="Choose your driver">
@@ -172,13 +178,15 @@ function ChooseDriver({ request, trip, offers, onPick, onDecline, onCancel, top 
                     <p className="text-sm font-semibold">
                       {c.etaMinutes} min away
                       {fastest != null && c.etaMinutes === fastest && <span className="ml-2 text-[11px] bg-black text-white rounded-full px-2 py-0.5 align-middle">Fastest</span>}
-                      {cheapest != null && c.priceSats === cheapest && <span className="ml-1.5 text-[11px] bg-[#e6f4ec] text-[#05683a] rounded-full px-2 py-0.5 align-middle">Lowest price</span>}
+                      {cheapest != null && estimates.get(o.id) === cheapest && <span className="ml-1.5 text-[11px] bg-[#e6f4ec] text-[#05683a] rounded-full px-2 py-0.5 align-middle">Lowest price</span>}
                       {preferred && <span className="ml-1.5 text-[11px] bg-neutral-100 text-neutral-700 rounded-full px-2 py-0.5 align-middle">Your preference</span>}
                     </p>
-                    <p className="text-sm">
-                      <span className="text-neutral-500 text-xs mr-1">about</span>
-                      <Money sats={c.priceSats} className="font-semibold" />
-                    </p>
+                    {estimates.get(o.id) != null && (
+                      <p className="text-sm">
+                        <span className="text-neutral-500 text-xs mr-1">about</span>
+                        <Money sats={estimates.get(o.id)} className="font-semibold" />
+                      </p>
+                    )}
                     <FareTerms offer={c} className="mt-0.5" />
                   </div>
                   <Button size="sm" variant="secondary" full={false} onClick={() => onDecline(o)} aria-label="Turn down this driver">No thanks</Button>
@@ -208,8 +216,10 @@ function ConfirmDriver({ request, trip, offer, onBack, onDecline }) {
   const { liveTick, ecash, ecashOff, prices, priceFor, btcPrice } = useApp();
   const { confirmDriver, drivers } = useRider();
   const c = parse(offer);
+  const estimate = offerEstimate(c, parse(request), prices); // from the driver's rates and the trip, not the driver's own `priceSats`
   const [done, setDone] = useState(false);
   const [adding, setAdding] = useState(false);
+  const [trusted, setTrusted] = useState(false);
   const busy = useRef(false);
   void liveTick; // the balance changes when funds arrive
   const rates = offerRates(c);
@@ -220,6 +230,8 @@ function ConfirmDriver({ request, trip, offer, onBack, onDecline }) {
   const have = ecash && mint ? ecash.balance(mint) : 0;
   const short = need != null ? Math.max(0, need - have) : 0;
   const ready = !!rates && !!mint && need != null && short === 0 && !ecashOff;
+  // The driver chose this mint. One the rider has never used is not trusted on the driver's word (features/ecash/myMint.js).
+  const unknownMint = !!mint && !trusted && !isKnownMint(mint, ecash);
   void prices;
 
   const go = () => {
@@ -236,7 +248,7 @@ function ConfirmDriver({ request, trip, offer, onBack, onDecline }) {
         <h2 className="text-2xl font-bold mb-3">Confirm your driver</h2>
         <DriverInfo pubkey={offer.pubkey} offerEvent={offer} />
         <dl className="mt-4 rounded-2xl bg-neutral-100 px-4 py-3 space-y-2 text-[15px]">
-          <div className="flex justify-between"><dt className="text-neutral-600">Estimated fare</dt><dd><Money sats={c.priceSats} className="font-semibold" /></dd></div>
+          {estimate != null && <div className="flex justify-between"><dt className="text-neutral-600">Estimated fare</dt><dd><Money sats={estimate} className="font-semibold" /></dd></div>}
           {rates && (
             <div className="text-xs text-neutral-600"><RatesLine rates={rates} /></div>
           )}
@@ -246,12 +258,19 @@ function ConfirmDriver({ request, trip, offer, onBack, onDecline }) {
               The base rate {moneyText(parts.base, btcPrice)} + 2 minutes {moneyText(parts.minutes, btcPrice)} + 1 mile {moneyText(parts.mile, btcPrice)}. The extra minute is a cushion, so your first payments are never late. Nothing is locked away.
             </div>
           )}
-          {mint && <div className="flex justify-between"><dt className="text-neutral-600">Your ecash here</dt><dd><Money sats={have} className={short ? "text-amber-700 font-semibold" : ""} /></dd></div>}
+          {mint && <div className="flex justify-between"><dt className="text-neutral-600">Your ecash at {mintLabel(mint)}</dt><dd><Money sats={have} className={short ? "text-amber-700 font-semibold" : ""} /></dd></div>}
         </dl>
         <p className="text-neutral-500 text-xs mt-2">
           You pay as you ride: the base rate when the ride starts, then each mile and each minute. You can finish the ride at any time and pay only for what you used.
           {" "}If you miss two payments in a row, the driver may finish the ride. There is no deposit.
         </p>
+        {unknownMint && (
+          <div className="mt-3 rounded-xl bg-amber-50 text-amber-800 px-3 py-2" role="alert">
+            <p className="text-sm font-semibold">This driver is paid at {mintLabel(mint)}, a mint you have not used.</p>
+            <p className="text-xs mt-0.5">A mint holds the money you put into it, and the driver chose this one. If the mint is not honest, you can lose what you add there. Add funds only if you trust it.</p>
+            <Button size="md" variant="secondary" className="mt-2" onClick={() => { trustMint(mint); setTrusted(true); }}>I trust this mint</Button>
+          </div>
+        )}
         {!rates || !mint ? (
           <p className="text-amber-700 text-sm mt-3" role="alert">This driver's reply is missing its rates or its ecash mint, so it cannot be used. Choose another driver.</p>
         ) : ecashOff ? (
@@ -261,7 +280,7 @@ function ConfirmDriver({ request, trip, offer, onBack, onDecline }) {
         ) : null}
         <StickyActions className="mt-4 space-y-2">
           {short > 0 && mint && (
-            <Button onClick={() => setAdding(true)} disabled={!ecash}><Icon name="zap" size={18} /> Add {moneyText(short, btcPrice)} to your wallet</Button>
+            <Button onClick={() => setAdding(true)} disabled={!ecash || unknownMint}><Icon name="zap" size={18} /> Add {moneyText(short, btcPrice)} to your wallet</Button>
           )}
           <Button variant="go" onClick={go} loading={done} disabled={!ready}>Confirm driver</Button>
         </StickyActions>

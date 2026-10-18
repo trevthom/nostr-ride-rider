@@ -18,7 +18,7 @@ test("a wrap shows a relay only a throwaway author, the recipient and a blob", (
   assert.equal(w.kind, GIFT_WRAP);
   assert.deepEqual(w.tags, [["p", alice.pk]]);
   assert.notEqual(w.pubkey, bob.pk);
-  assert.ok(!w.content.includes("Elm") && !w.content.includes("4200") && !w.content.includes("nostrride"));
+  assert.ok(!w.content.includes("12 Elm Street") && !w.content.includes("priceSats") && !w.content.includes("nostrride"));
   assert.notEqual(wrap(inner, alice.pk).pubkey, w.pubkey, "a new throwaway key for every wrap");
 });
 
@@ -46,7 +46,7 @@ test("publish sends wraps only; the receiver's cache gets the inner event once",
   assert.equal(sent.length, 3, "one wrap each for the author, alice and carl");
   assert.ok(sent.every((e) => e.kind === GIFT_WRAP && e.tags.length === 1 && e.tags[0][0] === "p"));
   assert.deepEqual(new Set(sent.map((e) => e.tags[0][1])), new Set([bob.pk, alice.pk, carl.pk]));
-  assert.ok(sent.every((e) => !e.content.includes("Elm")));
+  assert.ok(sent.every((e) => !e.content.includes("12 Elm Street")));
   // Alice's device: reads the wrap addressed to her.
   relay.seen.delete(inner.id); relay.events = []; relay.byKind = new Map(); relay.byTag = new Map();
   relay.setIdentity(alice.sk, alice.pk);
@@ -71,4 +71,60 @@ test("audience: near online drivers for a ride, nearest first, not the blocked",
   assert.deepEqual(audienceFor({ pickup: near }, list, { me: "me" }), ["d1", "d3"]);
   assert.deepEqual(audienceFor({ pickup: near }, list, { me: "me", blocked: [{ pubkey: "d1" }] }), ["d3"]);
   assert.deepEqual(audienceFor({}, list, { me: "me" }), []);
+});
+
+test("a flood of wraps is opened in small steps, not all at once", async () => {
+  const me = people(), sender = people();
+  relay.events = []; relay.byKind = new Map(); relay.byTag = new Map(); relay.seen = new Set();
+  relay.setIdentity(me.sk, me.pk);
+  relay.wrapLimits = { budget: 20, windowMs: 60000, queueMax: 60, seenMax: 30000, batch: 25 };
+  relay.wrapWindowAt = 0; relay.wrapsInWindow = 0;
+  const wraps = Array.from({ length: 100 }, (_, i) => wrap(finalizeEvent({ kind: EVENT_KINDS.RIDE_ALIVE, created_at: 2000 + i, tags: [["p", me.pk], ["d", "alive-" + i], ["t", APP_TAG]], content: JSON.stringify({ i }) }, sender.sk), me.pk));
+  const elsewhere = wrap(job(sender, alice), alice.pk);
+  assert.equal(relay._ingest(elsewhere), false, "a wrap for someone else costs nothing");
+  assert.equal(relay.seenWraps.has(elsewhere.id), false);
+  let opened = 0;
+  for (const w of wraps) if (relay._ingest(w)) opened++;
+  assert.equal(opened, 20, "the budget is opened at once");
+  assert.equal(relay.wrapQueue.length, 60, "the next ones wait in the queue; past its limit a flood is dropped");
+  await new Promise((r) => setTimeout(r, 1500));
+  assert.equal(relay.query({ kinds: [EVENT_KINDS.RIDE_ALIVE] }).length, 80, "the queue was opened a few at a time");
+  assert.equal(relay.wrapQueue.length, 0);
+  relay.wrapLimits = { budget: 300, windowMs: 5000, queueMax: 3000, seenMax: 30000, batch: 100 };
+  relay.setIdentity(null, null);
+});
+
+test("the list of opened wraps does not grow without end", () => {
+  const me = people(), sender = people();
+  relay.setIdentity(me.sk, me.pk);
+  relay.wrapLimits = { budget: 1e9, windowMs: 1, queueMax: 10, seenMax: 30, batch: 10 };
+  for (let i = 0; i < 100; i++) relay._ingest(wrap(finalizeEvent({ kind: EVENT_KINDS.RIDE_ALIVE, created_at: 5000 + i, tags: [["p", me.pk], ["d", "z" + i], ["t", APP_TAG]], content: "{}" }, sender.sk), me.pk));
+  assert.ok(relay.seenWraps.size <= 30, "bounded: " + relay.seenWraps.size);
+  relay.wrapLimits = { budget: 300, windowMs: 5000, queueMax: 3000, seenMax: 30000, batch: 100 };
+  relay.setIdentity(null, null);
+});
+
+test("audience: people the rider vouches for come first, and a few places are drawn at random", () => {
+  const near = { lat: 40, lng: -100 };
+  const at = (pubkey, d) => ({ pubkey, lat: 40 + d, lng: -100 });
+  // 40 fakes crowd the exact pickup; the real driver is a little further out.
+  const people = [...Array.from({ length: 40 }, (_, i) => at("fake" + i, 0.0001 * i)), at("real", 0.2), at("friend", 0.4)];
+  const picked = audienceFor({ pickup: near }, people, { me: "me", limit: 30, trusted: (pk) => pk === "friend", random: () => 0 });
+  assert.ok(picked.includes("friend"), "the rider's vouch is always in");
+  assert.equal(picked.length, 30);
+  assert.equal(new Set(picked).size, 30, "no one twice");
+  // with random draws the real driver can be picked even though 40 fakes are nearer: some draw puts it in
+  let hits = 0;
+  for (let i = 0; i < 40; i++) if (audienceFor({ pickup: near }, people, { me: "me", limit: 30, random: Math.random }).includes("real")) hits++;
+  assert.ok(hits > 0, "the random places give a real driver a chance: " + hits + " of 40");
+  assert.deepEqual(audienceFor({ pickup: near }, people, { me: "me", limit: 0 }), [], "no room: nobody");
+});
+
+test("presence time is believed only within a minute of the signed event's time", async () => {
+  const { presenceTs } = await import("../src/nostr/live.js");
+  const t = 1_700_000_000;
+  assert.equal(presenceTs(t, t * 1000 + 5000), t * 1000 + 5000);
+  assert.equal(presenceTs(t, t * 1000 + 3_650_000_000), t * 1000 + 60000, "a time a year ahead is cut back");
+  assert.equal(presenceTs(t, 0), t * 1000 - 60000, "and so is one far behind");
+  assert.equal(presenceTs(t, "junk"), t * 1000);
 });

@@ -20,3 +20,22 @@ export function setMyMint(input) {
   if (url) setSetting("ecashMint", url);
   return url;
 }
+
+// ── Mints the rider has chosen to trust ──
+// A DRIVER names the mint they are paid at, and the rider pays there. A mint holds the money put into it, so a mint the rider
+// has never used is not trusted on a driver's word: the confirm screen warns and asks first (rider/screens/ActiveTrip.jsx).
+// A mint is known when it is the app's default, the one chosen in Account, one the rider already holds ecash at, or one the
+// rider said yes to.
+const TRUSTED = "trustedMints";
+export function isKnownMint(url, ecash) {
+  if (!url) return false;
+  if (url === DEFAULT_MINT || url === getMyMint()) return true;
+  const trusted = getSetting(TRUSTED, []);
+  if (Array.isArray(trusted) && trusted.includes(url)) return true;
+  return !!ecash && ecash.balance(url) > 0;
+}
+export function trustMint(url) {
+  if (!isMintUrl(url)) return;
+  const trusted = getSetting(TRUSTED, []);
+  setSetting(TRUSTED, [...new Set([...(Array.isArray(trusted) ? trusted : []), url])].slice(-50));
+}

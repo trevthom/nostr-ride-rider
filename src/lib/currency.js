@@ -110,3 +110,26 @@ export function fiatFromSats(sats, price, code = current) {
 
 // Price feed: how long a saved price may be used when the feed is down (a ride must not stop because of it).
 export const PRICE_MAX_AGE_MS = 24 * 3600000;
+
+// ── A price feed that goes wrong ──
+// The apps turn every charge into sats at the BTC price of the moment, and pay by themselves. A wrong price (a feed error, a
+// glitch that returns 1 instead of 100,000) would make every tick far too large. So a new price that is more than 30% away
+// from the last good one is NOT taken at once. It is kept as a suspect; if the same new level shows up on 3 fetches in a row
+// (a real crash or jump does), it is accepted. Pure.
+//    acceptPrices(prev, fetched, suspects) → { prices, suspects }      (prices: code → price; suspects: code → { value, n })
+export const PRICE_JUMP = 0.3;
+export const PRICE_CONFIRMS = 3;
+export function acceptPrices(prev, fetched, suspects = {}) {
+  const prices = { ...(prev || {}) };
+  const nextSuspects = {};
+  for (const [code, value] of Object.entries(fetched || {})) {
+    if (typeof value !== "number" || !Number.isFinite(value) || value <= 0) continue;
+    const old = prices[code];
+    if (!old || Math.abs(value - old) / old <= PRICE_JUMP) { prices[code] = value; continue; }
+    const sus = suspects[code];
+    const n = sus && Math.abs(value - sus.value) / sus.value <= PRICE_JUMP ? sus.n + 1 : 1;
+    if (n >= PRICE_CONFIRMS) prices[code] = value;
+    else nextSuspects[code] = { value, n };
+  }
+  return { prices, suspects: nextSuspects };
+}

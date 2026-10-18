@@ -36,6 +36,16 @@ const coarse = (n) => Math.round(n * 1000) / 1000;
 
 // ── Presence (public) ───────────────────────────────────────
 
+// When a presence beat counts as sent. The beat names its own time (`ts`), but the signed event has one too, and a driver could
+// write a time far in the future: the car would then never expire from the riders' maps, and no later beat from it could replace it.
+// So the beat's own time is believed only within a minute of the event's time.
+export function presenceTs(createdAtSec, claimed) {
+  const at = Number(createdAtSec) * 1000;
+  const c = Number(claimed);
+  if (!Number.isFinite(at)) return Date.now();
+  return Number.isFinite(c) ? Math.min(Math.max(c, at - 60000), at + 60000) : at;
+}
+
 // Publish one presence beat. Call this on an interval while online.
 // Addressable (d-tag "presence") so each driver has exactly one current
 // presence on the relay, with a short expiration.
@@ -70,7 +80,7 @@ export async function publishPresence(user, { lat, lng, vehicle, rates, hide }) 
 // Pulls the current set first (querySync) THEN subscribes live, so a
 // newly-opened device sees drivers who are already online. Stale drivers
 // drop after TTL. Returns an unsubscribe function.
-export function subscribePresence(onDrivers, { excludePubkey, viewerPubkey } = {}) {
+export function subscribePresence(onDrivers, { excludePubkey, viewerSk } = {}) {
   const drivers = new Map();
   let sub = null;
   let closed = false;
@@ -86,9 +96,9 @@ export function subscribePresence(onDrivers, { excludePubkey, viewerPubkey } = {
     try {
       const d = JSON.parse(ev.content);
       if (typeof d.lat !== "number" || typeof d.lng !== "number") return;
-      if (hidesMe(d.hide, ev.pubkey, viewerPubkey)) return; // this driver blocked me: they do not show up for me
+      if (hidesMe(d.hide, ev.pubkey, viewerSk)) return; // this driver blocked me: they do not show up for me
       const prev = drivers.get(ev.pubkey);
-      const ts = d.ts || Date.now();
+      const ts = presenceTs(ev.created_at, d.ts);
       if (prev && prev.ts > ts) return; // keep the freshest
       drivers.set(ev.pubkey, { pubkey: ev.pubkey, ...d, ts });
       emit();

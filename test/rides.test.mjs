@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 const R = new URL("../src", import.meta.url).pathname;
 const { relay } = await import(`${R}/nostr/relay.js`);
-const { rideStatus, rideEnding, tripCounts, rideVersions } = await import(`${R}/lib/rides.js`);
+const { rideStatus, rideEnding, tripCounts, rideVersions, rideStage, rideTimes } = await import(`${R}/lib/rides.js`);
 const { getProfile, getMetadata } = await import(`${R}/nostr/profiles.js`);
 const { EVENT_KINDS: K } = await import(`${R}/nostr/eventKinds.js`);
 
@@ -46,6 +46,7 @@ const r3 = ev(K.RIDE_REQUEST, rider, { ...trip, status: "in_progress", driverPub
 ev(K.RIDE_FINISH, driver, { reason: "driver" }, [["e", r3.id]]);
 assert.equal(rideStatus(r3), "closed", "the driver finishing before the ride started: nothing owed");
 const r4 = ev(K.RIDE_REQUEST, rider, { ...trip, status: "in_progress", driverPubkey: driver }, [["d", "ride-4"]]);
+ev(K.RIDE_CONFIRM, rider, { phase: "code", ok: true }, [["e", r4.id], ["d", "confirm-r4-code"]]);
 ev(K.RIDE_STAGE, driver, { stage: "riding" }, [["e", r4.id]]);
 const fin4 = ev(K.RIDE_FINISH, rider, { reason: "rider", role: "rider", at: 5000, miles: 1.2, minutes: 7 }, [["e", r4.id]]);
 assert.equal(rideStatus(r4), "completed", "the rider finishing during the ride: it started, so it is completed");
@@ -56,15 +57,32 @@ const old = ev(K.RIDE_REQUEST, rider, { ...trip, status: "cancelled" }, [["d", "
 assert.equal(rideStatus(old), "closed");
 // Both people finish at once: the earliest counts; within 10 s, the one that costs the rider less.
 const r5 = ev(K.RIDE_REQUEST, rider, { ...trip, status: "in_progress", driverPubkey: driver }, [["d", "ride-5"]]);
+ev(K.RIDE_CONFIRM, rider, { phase: "code", ok: true }, [["e", r5.id], ["d", "confirm-r5-code"]]);
 ev(K.RIDE_STAGE, driver, { stage: "riding" }, [["e", r5.id]]);
 const slow = ev(K.RIDE_FINISH, driver, { reason: "driver", role: "driver", miles: 3.0, minutes: 9 }, [["e", r5.id]], 1000);
 const quick = ev(K.RIDE_FINISH, rider, { reason: "rider", role: "rider", miles: 2.8, minutes: 9 }, [["e", r5.id]], 1004);
 assert.equal(rideEnding(r5).by, rider, "within 10 s the cheaper finish (fewer miles) wins");
 const r6 = ev(K.RIDE_REQUEST, rider, { ...trip, status: "in_progress", driverPubkey: driver }, [["d", "ride-6"]]);
+ev(K.RIDE_CONFIRM, rider, { phase: "code", ok: true }, [["e", r6.id], ["d", "confirm-r6-code"]]);
 ev(K.RIDE_STAGE, driver, { stage: "riding" }, [["e", r6.id]]);
 ev(K.RIDE_FINISH, driver, { reason: "driver", role: "driver", miles: 1, minutes: 2 }, [["e", r6.id]], 2000);
 ev(K.RIDE_FINISH, rider, { reason: "rider", role: "rider", miles: 0.5, minutes: 1 }, [["e", r6.id]], 2060);
 assert.equal(rideEnding(r6).by, driver, "more than 10 s apart: the earliest signed finish counts");
+
+// The driver alone cannot start a ride: a "riding" marker counts only after the RIDER typed the start code.
+const r7 = ev(K.RIDE_REQUEST, rider, { ...trip, status: "in_progress", driverPubkey: driver }, [["d", "ride-7"]]);
+ev(K.RIDE_STAGE, driver, { stage: "arrived", at: 5000 }, [["e", r7.id], ["d", "stage-r7-a"]]);
+ev(K.RIDE_STAGE, driver, { stage: "riding", at: 6000 }, [["e", r7.id], ["d", "stage-r7"]]);
+assert.equal(rideStage(r7), "arrived", "a riding marker without the rider's start code is ignored");
+assert.equal(rideTimes(r7).startedAt, null, "nothing starts the meter");
+ev(K.RIDE_FINISH, rider, { reason: "rider", role: "rider" }, [["e", r7.id]]);
+assert.equal(rideStatus(r7), "closed", "so the ride never started and nothing is owed");
+const r8 = ev(K.RIDE_REQUEST, rider, { ...trip, status: "in_progress", driverPubkey: driver }, [["d", "ride-8"]]);
+ev(K.RIDE_CONFIRM, attacker, { phase: "code", ok: true }, [["e", r8.id], ["d", "confirm-r8-code"]]);
+ev(K.RIDE_STAGE, driver, { stage: "riding", at: 6000 }, [["e", r8.id], ["d", "stage-r8"]]);
+assert.equal(rideStage(r8), "arrived", "only the rider's own confirmation counts");
+ev(K.RIDE_CONFIRM, rider, { phase: "code", ok: true }, [["e", r8.id], ["d", "confirm-r8-code"]]);
+assert.equal(rideStage(r8), "riding", "with the rider's code the marker counts");
 
 // Star ratings are gone (too easy to fake): an old rating event left on a relay changes no number. Trips are plain counts.
 ev(K.RATING, rider, { rating: 5 }, [["p", driver], ["e", r1b.id]]);

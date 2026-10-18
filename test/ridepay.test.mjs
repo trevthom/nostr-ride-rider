@@ -1,6 +1,8 @@
 // The signed trail of pay-as-you-ride: ticks, replies, waivers, signs of life, stops, and the frozen terms.
 // Run with: npm test
 import assert from "node:assert/strict";
+const mem = {};
+globalThis.localStorage = { getItem: (k) => mem[k] ?? null, setItem: (k, v) => { mem[k] = String(v); }, removeItem: (k) => { delete mem[k]; } };
 const R = new URL("../src", import.meta.url).pathname;
 const { relay } = await import(`${R}/nostr/relay.js`);
 const Pay = await import(`${R}/lib/payments.js`);
@@ -83,7 +85,9 @@ sign(attacker, Pay.tickReplyEvent(live, t2, { ok: true, receivedSats: 250 }));
 assert.equal(Pay.paidSats(live), 2000, "a stranger cannot confirm a payment");
 sign(driver, Pay.tickReplyEvent(live, t2, { ok: false, reason: "The mint refused this token" }));
 assert.equal(Pay.paidSats(live), 2000);
-assert.equal(Pay.sentSats(live), 2000, "a refused tick was not paid: the rider's app pays it again");
+assert.equal(Pay.sentSats(live), 2250, "a refused tick still counts as sent until the rider's app has its token back (test/refusal.test.mjs)");
+Pay.setTickVerdict(t2.id, "recovered");
+assert.equal(Pay.sentSats(live), 2000, "once the rider's app took the token back from the mint, the tick was not paid: it is due again");
 sign(driver, Pay.tickReplyEvent(live, t1, { ok: false, reason: "late nonsense" }), NOW + 90);
 assert.equal(Pay.paidSats(live), 2000, "once received, a later refusal changes nothing");
 assert.equal(Pay.tickReplies(live).get(t1.id).ok, true);

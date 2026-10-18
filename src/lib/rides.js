@@ -165,7 +165,16 @@ function computeStage(request) {
     if (!ids.has(etagOf(e))) return;
     best = Math.max(best, RIDE_STAGES.indexOf(parse(e)?.stage));
   });
+  // The driver alone cannot start the ride: "riding" counts only once the RIDER typed the start code.
+  if (best === 2 && !riderStarted(request)) best = 1;
   return RIDE_STAGES[best];
+}
+
+// Did the rider type the start code shown on the driver's phone (lib/startcode.js)? Only the rider's own signed
+// confirmation says so. A driver can sign a "riding" marker from anywhere; without this a marker would start the
+// meter, and the rider's app would pay the base rate and every minute for a ride the rider never began.
+export function riderStarted(request) {
+  return !!rideConfirm(request).code?.ok;
 }
 
 // When each part of a drive began, in ms, from the signed events:
@@ -184,6 +193,7 @@ function computeTimes(request) {
     .query({ kinds: [EVENT_KINDS.RIDE_ACCEPT], authors: [rider], "#p": [driver], "#e": [...ids] })
     .sort((a, b) => a.created_at - b.created_at)[0];
   out.confirmedAt = accept ? accept.created_at * 1000 : null;
+  const started = riderStarted(request);
   const near = (claim, e) => (Number.isFinite(claim) && Math.abs(claim - e.created_at * 1000) <= 600000 ? claim : null);
   const earliest = (a, b) => (a == null ? b : b == null ? a : Math.min(a, b));
   relay.query({ kinds: [EVENT_KINDS.RIDE_STAGE], "#e": [...ids], authors: [driver] }).forEach((e) => {
@@ -191,7 +201,7 @@ function computeTimes(request) {
     const c = parse(e) || {};
     const own = near(c.at, e) ?? e.created_at * 1000;
     if (c.stage === "arrived") out.arrivedAt = earliest(out.arrivedAt, own);
-    if (c.stage === "riding") {
+    if (c.stage === "riding" && started) {
       out.startedAt = earliest(out.startedAt, own);
       // The time of arrival may be recalled inside the riding marker (it can be older than the event).
       if (Number.isFinite(c.arrivedAt) && c.arrivedAt <= own && own - c.arrivedAt <= 6 * HOUR) out.arrivedAt = earliest(out.arrivedAt, c.arrivedAt);

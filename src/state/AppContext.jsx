@@ -22,6 +22,7 @@ import { syncVouches } from "../nostr/vouchSync.js";
 import MilesSync from "../features/profile/MilesSync.jsx";
 import AudienceSync from "./AudienceSync.jsx";
 import { audienceFor } from "../lib/audience.js";
+import { trustFor } from "../lib/vouches.js";
 import { getPeople, getAudience, addAudience, answerersOf } from "../lib/audienceStore.js";
 import { useBackup } from "./useBackup.js";
 import { applyAppearance, isDark } from "../lib/appearance.js";
@@ -33,7 +34,7 @@ import { APP_NAME } from "../config/app.js";
 import { getSetting, setSetting, reconnectAll } from "../config/relays.js";
 import { addBlock, removeBlock, isBlocked } from "../lib/blocks.js";
 import { showSystemNotification } from "../lib/notify.js";
-import { PRICE_CODES, PRICE_MAX_AGE_MS, getCurrency, setCurrency as saveCurrency, onCurrencyChange } from "../lib/currency.js";
+import { PRICE_CODES, PRICE_MAX_AGE_MS, acceptPrices, getCurrency, setCurrency as saveCurrency, onCurrencyChange } from "../lib/currency.js";
 import { FALLBACK_BTC_USD } from "../config/settings.js";
 import { link } from "../nostr/link.js";
 
@@ -122,6 +123,8 @@ export function AppProvider({ initialView, children }) {
     const saved = getSetting("prices", null);
     return saved && saved.prices && Date.now() - saved.at < PRICE_MAX_AGE_MS ? { prices: saved.prices, at: saved.at, live: false } : { prices: {}, at: 0, live: false };
   });
+  const lastPrices = useRef(priceInfo.prices);
+  const suspectPrices = useRef({});
   useEffect(() => {
     let alive = true;
     const fetchPrice = async () => {
@@ -129,12 +132,16 @@ export function AppProvider({ initialView, children }) {
         const res = await fetch(`https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=${PRICE_CODES.map((c) => c.toLowerCase()).join(",")}`);
         const data = await res.json();
         const row = data?.bitcoin || {};
-        const prices = {};
-        PRICE_CODES.forEach((c) => { const v = row[c.toLowerCase()]; if (typeof v === "number" && v > 0) prices[c] = v; });
-        if (alive && Object.keys(prices).length) {
-          const next = { prices, at: Date.now(), live: true };
+        const fetched = {};
+        PRICE_CODES.forEach((c) => { const v = row[c.toLowerCase()]; if (typeof v === "number" && v > 0) fetched[c] = v; });
+        if (alive && Object.keys(fetched).length) {
+          // A price far from the last good one waits for confirmation (lib/currency.js acceptPrices): the apps pay by themselves.
+          const r = acceptPrices(lastPrices.current, fetched, suspectPrices.current);
+          suspectPrices.current = r.suspects;
+          lastPrices.current = r.prices;
+          const next = { prices: r.prices, at: Date.now(), live: true };
           setPriceInfo(next);
-          setSetting("prices", { prices, at: next.at });
+          setSetting("prices", { prices: r.prices, at: next.at });
         }
       } catch {
         /* keep the last prices; a fiat amount just may not show */
@@ -275,7 +282,7 @@ export function AppProvider({ initialView, children }) {
         const d = (tagged.find((t) => t[0] === "d") || [])[1];
         let c = null;
         try { c = typeof content === "string" ? JSON.parse(content) : content; } catch { /* no audience */ }
-        const asked = c && c.status === "requested" ? audienceFor(c, getPeople(), { me: user.publicKey, blocked }) : [];
+        const asked = c && c.status === "requested" ? audienceFor(c, getPeople(), { me: user.publicKey, blocked, trusted: (pk) => !!trustFor(pk, user.publicKey) }) : [];
         to.push(...asked, ...getAudience(d), ...answerersOf(d, user.publicKey));
         addAudience(d, asked);
       }

@@ -196,7 +196,7 @@ carries `driverPubkey`. Stage is `enroute` (default) → `arrived` → `riding`.
   the rider less; a claimed finish time must be close to the event's own time — except `silence`, which may run back to the last signed signal but never
   before a signed event that proves someone was there); a RIDE_COMPLETE (old) and a RIDE_STAGE only from the assigned driver; a RIDE_CONFIRM, a RIDE_PAYMENT, a RIDE_TICK and a
   RIDE_STOP_CHANGE only from the ride's rider; a RIDE_TICK_REPLY, a RIDE_WAIVER and a RIDE_STOP_REPLY only from the assigned driver; a RIDE_ALIVE from either. Stages only move forward (the
-  furthest valid marker wins). Always go through `rideVersions`/`rideStatus`/`rideEnding`/
+  furthest valid marker wins; `riding` also needs the rider's start-code confirmation, see Security rules). Always go through `rideVersions`/`rideStatus`/`rideEnding`/
   `rideStage`/`tripCounts` and `lib/payments.js` — don't re-derive.
 - **Offers expire**: for a ride needed now an offer is good for `OFFER_TTL_SECONDS`
   (`offersForRide`, `pendingOfferFor`). After a driver is chosen, read their offer with
@@ -395,6 +395,21 @@ carries `driverPubkey`. Stage is `enroute` (default) → `arrived` → `riding`.
 - **Audience** (`lib/audience.js`, `lib/audienceStore.js`, `state/AudienceSync.jsx`): a new request goes to the online drivers near the pickup, nearest 60. `AudienceSync` subscribes to presence and sends waiting requests to people who appear later (`relay.sealTo`). Later versions of a request go to the audience + every driver who sent an offer.
 - Other people's job history is not readable any more: the profile carries self-reported `stats.miles` (`lib/mileage.js`, `features/profile/MilesSync.jsx`).
 - Test relays must keep kind 1059 and answer `#p` filters. Tests: `test/sealing.test.mjs`.
+
+## Security rules (from an audit; do not weaken)
+Everything the OTHER person's app sends is a claim. The apps pay by themselves, so a claim must never move money or start a ride on its own.
+- **A drive needs consent** (`lib/trips.js consentedDrive`): `activeDriveFor` (and the driver's receipt list) count a request only if the driver sent an offer for it AND the rider's accept names them. A request that merely names a driver (anyone can sign one) must not put the driver on a ride: that made the driver's app send live GPS to a stranger.
+- **Only the rider starts the ride** (`lib/rides.js riderStarted`): the driver's `riding` marker counts (`rideStage`, `rideTimes.startedAt`) only after the RIDER's own signed `code` confirmation. Before that nothing is billed and a finish is `closed`.
+- **"Refused" is not trusted** (`features/payments/recoverRefused.js`, `lib/payments.js tickVerdict/sentSats`): a tick the driver answered `ok:false` still counts as sent until the rider's app took its own token back from the mint (`ecash.redeem` of the rider's own sealed token succeeds = unspent = unpaid; a definitive mint "no" = spent = paid, whatever the driver said; unreachable = undecided, still sent). The rider pays a tick once.
+- **Distances from the other person are bounded** (`lib/meter.js boundedMiles`, `lib/ridemoney.js currentLedger`, `rider/state/useRiderMeter.js`): the miles in a finish event are held to this phone's own measure (live meter, else the saved ledger's last sample plus what a car could drive since); with no measure at all, to the clock (70 mph average) and twice the quoted route + 3 mi. Live miles are held to the clock too.
+- **Spending cap per ride** (`lib/spendcap.js`, `payDue({capSats})`, status `capped`): 3 × the quoted fare, at least 10 USD of sats, fixed when first needed; at the cap the app stops and shows "Allow more" (OnTrip, Receipt).
+- **Price feed** (`lib/currency.js acceptPrices`): a price more than 30% from the last good one is a suspect and is taken only on the 3rd fetch in a row.
+- **Frozen terms** (`lib/terms.js agreedOffer`): the offer the rider's accept names, nothing else. If it is not in hand, nothing is agreed (no fallback to the driver's newest offer, which a driver can replace).
+- **Prices shown come from the rates** (`lib/fare.js offerEstimate`): never the offer's own `priceSats` (a driver's claim).
+- **Mints** (`features/ecash/myMint.js isKnownMint/trustMint`): a mint a driver names that the rider never used needs an explicit "I trust this mint" before Add funds. Waiver refunds are redeemed only at the ride's mint (`redeemWaivers.js`).
+- **Audience** (`lib/audience.js`): vouched people first, then the nearest, then random draws; at most `AUDIENCE_LIMIT` per request in all (`AudienceSync` fills only the places left). Presence time is held to ±60 s of the event (`live.js presenceTs`).
+- **Hide tokens** (`lib/blocks.js`): an HMAC with the NIP-44 conversation key the two people share, so a stranger cannot test who blocked whom. They take a SECRET KEY (`hideList(sk, …)`, `hidesMe(hide, ownerPubkey, mySk)`, `subscribePresence({viewerSk})`).
+- **Gift-wrap flood** (`nostr/relay.js _ingestWrap`): wraps not addressed to us are ignored; at most `wrapLimits.budget` are opened per window, the rest wait in a bounded queue; the seen-set is bounded.
 
 ## "Going live" swap points
 - Relays: already real (`nostr/relay.js`, `nostr/live.js`). To harden: scope relays/geography,

@@ -34,7 +34,7 @@ const parse = (e) => { try { return JSON.parse(e.content); } catch { return null
 
 export default function Receipt({ request }) {
   const { user, liveTick, btcPrice, priceFor } = useApp();
-  const { dismissReceipt, confirmRide, money, payNow, payMint } = useRider();
+  const { dismissReceipt, confirmRide, money, payNow, allowMore, payMint } = useRider();
   void liveTick;
   const key = rideKey(request);
   const driverPubkey = rideDriver(request);
@@ -119,6 +119,13 @@ export default function Receipt({ request }) {
               <Button size="md" variant="secondary" onClick={() => payNow(request)}>Pay now</Button>
             </div>
             {money?.status === "error" && <p className="text-xs text-red-700 mt-2">{money.message}</p>}
+          </div>
+        )}
+        {money?.status === "capped" && (
+          <div className="mt-4 rounded-2xl bg-amber-50 text-amber-900 px-4 py-3" role="alert">
+            <p className="font-semibold">Payments paused at {moneyText(money.capSats, btcPrice)}.</p>
+            <p className="text-sm mt-0.5">This ride cost much more than expected: {moneyText(money.held, btcPrice)} more is due. If the fare is right, allow more and the app pays it.</p>
+            <Button size="md" className="mt-2" onClick={() => allowMore(request)}>Allow more</Button>
           </div>
         )}
         {completed && !owes && sum.owed > 0 && <p className="text-[#05944f] text-sm font-medium mt-3 flex items-center gap-1"><Icon name="check" size={16} /> Paid in full</p>}

@@ -92,6 +92,7 @@ live = latestVersions(relay.query({ kinds: [K.RIDE_REQUEST] })).find((r) => r.id
 assert.equal(Rd.rideTimes(live).arrivedAt, (t0 + 600) * 1000);
 // The "riding" marker replaces "arrived" on a relay, so it carries the arrival time.
 const only = pub(K.RIDE_REQUEST, { ...JSON.parse(req.content), status: "in_progress", driverPubkey: driver.publicKey, n: 2 }, [["d", d], ["p", driver.publicKey]], rider, t0 + 61);
+pub(K.RIDE_CONFIRM, { phase: "code", ok: true }, [["e", inprog.id], ["p", driver.publicKey], ["d", "confirm-" + Rd.rideKey(inprog) + "-code"]], rider, t0 + 880);
 stage("riding", { at: (t0 + 900) * 1000, arrivedAt: (t0 + 600) * 1000 }, t0 + 900);
 const times = Rd.rideTimes(only);
 assert.deepEqual([times.arrivedAt, times.startedAt], [(t0 + 600) * 1000, (t0 + 900) * 1000]);

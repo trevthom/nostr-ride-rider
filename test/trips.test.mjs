@@ -38,6 +38,7 @@ assert.equal(rideStage(r1), "arrived");
 ev(K.RIDE_STAGE, driver, { stage: "bogus" }, [["e", r1.id], ["d", "stage-2"]]);
 assert.equal(rideStage(r1), "arrived", "unknown stage ignored");
 const r1b = ev(K.RIDE_REQUEST, rider, { ...trip, status: "in_progress", driverPubkey: driver }, [["d", "ride-1"]], now() + 1);
+ev(K.RIDE_CONFIRM, rider, { phase: "code", ok: true }, [["e", r1b.id], ["d", "confirm-1-code"]]);
 ev(K.RIDE_STAGE, driver, { stage: "riding" }, [["e", r1b.id], ["d", "stage-3"]]);
 assert.equal(rideStage(r1b), "riding", "marker on any version of the ride counts");
 ev(K.RIDE_STAGE, driver, { stage: "arrived" }, [["e", r1b.id], ["d", "stage-4"]]);
@@ -49,7 +50,14 @@ const stale = ev(K.RIDE_REQUEST, other, { ...trip, status: "requested", time: "A
 const reqs = latestVersions(relay.query({ kinds: [K.RIDE_REQUEST] }));
 assert.equal(T.activeRideFor(reqs, other).id, open.id, "open request is active; expired one is not");
 assert.equal(T.activeRideFor(reqs, rider).id, r1b.id, "running ride is active for the rider");
-assert.equal(T.activeDriveFor(reqs, driver).id, r1b.id, "and for the assigned driver");
+assert.equal(T.activeDriveFor(reqs, driver), null, "a request that only NAMES a driver is not a drive: no offer, no accept");
+const ph = ev(K.RIDE_REQUEST, "e".repeat(64), { ...trip, status: "in_progress", driverPubkey: driver }, [["d", "phantom"]], now());
+ev(K.RIDE_OFFER, driver, { priceSats: 7000, etaMinutes: 3 }, [["e", r1.id], ["p", rider], ["d", "offer-" + r1.id]], now());
+assert.equal(T.activeDriveFor(latestVersions(relay.query({ kinds: [K.RIDE_REQUEST] })), driver), null, "an offer alone is not enough: the rider must accept it");
+ev(K.RIDE_ACCEPT, rider, { offerId: "o1", requestId: r1.id }, [["e", "o1"], ["e", r1.id], ["p", driver], ["d", "accept-r1"]], now());
+const reqs2 = latestVersions(relay.query({ kinds: [K.RIDE_REQUEST] }));
+assert.equal(T.activeDriveFor(reqs2, driver).id, r1b.id, "offer + the rider's accept: the assigned driver is on the ride");
+assert.notEqual(T.activeDriveFor(reqs2, driver).id, ph.id, "the made-up ride never counts");
 assert.equal(T.activeDriveFor(reqs, rider), null);
 assert.equal(T.activeRideFor(reqs, attacker), null);
 ev(K.RIDE_FINISH, other, {}, [["e", open.id]]); // other is the rider on this ride
@@ -87,7 +95,7 @@ ev(K.RIDE_FINISH, rider, {}, [["e", q1.id]]);
 assert.equal(T.pendingOfferFor(driver), null, "no pending offer once the ride is finished");
 
 // The accept the rider sent to a driver is found by that driver only.
-const acc = ev(K.RIDE_ACCEPT, rider, { paidSats: 5 }, [["e", "x"], ["e", r1.id], ["p", driver], ["d", "accept-1"]]);
+const acc = ev(K.RIDE_ACCEPT, rider, { paidSats: 5 }, [["e", "x"], ["e", r1.id], ["p", driver], ["d", "accept-1"]], now() + 50);
 assert.equal(T.acceptFor(r1b, driver).id, acc.id); assert.equal(T.acceptFor(r1b, other), null);
 
 // ── Earnings ──

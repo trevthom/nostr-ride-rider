@@ -10,6 +10,7 @@
 import { relay } from "../../nostr/relay.js";
 import { EVENT_KINDS } from "../../nostr/eventKinds.js";
 import { rideDriver } from "../../lib/rides.js";
+import { rideMint } from "../../lib/terms.js";
 import { waiversOf, waiverToken } from "../../lib/payments.js";
 
 const tried = new Set(); // waiver ids already handled in this session
@@ -24,12 +25,15 @@ export async function redeemWaiversFor({ user, ecash, rideRequests }) {
     const request = rideRequests.find((r) => eid.includes(r.id)) || eid.map((id) => relay.query({ kinds: [EVENT_KINDS.RIDE_REQUEST], ids: [id] })[0]).find(Boolean);
     if (!request || request.pubkey !== user.publicKey || rideDriver(request) !== ev.pubkey || seen.has(request.id)) continue;
     seen.add(request.id);
+    // A refund is ecash at the mint the ride was agreed at, and only from there. A token from any other mint would make this app
+    // contact an address the DRIVER picked, and could fill the wallet with money that is worth nothing.
+    const mint = rideMint(request);
     for (const w of waiversOf(request)) {
       if (tried.has(w.id)) continue;
       const token = waiverToken(w, request, user);
-      if (!token) { tried.add(w.id); continue; }
+      if (!token || !mint) { if (!token) tried.add(w.id); continue; }
       try {
-        const r = await ecash.redeem(token);
+        const r = await ecash.redeem(token, { only: [mint] });
         tried.add(w.id);
         got.push(r);
       } catch (e) {

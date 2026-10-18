@@ -39,6 +39,7 @@ function newRide(name, mode, extra = {}) {
   signAs(rider, K.RIDE_ACCEPT, { offerId: offer.id, requestId: req.id }, [["e", offer.id], ["e", req.id], ["p", driver.publicKey], ["d", "accept-" + req.id]], T0 - 3 * MIN);
   const live = signAs(rider, K.RIDE_REQUEST, { ...trip, status: "in_progress", driverPubkey: driver.publicKey }, [["d", d], ["p", driver.publicKey]], T0 - 2 * MIN);
   signAs(driver, K.RIDE_STAGE, { stage: "arrived", at: T0 - MIN }, [["e", live.id], ["p", rider.publicKey], ["d", "stage-" + d]], T0 - MIN);
+  signAs(rider, K.RIDE_CONFIRM, { phase: "code", ok: true }, [["e", live.id], ["p", driver.publicKey], ["d", "confirm-" + d + "-code"]], T0 - 30000);
   signAs(driver, K.RIDE_STAGE, { stage: "riding", at: T0, arrivedAt: T0 - MIN }, [["e", live.id], ["p", rider.publicKey], ["d", "stage-" + d]], T0);
   return live;
 }
@@ -93,7 +94,7 @@ const verdict = Pay.tickReplies(ride).get(evilEv.id);
 assert.equal(verdict.ok, false, "a replayed token is refused");
 assert.match(verdict.reason, /already used for another payment/);
 assert.equal(Pay.paidSats(ride), Pay.ticksOf(ride).filter((t) => t.id !== evilEv.id).reduce((s, t) => s + (Pay.tickReplies(ride).get(t.id)?.ok ? t.amountSats : 0), 0), "and it adds nothing to what is paid");
-assert.equal(Pay.sentSats(ride), Pay.ticksOf(ride).filter((t) => t.id !== evilEv.id).reduce((s, t) => s + t.amountSats, 0), "a refused tick does not count as sent either");
+assert.equal(Pay.sentSats(ride), Pay.ticksOf(ride).reduce((s, t) => s + t.amountSats, 0), "a refused tick still counts as sent: the driver's word is not enough to make the rider pay it again (test/refusal.test.mjs)");
 
 // ── 5. A short wallet: partial payment now, the rest caught up after a top-up ──
 const poor = build(net);

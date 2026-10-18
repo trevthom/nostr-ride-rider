@@ -84,7 +84,15 @@ class NostrRelay {
     this.probing = new Set();
     this.listeners = new Set();
     this.me = null; // { sk, pk }: who may open the wraps addressed to this device (setIdentity)
-    this.seenWraps = new Set(); // wrap ids already opened (or found unreadable)
+    this.seenWraps = new Set(); // wrap ids already opened (or found unreadable); the oldest are forgotten past wrapLimits.seenMax
+    // Anyone can send a wrap to any key, and opening one costs a key agreement and a decryption. A flood of them must not freeze the app:
+    // `budget` are opened at once per `windowMs`, the rest wait in a queue (at most `queueMax`, then they are dropped) and are
+    // opened `batch` at a time every 250 ms.
+    this.wrapLimits = { budget: 300, windowMs: 5000, queueMax: 3000, seenMax: 30000, batch: 100 };
+    this.wrapWindowAt = 0;
+    this.wrapsInWindow = 0;
+    this.wrapQueue = [];
+    this._wrapTimer = null;
     this.sub = null;
     this.wrapSub = null;
     this.syncing = false;
@@ -133,7 +141,7 @@ class NostrRelay {
   setIdentity(sk, pk) {
     const same = this.me && pk && this.me.pk === pk;
     this.me = sk && pk ? { sk, pk } : null;
-    if (!same) this.seenWraps = new Set();
+    if (!same) { this.seenWraps = new Set(); this.wrapQueue = []; }
     if (this.syncing && !same) this._resubscribe();
   }
 
@@ -477,9 +485,32 @@ class NostrRelay {
   // A gift wrap from a relay: open it with our key; the inner event goes through the same checks as any relay event.
   _ingestWrap(w) {
     if (!this.me || this.seenWraps.has(w.id)) return false;
+    if (!(w.tags || []).some((t) => t[0] === "p" && t[1] === this.me.pk)) return false; // not addressed to us: not worth a decryption
+    const now = Date.now();
+    if (now - this.wrapWindowAt > this.wrapLimits.windowMs) { this.wrapWindowAt = now; this.wrapsInWindow = 0; }
+    if (this.wrapsInWindow >= this.wrapLimits.budget) { this._queueWrap(w); return false; }
+    this.wrapsInWindow++;
+    return this._openWrap(w);
+  }
+  _openWrap(w) {
     this.seenWraps.add(w.id);
+    if (this.seenWraps.size > this.wrapLimits.seenMax) {
+      let drop = Math.ceil(this.wrapLimits.seenMax / 6);
+      for (const id of this.seenWraps) { if (drop-- <= 0) break; this.seenWraps.delete(id); }
+    }
     const inner = unwrap(w, this.me.sk);
     return inner ? this._ingest(inner) : false;
+  }
+  _queueWrap(w) {
+    if (this.wrapQueue.length >= this.wrapLimits.queueMax) return; // a flood: the rest is dropped
+    this.wrapQueue.push(w);
+    if (!this._wrapTimer) { this._wrapTimer = setTimeout(() => this._drainWraps(), 250); this._wrapTimer.unref?.(); }
+  }
+  _drainWraps() {
+    this._wrapTimer = null;
+    if (!this.me) { this.wrapQueue = []; return; }
+    for (const w of this.wrapQueue.splice(0, this.wrapLimits.batch)) if (!this.seenWraps.has(w.id)) this._openWrap(w);
+    if (this.wrapQueue.length) { this._wrapTimer = setTimeout(() => this._drainWraps(), 250); this._wrapTimer.unref?.(); }
   }
 
   _matches(event, filter) {

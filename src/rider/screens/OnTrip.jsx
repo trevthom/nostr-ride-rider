@@ -31,7 +31,7 @@ import { useApp } from "../../state/AppContext.jsx";
 import { useRider } from "../state/RiderContext.jsx";
 import { subscribeRideLocation } from "../../nostr/live.js";
 import { haversineDistance } from "../../lib/geo.js";
-import { pickupEta, isLowBalance } from "../../lib/fare.js";
+import { pickupEta, isLowBalance, offerEstimate } from "../../lib/fare.js";
 import { rideConfirm, rideDriver, rideStage, rideTimes } from "../../lib/rides.js";
 import { offerPlate } from "../../lib/privacy.js";
 import { offerFrom } from "../../lib/trips.js";
@@ -59,8 +59,8 @@ const r3 = (n) => Math.round(n * 1000) / 1000; // ~110 m: limits how often the r
 const miles = (a, b) => haversineDistance(a.lat, a.lng, b.lat, b.lng);
 
 export default function OnTrip({ request, trip }) {
-  const { user, pushNotice, btcPrice, usdPrice, ecash } = useApp();
-  const { finishRide, myPosition, gps, share, shareUpdate, confirmRide, money, reportMiles, payMint, screenMayDim } = useRider();
+  const { user, pushNotice, btcPrice, usdPrice, ecash, prices } = useApp();
+  const { finishRide, myPosition, gps, share, shareUpdate, confirmRide, money, allowMore, reportMiles, payMint, screenMayDim } = useRider();
   const driverPubkey = rideDriver(request);
   const stage = rideStage(request);
   const offer = offerFrom(request, driverPubkey);
@@ -137,7 +137,7 @@ export default function OnTrip({ request, trip }) {
 
   // Time and distance so far (the same on the driver's screen). The rider's own GPS figure is used inside
   // the code only (lib/meter.js); it is sent to the driver's app, so both screens agree.
-  const meter = useRiderMeter({ request, stage, loc, pos: myPosition });
+  const meter = useRiderMeter({ request, stage, loc, pos: myPosition, quotedMiles: (() => { try { return JSON.parse(request.content).distanceMiles; } catch { return null; } })() });
   useEffect(() => { reportMiles(meter.tripMiles); }, [meter.tripMiles, reportMiles]);
   const view = meterView({ stage, times: rideTimes(request), nowMs: Date.now(), pickupMiles: meter.pickupMiles, tripMiles: meter.tripMiles });
   const latestMeter = useRef(meter);
@@ -187,6 +187,8 @@ export default function OnTrip({ request, trip }) {
   const route = loc ? [{ lat: r3(loc.lat), lng: r3(loc.lng) }, ...waypoints] : stage === "riding" ? [pickup, ...stops, dropoff] : null;
   const car = carText(profile?.vehicle);
   const contentOffer = offer ? JSON.parse(offer.content) : null;
+  // Our own estimate from the driver's frozen rates and the trip (lib/fare.js offerEstimate), not the driver's `priceSats`.
+  const quotedSats = contentOffer ? offerEstimate(contentOffer, (() => { try { return JSON.parse(request.content); } catch { return null; } })(), prices) : null;
   // The rider's ecash at the mint that pays this ride, live (the wallet tells the app on every change). Red at LOW_BALANCE_USD or less.
   const walletSats = ecash && payMint ? ecash.balance(payMint) : null;
   const lowWallet = walletSats != null && isLowBalance(walletSats, usdPrice);
@@ -283,7 +285,7 @@ export default function OnTrip({ request, trip }) {
               <Money sats={money?.paid || 0} />
             </div>
             {riding && contentOffer && (
-              <EstimatedTotal className="mt-2" baseSats={contentOffer.priceSats} trip={full} changed={accepted.length > 0} changeKinds={changeKinds} terms={terms} />
+              <EstimatedTotal className="mt-2" baseSats={quotedSats ?? contentOffer.priceSats} trip={full} changed={accepted.length > 0} changeKinds={changeKinds} terms={terms} />
             )}
             <FareBreakdown ledger={money?.ledger} paidSats={money?.paid || 0} className="mt-3 pt-3 border-t border-neutral-200" />
             <p className="text-xs text-neutral-500 mt-2">
@@ -299,6 +301,13 @@ export default function OnTrip({ request, trip }) {
                 <p className="text-sm font-semibold">Your ecash wallet is short by {moneyText(Math.max(1, money.shortSats || money.due), btcPrice)}.</p>
                 <p className="text-xs mt-0.5">If two payments are missed, your driver may finish the ride. Add funds and everything missed is paid at once.</p>
                 <Button size="md" className="mt-2" onClick={() => setAdding(true)}><Icon name="zap" size={16} /> Add funds</Button>
+              </div>
+            )}
+            {money?.status === "capped" && (
+              <div className="mt-2 rounded-xl bg-amber-50 text-amber-800 px-3 py-2" role="alert">
+                <p className="text-sm font-semibold">Payments paused at {moneyText(money.capSats, btcPrice)}.</p>
+                <p className="text-xs mt-0.5">This ride has already cost much more than expected. {moneyText(money.held, btcPrice)} more is due. Your driver sees missed payments and may finish the ride. If the fare is right, allow more.</p>
+                <Button size="md" className="mt-2" onClick={() => allowMore(request)}>Allow more</Button>
               </div>
             )}
             {money?.status === "error" && <p className="mt-2 text-xs text-red-700" role="alert">A payment did not go through: {money.message}</p>}
@@ -374,8 +383,7 @@ export default function OnTrip({ request, trip }) {
           </div>
           {contentOffer && !riding && (
             <div className="text-right">
-              <Money sats={contentOffer.priceSats} stacked className="font-bold" />
-              <p className="text-xs text-neutral-500">estimate</p>
+              {quotedSats != null && <><Money sats={quotedSats} stacked className="font-bold" /><p className="text-xs text-neutral-500">estimate</p></>}
             </div>
           )}
         </div>
