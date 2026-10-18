@@ -57,7 +57,7 @@ export default function PlanTrip() {
         dropoff={plan.dropoff}
         here={here}
         near={myPosition}
-        recents={recentPlaces()}
+        recents={{ pickup: recentPlaces("pickup", 3), dropoff: recentPlaces("dropoff", 3) }}
         onBack={() => setPlan({ step: plan.from === "quote" && plan.pickup && plan.dropoff ? "quote" : "idle" })}
         onExit={resetPlan}
         onPin={(field) => setPlan({ step: "pin", pinField: field })}

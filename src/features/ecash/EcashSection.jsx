@@ -7,7 +7,8 @@
 //    • paste an ecash token to add it to the wallet
 //    • back up the wallet as tokens (ecash is cash: whoever holds a token owns it)
 //    (the 12-word recovery phrase that brings the ecash back on a new phone is its own Account part: RecoverySection.jsx)
-//    • driver: cash out to their Lightning address
+//    • driver: cash out to their Lightning address, and "Automatically cash out at: $" (AutoCashOutField, runs in useAutoCashOut)
+//    • Send ecash (SendEcash): a token for another ecash wallet, or a Lightning invoice / address
 //    • Disconnect ecash from this device: the coins are swapped for new ones (a copy taken earlier is then worth nothing), then the coins
 //      and the recovery phrase are erased HERE; the money stays at the mint and comes back with the 12 words. While disconnected, this part
 //      offers to connect a new, empty wallet.
@@ -24,6 +25,8 @@ import Money, { moneyText } from "../../ui/Money.jsx";
 import { cleanMintUrl, mintLabel } from "../../lib/mints.js";
 import { requestInvoice, isLightningAddress } from "../../lib/lnurl.js";
 import AddFunds from "../payments/AddFunds.jsx";
+import SendEcash from "./SendEcash.jsx";
+import AutoCashOutField from "./AutoCashOutField.jsx";
 import { getMyMint, setMyMint } from "./myMint.js";
 
 export default function EcashSection({ locked = false }) {
@@ -31,6 +34,7 @@ export default function EcashSection({ locked = false }) {
   const [mint, setMint] = useState(getMyMint());
   const [draft, setDraft] = useState(mint);
   const [adding, setAdding] = useState(false);
+  const [sending, setSending] = useState(false);
   const [token, setToken] = useState("");
   const [msg, setMsg] = useState("");
   const [busy, setBusy] = useState("");
@@ -145,10 +149,14 @@ export default function EcashSection({ locked = false }) {
             ))}
             <div className="flex gap-2 mt-4">
               <Button size="md" onClick={() => setAdding(true)}><Icon name="zap" size={16} /> Add funds</Button>
+              {total > 0 && <Button size="md" variant="outline" onClick={() => setSending(true)} disabled={locked}>Send</Button>}
             </div>
+            {locked && total > 0 && !IS_DRIVER_APP && <p className="text-xs text-neutral-500 mt-2">Sending is paused while a ride is running.</p>}
             {IS_DRIVER_APP && total > 0 && !user.lud16 && <p className="text-xs text-amber-700 mt-2">Set a cash out location (a Lightning address) in Account to cash out.</p>}
-            {IS_DRIVER_APP && locked && <p className="text-xs text-neutral-500 mt-2">Cash out is paused while a ride is running.</p>}
+            {IS_DRIVER_APP && locked && <p className="text-xs text-neutral-500 mt-2">Cash out and sending are paused while a ride is running.</p>}
           </div>
+
+          {IS_DRIVER_APP && <AutoCashOutField />}
 
           <div className="mt-4">
             <p className="font-medium text-[15px]">{IS_DRIVER_APP ? "The mint you are paid at" : "Mint for adding funds"}</p>
@@ -202,6 +210,7 @@ export default function EcashSection({ locked = false }) {
         </>
       )}
       {adding && <AddFunds mint={mint} onClose={() => setAdding(false)} />}
+      {sending && <SendEcash onClose={() => setSending(false)} />}
       <ConfirmDialog open={askOff} title="Disconnect ecash from this device?" confirmLabel="Swap coins and disconnect" cancelLabel="Keep it"
         message={`Your coins are swapped for new ones first, so a copy of the old coins is worth nothing. Then the wallet and its 12 words are erased from this device.${total > 0 ? ` ${moneyText(total, btcPrice)} stays at the mint: you get it back with your 12 words.` : ""}`}
         onConfirm={() => disconnect(false)} onCancel={() => setAskOff(false)} />

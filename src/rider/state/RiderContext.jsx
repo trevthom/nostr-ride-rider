@@ -438,18 +438,18 @@ export function RiderProvider({ children }) {
     return () => clearInterval(id);
   }, [me, pushNotice, liveTick]);
 
-  // Places the rider has been to, newest first (for quick "Where to?" picks).
-  const recentPlaces = () => {
+  // Places the rider has been to, newest first, for quick picks. `field` is "dropoff" (default) or "pickup"; at most `limit` places.
+  const recentPlaces = (field = "dropoff", limit = 4) => {
     const seen = new Set();
     const out = [];
     rideRequests
       .filter((r) => r.pubkey === me)
       .sort((a, b) => b.created_at - a.created_at)
       .forEach((r) => {
-        const d = exactTrip(r, user)?.dropoff;
-        // The public copy of the dropoff names only the area; keep it so a
+        const d = exactTrip(r, user)?.[field];
+        // The public copy of the place names only the area; keep it so a
         // repeat trip publishes the same coarse label.
-        if (d && !seen.has(d.name) && out.length < 4) { seen.add(d.name); out.push({ ...d, area: parse(r)?.dropoff?.name || "" }); }
+        if (d && !seen.has(d.name) && out.length < limit) { seen.add(d.name); out.push({ ...d, area: parse(r)?.[field]?.name || "" }); }
       });
     return out;
   };

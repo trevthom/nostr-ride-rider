@@ -273,21 +273,63 @@ export class EcashWallet {
         }
       }
       if (!best || !split) throw new EcashError("funds", "The balance is too small to cover the mint's fee.");
-      const q = best.quote, need = best.need;
-      this._setProofs(url, split.keep);
-      this.state.pending.push({ id: "melt-" + q.id, mint: url, sats: need, proofs: split.send, at: Date.now() });
-      this._save();
-      let res;
-      try {
-        res = await mint.melt(q, split.send);
-      } catch (e) {
-        this.unreserve("melt-" + q.id);
-        throw new EcashError("mint", e?.message || "The mint could not pay the invoice.");
-      }
-      if (!res.paid) { this.unreserve("melt-" + q.id); throw new EcashError("mint", "The Lightning payment failed. Your ecash is still here."); }
-      this._setProofs(url, [...this._proofs(url), ...res.change]);
-      this.settle("melt-" + q.id);
-      return { paidSats: q.sats, feeSats: need - sum(res.change) - q.sats };
+      return this._meltWith(url, mint, best.quote, best.need, split);
+    });
+  }
+
+  // The last steps of every Lightning payment: the coins that pay it leave the balance and wait in `pending`; the mint pays; the
+  // change comes back. A payment that fails puts the coins back. Runs inside the money lock. Returns { paidSats, feeSats }.
+  async _meltWith(url, mint, q, need, split) {
+    this._setProofs(url, split.keep);
+    this.state.pending.push({ id: "melt-" + q.id, mint: url, sats: need, proofs: split.send, at: Date.now() });
+    this._save();
+    let res;
+    try {
+      res = await mint.melt(q, split.send);
+    } catch (e) {
+      this.unreserve("melt-" + q.id);
+      throw new EcashError("mint", e?.message || "The mint could not pay the invoice.");
+    }
+    if (!res.paid) { this.unreserve("melt-" + q.id); throw new EcashError("mint", "The Lightning payment failed. Your ecash is still here."); }
+    this._setProofs(url, [...this._proofs(url), ...res.change]);
+    this.settle("melt-" + q.id);
+    return { paidSats: q.sats, feeSats: need - sum(res.change) - q.sats };
+  }
+
+  // ── Sending to another wallet ──
+  // Pay a Lightning invoice (any wallet's) from the ecash held at `url`. The invoice must name an amount. The mint's fee comes on top
+  // (and the fee for spending the coins), so the wallet needs a little more than the invoice. Returns { paidSats, feeSats }.
+  payInvoice(url, invoice) {
+    return this._exclusive(async () => {
+      const mint = this.mintFor(url);
+      const have = this._proofs(url);
+      const balance = sum(have);
+      if (balance < 2) throw new EcashError("funds", "Not enough ecash at this mint.");
+      let quote;
+      try { quote = await mint.quoteMelt(invoice); }
+      catch (e) { throw new EcashError("mint", e?.message || "The mint could not read that invoice."); }
+      const need = quote.sats + quote.fee;
+      if (need > balance) throw new EcashError("funds", `Not enough ecash: this payment needs ${need.toLocaleString()} sats with the mint's fee, and you have ${balance.toLocaleString()}.`);
+      let split;
+      try { split = await mint.split(have, need); }
+      catch { throw new EcashError("funds", "Not enough ecash to cover the mint's fee as well."); }
+      return this._meltWith(url, mint, quote, need, split);
+    });
+  }
+
+  // A token that was taken out to hand over by hand (`pay`, then shown on screen): has the other person taken it yet?
+  // The mint says. Still unspent → the coins come back into the wallet; spent → it was delivered and is forgotten.
+  // Returns "back" | "taken". Throws EcashError "mint" when the mint cannot say (the token stays pending).
+  reclaim(id) {
+    return this._exclusive(async () => {
+      const p = this.state.pending.find((x) => x.id === id);
+      if (!p) return "taken";
+      let states;
+      try { states = await this.mintFor(p.mint).states(p.proofs); }
+      catch (e) { throw new EcashError("mint", e?.message || "The mint did not answer. Try again in a moment."); }
+      if (states.every((x) => x === "UNSPENT")) { this.unreserve(id); return "back"; }
+      if (states.every((x) => x === "SPENT")) { this.settle(id); return "taken"; }
+      throw new EcashError("mint", "The mint is still working on this token. Try again in a moment.");
     });
   }
 

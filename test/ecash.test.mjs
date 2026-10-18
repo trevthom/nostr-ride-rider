@@ -108,6 +108,38 @@ await assert.rejects(() => keep.cashOut(MINT, async (s) => "lnbc" + s + "n1x"), 
 assert.equal(keep.balance(MINT), 1000, "a failed payment loses nothing");
 net[MINT].failMelt = false;
 
+// ── Sending to another wallet: pay a Lightning invoice from the balance ──
+const sender = build(net);
+const sf = await sender.fundStart(MINT, 2000); net[MINT].quotes[sf.id].state = "PAID"; await sender.claim(sf.id);
+const paidBefore = net[MINT].paidInvoices.length;
+const sent = await sender.payInvoice(MINT, "lnbc500n1someoneelse");
+assert.equal(sent.paidSats, 500, "the invoice was paid for exactly its amount");
+assert.equal(net[MINT].paidInvoices.length, paidBefore + 1);
+assert.ok(sender.balance(MINT) >= 2000 - 500 - 2 - 3 && sender.balance(MINT) < 1500, "the amount and the fee left the balance; the change came back: " + sender.balance(MINT));
+assert.equal(sender.pendingList().length, 0, "nothing is left waiting");
+await assert.rejects(() => sender.payInvoice(MINT, "lnbc99999n1toobig"), (e) => e instanceof EcashError && e.code === "funds", "more than the balance is refused before anything is spent");
+const unlucky = build(net); // (the fake mint spends the coins of a failed payment, so this wallet is not used again)
+const uf = await unlucky.fundStart(MINT, 1000); net[MINT].quotes[uf.id].state = "PAID"; await unlucky.claim(uf.id);
+net[MINT].failMelt = true;
+await assert.rejects(() => unlucky.payInvoice(MINT, "lnbc100n1fails"), (e) => /still here/.test(e.message));
+assert.equal(unlucky.balance(MINT), 1000, "a failed Lightning payment loses nothing");
+assert.equal(unlucky.pendingList().length, 0);
+net[MINT].failMelt = false;
+await assert.rejects(() => build(net).payInvoice(MINT, "lnbc10n1empty"), (e) => e.code === "funds", "an empty wallet cannot pay");
+
+// ── Sending to another wallet: a token to hand over, and taking it back ──
+const hand = await sender.pay(MINT, 300);
+const afterPay = sender.balance(MINT);
+assert.equal(await sender.reclaim(hand.id), "back", "nobody took the token: the coins return");
+assert.equal(sender.balance(MINT), afterPay + hand.sats + 1, "the amount and the mint's fee are back");
+assert.equal(sender.pendingList().length, 0);
+const gift = await sender.pay(MINT, 300);
+const friend = build(net);
+await friend.redeem(gift.token);
+assert.equal(await sender.reclaim(gift.id), "taken", "the friend took it: it is forgotten, never returned");
+assert.equal(sender.pendingList().length, 0);
+assert.equal(await sender.reclaim("no-such-token"), "taken");
+
 // ── Saved encrypted, in pieces, per user ──
 const alice = generateKeypair(), mallory = generateKeypair();
 const user = { sk: alice.sk, publicKey: alice.publicKey };

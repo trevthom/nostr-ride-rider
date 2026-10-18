@@ -4,7 +4,7 @@
 
 > This repository is the **rider** app. The **driver** app is in its own repository, **nostr-ride-driver**. They share no server: they find each other through Nostr relays, so both use the same event formats (see [Nostr events](#nostr-events)).
 
-Last updated with: **a live ecash balance, the estimate below Paid, Add stop / update fare with an estimated change, seconds on the trip clock, default rates $1.50 / $1.10 / $0.20, no car-confirmation button (the start-code field is shown at once), dark mode, a password eye, "Cash out location", no flat price or counter-offer, a wide start-code field, phone-sized screens (pinned main buttons), one 4-digit start code typed only by the rider, I've arrived within 150 m, a 12-word recovery phrase for the ecash wallet, collapsible Account sections, vouches ("I know and trust this person") in place of star ratings, pay-as-you-ride ecash payments, Finish ride (no cancellations), start codes, local currency** (see the [changelog](#changelog)).
+Last updated with: **a cash out location that is optional, an address search that shows only what the active box needs (its map button first, its 3 recent places below), sending ecash to another wallet (a token or Lightning), "Automatically cash out at", a live ecash balance, the estimate below Paid, Add stop / update fare with an estimated change, seconds on the trip clock, default rates $1.50 / $1.10 / $0.20, no car-confirmation button (the start-code field is shown at once), dark mode, a password eye, "Cash out location", no flat price or counter-offer, a wide start-code field, phone-sized screens (pinned main buttons), one 4-digit start code typed only by the rider, I've arrived within 150 m, a 12-word recovery phrase for the ecash wallet, collapsible Account sections, vouches ("I know and trust this person") in place of star ratings, pay-as-you-ride ecash payments, Finish ride (no cancellations), start codes, local currency** (see the [changelog](#changelog)).
 
 NostrRide is a decentralized ridesharing system. It is **two web apps** — a rider app and a driver
 app — that find each other through **Nostr relays**. There is no company server and no database.
@@ -82,10 +82,10 @@ before the first paint, so a reload does not flash white. `scripts/e2e/appearanc
 **Password eye.** Every password field (the *Remember me* password and the **Unlock** page of a saved account) has an eye button that shows or hides the typed text (`src/ui/PasswordField.jsx`).
 The password starts hidden each time the page is drawn.
 
-**Cash out location.** *Account → Cash out location* (driver app) is where the driver's Lightning address is kept (`lud16` in the profile, checked when saved). The onboarding list and the *GO* gate use the same
-words. A driver cashes out the ecash there, and a rider's tip goes there. (It was called *Lightning address*.)
+**Cash out location.** *Account → Cash out location* (driver app) is where the driver's Lightning address is kept (`lud16` in the profile, checked when saved). It is **optional**: a driver can go online
+without it and keep the ecash in the wallet. With it, the driver can *Cash out* and use *Automatically cash out at*, and a rider's tip goes there (without it the tip screen says the driver has no Lightning address). (It was called *Lightning address*.)
 | Money | An ecash wallet (fill it with Lightning) | An ecash wallet (cash out to the **cash out location**, a Lightning address) |
-| Needs | Ecash in the wallet before the ride starts | Face photo, vehicle and vehicle photo, plate, a cash out location (a Lightning address) |
+| Needs | Ecash in the wallet before the ride starts | Face photo, vehicle and vehicle photo, plate (a cash out location is optional) |
 
 Both apps share one code base for Nostr, maps, payments, profiles and UI (`src/nostr`, `src/lib`,
 `src/ui`, `src/features`, `src/state`). The rider app must never import from `src/driver`, and the
@@ -93,7 +93,9 @@ reverse. The Vite *mode* picks the app (`vite --mode rider|driver`).
 
 ## How a ride works
 1. The driver taps **GO** (needs a good or an *approximate* GPS fix, see [Location and GPS](#location-and-gps)). The app shares an approximate location.
-2. The rider sets the pickup and the destination. **The app never fills in the pickup by itself.** The rider types an address or the name of a business or landmark (the search page says so), or **pins the spot on the map** (*Set pickup on the map*, always shown: drag the map under the pin), or taps *Your location* on the pickup field. **The drop-off can be pinned the same way** (*Set drop-off on the map*, also always shown); with both places set the quote opens. The rider picks a **standard fare** (each driver's own rates) or a **flat price** and taps **Request**.
+2. The rider sets the pickup and the destination. **The app never fills in the pickup by itself.** The rider types an address or the name of a business or landmark (the search page says so), or **pins the spot on the map** (*Set pickup on the map*: drag the map under the pin), or taps *Your location* on the pickup field. **The drop-off can be pinned the same way** (*Set drop-off on the map*); with both places set the quote opens.
+   The search page shows **nothing but the two boxes until one is active** (has the cursor). Then, for that box only: its map button comes first, and the **3 most recent pickups** (or **3 most recent drop-offs**) are listed below it; once the rider types, the search results take their place.
+   The rider sees each driver's own rates (a **standard fare**) and taps **Request**.
 3. Nearby drivers get a **request card** with a countdown. A driver **accepts** (or declines). The reply carries the driver's rates and ecash mint.
 4. The rider **chooses a driver**. The rider needs enough ecash at the driver's mint for the start: the base rate, two minutes and a mile (with the default rates $1.50 + $0.40 + $1.10 = **$3.00**).
    The confirm screen shows the sum. The second minute is a small cushion, so the first payments are never late (a minute is due after 60 seconds and the app checks every 3 seconds). It is **not locked away**:
@@ -139,7 +141,7 @@ only what the ride has earned so far, and most of it is already paid.
   same meter, so they agree without talking. Each app saves the ledger on its device, so a reload loses nothing.
 - A tick is paid as **one ecash token** sent to the driver in a signed event (kind 30095). The token is sealed to the driver. The driver's app redeems
   it at the mint at once and answers with a signed reply (kind 30096). From then the money is the driver's own ecash. The driver can **cash out** to
-  their **cash out location** (a Lightning address) in *Account*.
+  their **cash out location** (a Lightning address) in *Account*, by hand or automatically (see *Sending and cashing out ecash*).
 
 ### The fare
 - **There is one fare: each driver's own rates**, paid tick by tick. The quote screen shows an estimate and the drivers nearby; traffic can raise the cost.
@@ -222,6 +224,13 @@ only what the ride has earned so far, and most of it is already paid.
 - **Add funds:** the mint makes a Lightning invoice. The rider pays it with a connected **NWC wallet** (one tap) or any wallet (QR, text or *Open wallet*). The app collects
   the ecash when the invoice is paid. A paid invoice that was not collected is collected the next time the app opens. **Cash out** (driver): the app asks
   the driver's Lightning address for an invoice and the mint pays it from the ecash.
+- **Sending and cashing out ecash.** *Account → Ecash wallet → Send* (both apps; paused while a ride runs) sends money from the balance to another wallet, two ways.
+  **Ecash token**: the app takes the amount out as a token (text starting `cashuB…`); the person pastes it into their ecash wallet (this app's *Add ecash you were sent* too). A token is cash: anyone with the text can take it.
+  Until *Done* is tapped, *Take it back* asks the mint: if nobody has taken the token the money returns to the wallet; if it was taken, it is forgotten (`EcashWallet.reclaim`).
+  **Lightning**: paste an invoice (it must name an amount) or a Lightning address with an amount; the mint pays it and charges a small fee on top (`EcashWallet.payInvoice`; too little money is refused before anything is spent; a failed payment keeps the ecash).
+  **Automatically cash out at: $** (driver app, needs a cash out location): the driver types an amount; when the ecash held at a mint is worth that much, the app cashes out by itself to the cash out location (`features/ecash/useAutoCashOut.js`,
+  rules in `lib/autocashout.js`). The choice is saved when the field is left or Enter is pressed (never on each key, so typing "15" cannot cash out at "1"); empty turns it off. It never runs during a ride, never without a price, waits 10 minutes after a failure
+  and tells the driver once. It is kept per account on the device, in the currency that was current when it was set.
 - **Safety of the wallet.** The proofs are saved on the device, encrypted (NIP-44) to the user's own key, in pieces. A token being sent waits in a *pending* list until the
   event carrying it is published or queued; after a crash it returns to the wallet if the mint still calls it unspent. One money move runs at a time. A token cannot be
   redeemed twice. The user can back up the wallet as tokens (*Back up my ecash*). Logging out keeps the ecash on the device; without the nsec it cannot be opened.
@@ -372,7 +381,7 @@ still calls unspent (NUT-09), and the money is back. No server, no account, no r
 
 ## Driver requirements
 To go online a driver needs: face photo, vehicle year/make/model, **vehicle photo**, plate state and number,
-and a **cash out location** (a Lightning address; `driveGaps` in `src/lib/profile.js`). No driver's license photo is asked for or stored.
+(`driveGaps` in `src/lib/profile.js`). A cash out location (a Lightning address) is optional. No driver's license photo is asked for or stored.
 The Account page and the checklist name each missing item (for example *Vehicle (year, model)*, *Vehicle photo*). After
 *Save vehicle info* the app lists everything that is still needed.
 
@@ -541,7 +550,7 @@ A web page cannot read the location with the screen off. `native/` wraps the **d
 earnings, privacy, history, Lightning invoices, geocoding, publishing and the outbox, event ordering, contact links, GPS, payment evidence, blocking, trip sharing, native location, tips,
 pickup changes, the odometer (and the GPS-gap rule) and the 5% distance rule, stage times, relay subscription calls, old flat offers read as standard, driver rates and currencies, exact amounts, gender
 ordering, driver requirements, expiry of unmatched requests, blocking both ways, declined offers (`requests`), **the recovery phrase and getting the ecash back from it (`recovery`, `restore`)**, **vouches (reading an npub, the list event, the one-hop badge, its words, the sync)**, **the tick schedule, missed payments, the final tick, the start code, the 50 m arrival rule, silence and sign-of-life
-rules, waivers, extra stops and frozen rates, the ecash wallet (funding, paying, redeeming, crash recovery, cash out, encrypted saving), a whole ride's money between a rider and a
+rules, waivers, extra stops and frozen rates, the ecash wallet (funding, paying, redeeming, crash recovery, cash out, paying an invoice, taking a token back, encrypted saving), the automatic cash out rules (`autocashout`), a whole ride's money between a rider and a
 driver, and the real `@cashu/cashu-ts` client against a local test mint that does the real blind-signature maths**.
 
 The apps were also run end to end in a headless browser (a rider and a driver playing a whole ride through a local relay and the local test mint): funding with an invoice, the request,
@@ -618,6 +627,7 @@ To switch, copy `env.example` to `.env`, set `VITE_TILE_URL` (and `VITE_PHOTON_U
   and a cancel rate on profiles.
 
 ## Changelog
+- **Cash out location optional, a calmer address search, send ecash, automatic cash out** — (1) A driver no longer needs a cash out location to go online (the onboarding list and the gate dropped it; the section stays in Account). (2) The address search shows no button and no choice until a box is active; then the map button of that box is first and that box's 3 most recent places are below it (`recentPlaces(field, limit)` reads the rider's own earlier pickups and drop-offs). (3) *Account → Ecash wallet → Send*: an ecash token for another wallet, or a Lightning invoice / address; *Take it back* returns an unclaimed token. (4) *Automatically cash out at* (driver app): a threshold; the app cashes out to the cash out location when the ecash reaches it. Tests: `ecash`, `autocashout`, `negotiation`; browser run: `scripts/e2e/send.mjs`, `nav.mjs`.
 - **A live ecash balance, the estimate below "Paid", "Add stop / update fare" with an estimated change, seconds on the trip clock, new default rates** — (1) The rider's fare card starts with *Your ecash* (the wallet's balance at the ride's mint, live), red at $5.00 or less. (2) The estimated total moved from the bottom of the sheet to a dashed "≈" row below *Paid* on both screens; the old place shows it only before the ride starts. (3) *Add a stop or change the destination* is now **Add stop / update fare**: after the rider picks a place the modal shows the estimated change in the fare (dashed, ≈, for example *≈ +$2.40 · +1.8 mi · +4 min*; negative for a shorter way), the driver's request card shows the same, the rider's pending note shows it, and after the driver accepts the estimated total is priced again for the new route with a muted *from the added stop ≈ +$…* line. (4) *Trip so far* shows seconds on both screens. (5) The app's default rates are now **$1.50 base, $1.10 per mile, $0.20 per minute** (were $2.00 / $1.10 / $0.25): `FARE_RATES` in `config/settings.js`; the start amount with the defaults is $1.50 + 2 × $0.20 + $1.10 = **$3.00**. New: `lib/useFareEstimate.js`, `ui/FareEstimate.jsx`, `fareChangeSats`, `isLowBalance`, `fmtDurationSec`, `test/tripcard.test.mjs`; the `ride` and `stop` browser runs check all of it.
 - **No "It matches" button; the start-code field is at the top; apps say which commit they came from** — the rider no longer taps *It matches* / *Doesn't match* to confirm the car: the driver's photo, car and plate are on the screen and the rider checks them by eye (the screen says: if they do not match, do not get in; use *Safety*). The 4-digit start-code field is now on the arrived screen at once, at the top of the sheet (it was hidden behind that button and below the fold on a small phone). The driver app still reads a `boarded` confirmation from an older rider app. The service worker cache is renamed (`nostrride-v2`) and a page reload asks the server for a fresh page, so no phone keeps an old copy of the app. The exported apps now show *version <time> · from nostr-ride <commit>* at the bottom of Account, so a person can see at once whether the rider and the driver app are from the same commit (a rider app from before the single 4-digit code shows a 2-digit code on both phones and a narrow box: that is an old build, not this code).
 - **Dark mode, a password eye, "Cash out location", no flat price, a wide start-code field** — (1) *Account → Appearance → Dark mode* in both apps, saved the moment it is flipped; the colors are CSS variables, the map is darkened, a first-paint script avoids a white flash. (2) Every password field

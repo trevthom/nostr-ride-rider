@@ -86,14 +86,14 @@ assert.equal(getProfile(d1.publicKey).gender, "", "junk gender ignored");
 
 // ── What a driver still has to finish ──
 const none = Prof.driveGaps({});
-assert.deepEqual(none.map((g) => g.id), ["photo", "vehicle", "vehiclePhoto", "plate", "lightning"]);
+assert.deepEqual(none.map((g) => g.id), ["photo", "vehicle", "vehiclePhoto", "plate"]);
 const partial = Prof.driveGaps({ picture: "p", lud16: "a@b.c", vehicle: { make: "Ford", plateNumber: "ABC", year: "", model: "" } });
 assert.deepEqual(partial.map((g) => [g.id, g.missing]), [["vehicle", ["year", "model"]], ["vehiclePhoto", []], ["plate", ["state"]]]);
 assert.equal(Prof.gapsText(partial), "Vehicle (year, model), Vehicle photo and License plate (state)");
 assert.equal(Prof.gapsText([{ title: "Vehicle photo", missing: [] }]), "Vehicle photo");
 const full = { picture: "p", lud16: "a@b.c", vehicle: { picture: "v", plateState: "KY", plateNumber: "ABC", year: "2020", make: "Ford", model: "Focus" } };
 assert.equal(Prof.isDriveReady(full), true);
-assert.equal(Prof.isDriveReady({ ...full, lud16: "" }), false, "a Lightning address is required");
+assert.equal(Prof.isDriveReady({ ...full, lud16: "" }), true, "a cash out location (Lightning address) is optional");
 assert.equal(Prof.isDriveReady({ ...full, license: "" }), true, "a driver's license photo is not required");
 assert.equal(Prof.isDriveReady({ ...full, vehicle: { ...full.vehicle, picture: "" } }), false, "the vehicle photo is required");
 assert.equal(Prof.isDriveReady({ ...full, gender: "" }), true, "gender is optional");
