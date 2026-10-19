@@ -119,7 +119,9 @@ src/
     bolt11.js     # paymentHash / preimageMatches
     blocks.js     # local block list helpers
     useFareEstimate.js # estimates during a ride: changeRoutes (pure), useChangeEstimate (a new stop / destination: the fare change), useTotalEstimate (the whole ride, re-priced after an accepted change); routes via OSRM (routing.js)
-    appearance.js # light/dark look: isDark/setDark (saved AT ONCE in localStorage `nostrride_dark`), applyAppearance (the `dark` class on <html> + <meta theme-color>), useDark
+    appearance.js # light/dark look, TWO switches: isDark/setDark (the application, `nostrride_dark`) and isDarkMap/setDarkMap (the map only, `nostrride_darkMap`), saved AT ONCE; applyAppearance (the `dark` and `dark-map` classes on <html> + <meta theme-color>), useDark/useDarkMap
+    profilecontent.js # profileContent(base, next, patch): what a kind-0 save writes: ONLY the fields the patch changes, the rest from the newest profile (shared with the other app)
+    backup.js     # the encrypted settings note (kind 30111, always on; state/useBackup.js sends it)
     recovery.js   # the 12-word recovery phrase (pure): newPhrase/cleanPhrase/checkPhrase/seedOf/pickCheckPositions/checkAnswers/boxKey (@scure/bip39; HKDF)
     vouches.js    # "I know and trust this person": parsePubkey (npub; an nsec is refused), vouchEvent/vouchList (kind 30102), trustFor(target, me) = {direct, via} (ONE hop, only through people I vouch for), trustHeadline/trustDetail (the badge words)
     safety.js     # trusted contacts, sms link, trip message
@@ -138,9 +140,9 @@ src/
   features/
     auth/        AuthScreen (role-aware copy) + AuthSteps (unlock, key backup)
     profile/     ProfileParts (useSaveProfile, AccountHeader, ContactMethods, RelaysSection, LogoutButton),
-                 AppearanceSection (the Dark mode switch), VehicleSection, VouchesSection ("Your vouches": npub in, list out), TypicalFareSection ("Your rates", locked during a ride), CurrencySection, LightningAddressSection, WalletSection, KeysSection
+                 WalletsSection (Account → Wallets: Currency, then the ecash wallet with the cash out location and the Lightning wallet inside), AppearanceSection (Dark Mode (application) and Dark Mode (map)), VehicleSection (up to 3 photos), VouchesSection ("Your vouches": npub in, list out), TypicalFareSection ("Your rates", locked during a ride), CurrencySection, LightningAddressSection, WalletSection, KeysSection
     ecash/       EcashSection (balance, Send, mint, paste a token, back up, driver cash out + Automatically cash out), SendEcash (token or Lightning), AutoCashOutField, useAutoCashOut, RecoverySection (RecoveryFold + RecoveryNotice: write down 12 words, show again, I-lost-a-phone) + RestorePanel, myMint.js
-    payments/    PayDriver (a Lightning address: tips), AddFunds (mint invoice → ecash, NWC or any wallet), rideTicks.js (rider: payDue), redeemTicks.js (driver: redeem + reply),
+    payments/    PayDriver (a Lightning address: tips), AddFunds (Lightning tab: mint invoice → ecash, NWC or any wallet; On-chain tab: OnchainFunds, a bitcoin address from the mint), rideTicks.js (rider: payDue), redeemTicks.js (driver: redeem + reply),
                  redeemWaivers.js (rider: collect refunds), useRideLink.js (quiet phone, sign of life, 10-minute silence)
   rider/
     App.jsx  state/RiderContext.jsx
@@ -208,7 +210,9 @@ carries `driverPubkey`. Stage is `enroute` (default) → `arrived` → `riding`.
   could otherwise leave the OLD version. Always sign through `buildSignedEvent`.
 - **Kind 0 is shared with every Nostr app**: never publish a fresh kind-0 over
   an existing one. Writes start from `getMetadata(pubkey)` and merge (`useSaveProfile`);
-  importing an nsec keeps the existing profile.
+  importing an nsec keeps the existing profile. The Rider and Driver apps share the same profile, and one of them may hold an OLD copy of it: `profileContent(base, next, patch)` writes only the fields of the patch
+  (name, picture, comm, vehicle, lud16, gender, rates, stats) and takes every other field from the newest profile in hand, so a save never writes an old cash out location, vehicle, rate or gender over the other app's. The cash out location (`lud16`)
+  is refreshed from the relays at login, every 5 minutes and when the app returns to the front (AppContext).
 - **Privacy (lib/privacy.js)**: never publish an exact address or a license plate in
   clear. Requests carry `publicPlace()` points (area name + ~1 km grid) and the exact
   trip sealed to the rider; RIDE_ACCEPT seals it to the chosen driver. Read trips with
@@ -248,6 +252,8 @@ carries `driverPubkey`. Stage is `enroute` (default) → `arrived` → `riding`.
   Proofs are saved encrypted (NIP-44 to the user's own key, in pieces). Rules: one money move at a time (`_exclusive`); a token being sent sits in `pending` until its event is
   published/queued (`settle`) or is returned (`unreserve`/`recoverPending`); a token is redeemed once (fingerprint); the sender adds the mint's input fee (`includeFees`) so the receiver
   gets the full tick; `EcashError.definitive` separates a mint's "no" from an unreachable mint. Never log proofs or tokens. Test against `test/helpers/localmint.mjs` (real maths).
+- **On-chain funding** (`EcashWallet.onchainStart/claimOnchain/onchainList`, adapter `onchainSupported/quoteOnchain/onchainState/mintOnchain/onchainPubkey`, `features/payments/OnchainFunds.jsx`): Cashu NUT-30 (experimental in cashu-ts 4.11.0). The mint gives a bitcoin address for a quote locked (NUT-20) to a key made from the recovery SEED and the quote's number (`onchainKey`, its own HKDF label), so the 12 words can always claim a deposit. `onchainStart` asks `onchainSupported` FIRST and throws `EcashError("onchain")` before any bitcoin can be sent to a mint without it; it reuses the newest unexpired address of this wallet and NEVER one whose `pubkey` this wallet's seed does not produce (`_ownsOnchain`).
+  The deposit records (ids, numbers, addresses, public key: NO key, NO coin) live in `state.onchain` AND in a plain setting `onchain_<pk16>` that the encrypted backup carries (`makeStore.loadOnchain/saveOnchain`); `recovery.restore` with a typed phrase claims its unclaimed deposits (random-secret coins, swapped into the wallet). `claimAll` collects what was paid while the app was closed. Do not store a deposit key anywhere.
 - **Sending ecash / auto cash out** (`features/ecash/SendEcash.jsx`, `AutoCashOutField.jsx`, `useAutoCashOut.js`, `lib/autocashout.js`): *Send* makes a token with `ecash.pay` (it waits in `pending` while the dialog is open; *Done* = `settle`, *Take it back* = `reclaim(id)`: the mint says unspent → back, spent → forgotten)
   or pays a Lightning invoice / address with `ecash.payInvoice(url, invoice)` (the shared `_meltWith` tail also serves `cashOut`). Both locked while a ride runs. "Automatically cash out at" (driver app, `useAutoCashOut` in `DriverContext`): `{amount, code}` saved per account (`autoCashOut_<pk16>`), saved on blur / Enter only (never per key),
   `autoCashOutDue` = needs `lud16`, no ride, a known price, balance at ONE mint ≥ the amount, 10 min after a failure (`AUTO_RETRY_MS`); one notice per failure streak. The cash out location is OPTIONAL (no gap in `driveGaps`).
@@ -269,12 +275,15 @@ carries `driverPubkey`. Stage is `enroute` (default) → `arrived` → `riding`.
   exists and the words are not written down → `rotateAll` (refuse on a failed swap unless `force`) → `wallet.wipe()` + `box.erase()`; `AppContext` keeps `ecashOff` (`nostrride_ecashOff_<pk16>`), `disconnectEcash`, `connectEcash`; while off the wallet is not loaded (no new phrase is made), a driver cannot GO and a rider
   cannot confirm a driver, and it is locked while a ride is running; (7) on "Blinded message is already signed" (10002) the adapter skips its counters ahead and retries once (another device used the numbers) and takes no coins; (8) `@cashu/cashu-ts` is pinned EXACTLY (no `^`) and
   `test/recovery.test.mjs` holds the NUT-13 specification vector: a library change must not alter a derived secret. The phrase counts as safe (`backedUp`) only after the person types three words back. Old random coins (`state.legacy`) are swapped under the phrase when it is confirmed.
-- **Account folds (ui/Fold.jsx)**: every setting on both Account screens is a `<Fold id title>`: closed at first (a driver's vehicle starts open while still needed; the Lightning address section is titled **Cash out location**), open state remembered per device (`nostrride_fold_<id>`), content stays mounted while closed (typed text is kept).
-  A section's own `SectionLabel`/`FoldTitle` draws nothing inside a Fold. E2E scripts open a section with `openFold(page, title)` (scripts/e2e/flow.mjs). New settings go in a Fold.
-- **Dark mode (lib/appearance.js, tailwind.config.js, src/index.css, public/theme-init.js, features/profile/AppearanceSection.jsx)**: Account → Appearance → Dark mode saves and applies AT ONCE (no Save button; `nostrride_dark`). The Tailwind colors `white`, `black`, `neutral-*` and the tints of
+- **Account folds (ui/Fold.jsx)**: every setting on both Account screens is a `<Fold id title>`: closed at first (a driver's vehicle starts open while still needed), open state remembered per device (`nostrride_fold_<id>`), content stays mounted while closed (typed text is kept).
+  A section's own `SectionLabel`/`FoldTitle` draws nothing inside a Fold; a Fold with several parts names them with `SubTitle`. E2E scripts open a section with `openFold(page, title)` (scripts/e2e/flow.mjs). New settings go in a Fold.
+  **Wallets** (`<Fold id="ecash" title="Wallets">`, `features/profile/WalletsSection.jsx`, both apps) holds, in this order: Currency, the ecash wallet (note "Add ecash here before you ride.", balance, **Add funds** and **Send** side by side, Automatically cash out (driver), then the **Cash out location**
+  and the **Lightning wallet (NWC)** as `EcashSection` children, then the mint, pasted tokens, disconnect). There is NO separate Currency, Cash out location, Lightning wallet or Backup section: do not add them back. Settings are saved to the relays by `state/useBackup.js` with no switch and no screen (`lib/backup.js` lists what goes in, `onchain_` addresses included, never a key or a coin).
+- **Dark mode (lib/appearance.js, tailwind.config.js, src/index.css, public/theme-init.js, features/profile/AppearanceSection.jsx)**: Account → Appearance has TWO switches that save and apply AT ONCE (no Save button): **Dark Mode (application)** (`nostrride_dark`, the `dark` class on `<html>`, the phone's bar color) and **Dark Mode (map)** (`nostrride_darkMap`, the `dark-map` class). The application switch NEVER touches the map and the map switch never touches the screens; the Leaflet tile filter, the map's background and its credit line hang on `.dark-map`, not on `.dark`.
+  The Tailwind colors `white`, `black`, `neutral-*` and the tints of
   red / amber / green / blue are CSS variables (`:root` = light, `.dark` = dark; channels as `r g b`, so `bg-black/50` still works), so ordinary classes follow the look with no `dark:` variant. In the dark look `white` and `black` TRADE PLACES (a `bg-black text-white` button becomes a light button with dark text; `bg-white` is the
   dark surface). A color that must NOT change is written FIXED: white text on a colored button `text-[#fff]`, a dialog or photo backdrop `bg-[#000]/50`, a red or green dot `bg-[#dc2626]`, the plate `bg-[#fff] text-[#000]`. Never write `text-white` on a green/red/amber background, and never `bg-black/NN` for a backdrop. The arbitrary greens
-  (`text-[#05944f]`, `text-[#05683a]`, `bg-[#e6f4ec]`) are re-mapped in index.css. Leaflet's tile pane gets a CSS filter in `.dark`; pins, route and price tags keep their colors. Check a new screen in both looks (`DARK=1`-style script: set `localStorage.nostrride_dark="true"` before load).
+  (`text-[#05944f]`, `text-[#05683a]`, `bg-[#e6f4ec]`) are re-mapped in index.css. Pins, route and price tags keep their colors. Check a new screen in both looks (`DARK=1`-style script: set `localStorage.nostrride_dark="true"` before load). The switches have no description text.
 - **Password fields**: use `ui/PasswordField.jsx` (an input with a show/hide eye, hidden at first), never a bare `type="password"` input (the Unlock page and the Remember-me password both use it).
 - **Vouches (lib/vouches.js, nostr/vouchSync.js, ui/VouchBadge.jsx, features/profile/VouchesSection.jsx)**: the ONLY reputation. No stars, no reviews (they are easy to fake): do not add them back. Each person publishes one public list (kind 30102,
   `d`="vouches", a `p` tag per npub, max 100) from Account → Your vouches. A vouch is for the PERSON, in either role. The badge is read for the VIEWER and is ONE hop: `trustFor(target, me)` = the people in MY list who have the target in THEIR list
@@ -311,7 +320,7 @@ carries `driverPubkey`. Stage is `enroute` (default) → `arrived` → `riding`.
 - **Gender preference**: drivers MAY set `gender` ("male" | "female") in kind 0 (copied into offers); anything else is ignored.
   A rider's preference (`getSetting("genderPref")`, local only) only reorders the offers via `rankOffers`; never filter or hide a driver by it.
 - **Drive gating**: `isDriveReady(user)` = `driveGaps(user)` is empty (lib/profile.js): face photo + vehicle year/make/model +
-  vehicle photo + plate state/number (no driver's license photo). The cash out location (a Lightning address) and gender are optional. Until then the
+  at least one vehicle photo (up to 3 can be added) + plate state/number (no driver's license photo). The cash out location (a Lightning address) and gender are optional. Until then the
   Drive tab shows Onboarding and GO is unavailable. Every message about what is missing comes from `driveGaps`/`gapsText`
   so it names the exact items; keep it that way when adding a requirement.
 - **Tips**: optional and never required. `TipSheet` (opened from the Receipt's quiet link and from Activity → past trip, any time after the ride)
@@ -343,7 +352,8 @@ carries `driverPubkey`. Stage is `enroute` (default) → `arrived` → `riding`.
   at once on `visibilitychange` and `online`. A page that is hidden (another app, a locked phone without the lock) still pays nothing until it wakes.
   ETAs use the OSRM road time from the map route (`onRoute`), with a straight-line guess as fallback.
 - **Profiles carry photo + vehicle**: kind-0 has `picture` (small resized JPEG, ~20 KB budget in
-  lib/image.js) and `vehicle:{picture,plateState,plateNumber,year,make,model}` (plate sealed).
+  lib/image.js) and `vehicle:{picture,morePictures?,plateState,plateNumber,year,make,model}` (plate sealed). A vehicle has 1 to 3 photos: `picture` is the main one (older apps read only it; `driveGaps` needs it) and `morePictures` holds up to 2 more (`vehiclePhotos(v)` lists them).
+  With more than one photo each is kept to ~12 KB (`PHOTO_BYTES` in VehicleSection) so the whole kind-0 stays under the 64 KB many relays allow; `getProfile` accepts only embedded `data:image/` extras.
   `relay.fetchProfile(pubkey)` pulls one user's kind-0 on demand (rider: DriverInfo; driver: RiderInfo).
 - **History = fetchHistory(pubkey)**: live sync and `fetchRecent` cover only 24 h. Trip counts and past
   trips need `relay.fetchHistory(pubkey)` (throttled to once per 5 min per pubkey, queued 3 at a time).

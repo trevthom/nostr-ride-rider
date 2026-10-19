@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════
-//  AUTO CASH OUT FIELD — "Automatically cash out at: $ [ ]" (driver app, Account → Ecash wallet).
+//  AUTO CASH OUT FIELD — "Automatically cash out at: $ [ ]" (driver app, Account → Wallets).
 //  The driver types an amount. When the ecash reaches it, the app cashes out to the cash out location by itself
 //  (useAutoCashOut.js). Empty = off. The choice is saved when the field is left or Enter is pressed (NOT on every key:
 //  typing "15" must never cash out at "1"). Needs a cash out location.

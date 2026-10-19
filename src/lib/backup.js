@@ -3,9 +3,9 @@
 //  secret key can open (nip44 to their own key, so the nsec is the only thing to remember). A new phone that logs in with the
 //  nsec gets everything back. Relays see that a note exists, its size and when it changed: nothing inside.
 //
-//  What goes in (BACKUP_KEYS): the block list, trusted contacts, currency, units, dark mode, request radius / alerts, gender
-//  preference, the amount unit, the chosen mint, the relay list, "automatically cash out at", 
-//  and the vouch list. What NEVER goes in: ecash (its own 12 words), keys, the outbox, prices, trip leftovers, open/closed sections.
+//  What goes in (BACKUP_KEYS): the block list, trusted contacts, currency, units, dark mode (application and map), request radius / alerts, gender
+//  preference, the amount unit, the chosen mint, the relay list, "automatically cash out at", the on-chain deposit addresses
+//  (quote ids and numbers only: a deposit sent to an address stays claimable on a new phone) and the vouch list. What NEVER goes in: ecash (its own 12 words), keys, the outbox, prices, trip leftovers, open/closed sections.
 //  Pure maths and storage; the sending is state/useBackup.js.
 //
 //    collectBackup(me, nowMs)        → { v, at, settings: {key: value}, vouches: [hex] }   (a snapshot of this device)
@@ -22,8 +22,8 @@ import { getSetting, setSetting, getRelays, setRelays } from "../config/relays.j
 import { EVENT_KINDS } from "../nostr/eventKinds.js";
 import { vouchList } from "./vouches.js";
 
-export const BACKUP_KEYS = ["blocked", "trustedContacts", "currency", "units", "dark", "requestRadius", "requestAlerts", "genderPref", "amountUnit", "ecashMint"];
-export const BACKUP_PREFIXES = ["autoCashOut_"];
+export const BACKUP_KEYS = ["blocked", "trustedContacts", "currency", "units", "dark", "darkMap", "requestRadius", "requestAlerts", "genderPref", "amountUnit", "ecashMint"];
+export const BACKUP_PREFIXES = ["autoCashOut_", "onchain_"]; // onchain_<pk16>: deposit addresses (ids and numbers, no key, no coin)
 const HEX64 = /^[0-9a-f]{64}$/;
 export const MAX_BACKUP_BYTES = 60000; // one nip44 message holds 64 KB
 

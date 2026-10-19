@@ -12,6 +12,7 @@ import { relay } from "../nostr/relay.js";
 import { getProfile } from "../nostr/profiles.js";
 import { fullNpub } from "../nostr/keys.js";
 import { tripCounts } from "../lib/rides.js";
+import { vehiclePhotos } from "../lib/profile.js";
 import { useUnits, formatDistance } from "../lib/units.js";
 import Avatar from "./Avatar.jsx";
 import VouchBadge from "./VouchBadge.jsx";
@@ -45,6 +46,7 @@ export default function UserModal() {
   const rep = tripCounts(profileModalPubkey);
   const name = p?.name || "Anonymous";
   const veh = p?.vehicle || null;
+  const photos = vehiclePhotos(veh);
 
   return (
     <div
@@ -83,11 +85,16 @@ export default function UserModal() {
           </div>
         </div>
 
-        {veh && (veh.make || veh.model || veh.plateNumber || veh.picture) && (
+        {veh && (veh.make || veh.model || veh.plateNumber || photos.length > 0) && (
           <div className="mt-5 border-t border-neutral-200 pt-4 text-left">
             <p className="text-neutral-500 text-[11px] font-semibold uppercase tracking-wider mb-2">Vehicle</p>
-            {veh.picture && (
-              <img src={veh.picture} alt="Vehicle" onClick={() => setZoom("veh")} className="w-full h-32 object-cover rounded-xl mb-2 cursor-zoom-in" />
+            {photos.length > 0 && (
+              <div className={`grid gap-2 mb-2 ${photos.length > 1 ? "grid-cols-3" : "grid-cols-1"}`}>
+                {photos.map((src, i) => (
+                  <img key={i} src={src} alt={photos.length > 1 ? `Vehicle photo ${i + 1}` : "Vehicle"} onClick={() => setZoom("veh" + i)}
+                    className={`w-full object-cover rounded-xl cursor-zoom-in ${photos.length > 1 ? "h-20" : "h-32"}`} />
+                ))}
+              </div>
             )}
             {(veh.year || veh.make || veh.model) && (
               <p className="font-medium">{[veh.year, veh.make, veh.model].filter(Boolean).join(" ")}</p>
@@ -109,7 +116,7 @@ export default function UserModal() {
           style={{ zIndex: 10060 }}
           onClick={(e) => { e.stopPropagation(); setZoom(false); }}
         >
-          <img src={zoom === "veh" ? veh?.picture : p?.picture} alt={name} className="max-w-[92vw] max-h-[85vh] object-contain rounded-lg" />
+          <img src={String(zoom).startsWith("veh") ? photos[Number(String(zoom).slice(3))] : p?.picture} alt={name} className="max-w-[92vw] max-h-[85vh] object-contain rounded-lg" />
         </div>
       )}
     </div>

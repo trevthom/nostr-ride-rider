@@ -11,7 +11,7 @@ import { EVENT_KINDS } from "../../nostr/eventKinds.js";
 import { buildSignedEvent } from "../../nostr/events.js";
 import { getMetadata } from "../../nostr/profiles.js";
 import { shortNpub } from "../../nostr/keys.js";
-import { sealVehicle } from "../../lib/privacy.js";
+import { profileContent } from "../../lib/profilecontent.js";
 import { tripCounts } from "../../lib/rides.js";
 import { useUnits, formatDistance } from "../../lib/units.js";
 import { resizeImage } from "../../lib/image.js";
@@ -41,19 +41,7 @@ export function useSaveProfile() {
       relay.publish(
         buildSignedEvent(
           EVENT_KINDS.METADATA,
-          {
-            ...base,
-            name: next.name,
-            about: base.about ?? "NostrRide user",
-            communication: next.comm || [],
-            picture: next.picture || "",
-            ...(next.lud16 !== undefined && { lud16: next.lud16 }),
-            ...(next.gender !== undefined && { gender: next.gender }),
-            ...(next.rates !== undefined && { rates: next.rates }), // null = back to the app's rates
-            ...(next.stats !== undefined && { stats: next.stats }), // self-reported miles driven
-            // Plate is sealed to ourselves; riders get it privately in offers.
-            vehicle: sealVehicle(next.vehicle, next.sk, next.publicKey),
-          },
+          profileContent(base, next, patch), // only what this save changes; the rest is the newest profile (shared with the other app)
           [],
           next.sk
         )

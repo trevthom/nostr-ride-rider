@@ -124,7 +124,7 @@ function Panel() {
     const id = setTimeout(() => setShown(false), SHOW_MS);
     return () => clearTimeout(id);
   }, [shown]);
-  if (ecashOff) return <p className="text-sm text-neutral-500" role="status">The ecash wallet is not connected on this device. Connect it in Ecash wallet first; then you can restore ecash here.</p>;
+  if (ecashOff) return <p className="text-sm text-neutral-500" role="status">The ecash wallet is not connected on this device. Connect it in Wallets first; then you can restore ecash here.</p>;
   if (!recovery) return <p className="text-sm text-neutral-500" role="status">Loading your wallet…</p>;
 
   const safe = recovery.backedUp();

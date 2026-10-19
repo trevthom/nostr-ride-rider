@@ -33,6 +33,11 @@ export async function resizeImage(file, maxDim = 200, quality = 0.6, maxBytes = 
     reader.readAsDataURL(file);
   });
 
+  return shrinkDataUrl(srcDataUrl, maxDim, quality, maxBytes);
+}
+
+// The same shrinking for an image that is already a data URL (a saved vehicle photo that must fit a smaller budget).
+export async function shrinkDataUrl(srcDataUrl, maxDim = 200, quality = 0.6, maxBytes = 20000) {
   let dim = maxDim;
   let q = quality;
   let out = await render(srcDataUrl, dim, q);

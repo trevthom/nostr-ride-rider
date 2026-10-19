@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════
-//  AUTO CASH OUT — "Automatically cash out at: $" in Account → Ecash wallet (driver app).
+//  AUTO CASH OUT — "Automatically cash out at: $" in Account → Wallets (driver app).
 //  The driver names an amount. Once the ecash held at a mint is worth that much, the app cashes it out to the driver's
 //  cash out location (a Lightning address) by itself. Pure rules and the saved choice; the runner is
 //  features/ecash/useAutoCashOut.js, the money move is EcashWallet.cashOut.

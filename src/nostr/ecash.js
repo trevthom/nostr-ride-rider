@@ -12,6 +12,11 @@
 //      quoteMint(sats) → { id, invoice, expiry }      ask the mint for a Lightning invoice to fund
 //      quoteState(id) → "UNPAID" | "PAID" | "ISSUED"
 //      mint(sats, id) → proofs                         turn a paid invoice into ecash
+//      onchainSupported() → bool                       does the mint take on-chain deposits (NUT-30)?
+//      onchainPubkey(index) → hex                      the key quote number `index` is locked to (no network; only this phrase can sign for it)
+//      quoteOnchain(index) → { id, address, expiry, pubkey }   a bitcoin address for quote number `index` (its key comes from the recovery seed)
+//      onchainState(id) → { paid, issued }             sats the mint saw paid to the address / already issued as ecash
+//      mintOnchain(id, index, sats, {random}) → proofs turn `sats` of a paid deposit into ecash
 //      split(proofs, sats) → { keep, send }            exactly `sats` to send (fees on top), the rest to keep
 //      receive(token) → proofs                         swap a received token for fresh proofs
 //      quoteMelt(invoice) → { id, sats, fee }          what paying a Lightning invoice costs
@@ -59,6 +64,7 @@ export class EcashError extends Error {
 // ── Saving: encrypted to the user's own key ──
 export function makeStore(user) {
   const key = "ecash_" + user.publicKey.slice(0, 16);
+  const mirror = "onchain_" + user.publicKey.slice(0, 16);
   const ck = () => nip44.getConversationKey(user.sk, user.publicKey);
   return {
     load() {
@@ -75,10 +81,14 @@ export function makeStore(user) {
       setSetting(key, pieces);
     },
     erase() { setSetting(key, null); },
+    // The on-chain deposit addresses (quote ids, numbers, addresses: no key, no coin) are ALSO kept as a plain setting, which the encrypted
+    // backup (lib/backup.js, prefix "onchain_") carries to a new phone. A deposit sent to an address must stay claimable.
+    loadOnchain() { const l = getSetting(mirror, []); return Array.isArray(l) ? l : []; },
+    saveOnchain(list) { setSetting(mirror, list); },
   };
 }
 
-const emptyState = () => ({ v: 1, mints: {}, pending: [], quotes: [], redeemed: [], counters: {}, legacy: [] });
+const emptyState = () => ({ v: 1, mints: {}, pending: [], quotes: [], redeemed: [], counters: {}, legacy: [], onchain: [], onchainIndex: 0 });
 
 export class EcashWallet {
   // store: { load, save }   mintFor: (url) => adapter   tokenInfo: (token) => { mint, sats } | null
@@ -142,13 +152,77 @@ export class EcashWallet {
     });
   }
 
-  // Claim everything that was paid while the app was closed. Returns the sats added.
+  // Claim everything that was paid while the app was closed (invoices and on-chain deposits). Returns the sats added.
   async claimAll() {
     let added = 0;
     for (const q of this.quotesList()) {
       try { added += (await this.claim(q.id)).sats; } catch { /* the mint is down: try again later */ }
     }
+    const now = Date.now() / 1000;
+    for (const q of this.onchainList()) {
+      if ((q.expiry != null && q.expiry < now) || !this._ownsOnchain(q)) continue;
+      try { added += (await this.claimOnchain(q.id)).sats; } catch { /* the mint is down: try again later */ }
+    }
     return added;
+  }
+
+  // ── Funding on-chain (NUT-30) ──
+  // The mint gives a bitcoin address. When a payment to it is confirmed, the mint lets this wallet turn it into ecash (claimOnchain).
+  // Only some mints can do this: onchainStart says so (EcashError "onchain") before anyone sends bitcoin to a mint that cannot.
+  // The deposit addresses are kept in the wallet AND in a plain setting that the backup carries (see makeStore).
+  onchainList() {
+    const seen = new Set();
+    return [...this.state.onchain, ...(this.store.loadOnchain?.() || [])].filter((q) => q && q.id && !seen.has(q.id) && seen.add(q.id));
+  }
+  // Is this address one THIS wallet can claim (its key comes from this wallet's recovery phrase)? An address from a backup of another
+  // phrase is not: it is claimed by restoring with that phrase, and it is never handed out again.
+  _ownsOnchain(q) {
+    const mint = this.mintFor(q.mint);
+    return typeof mint.onchainPubkey !== "function" || !q.pubkey || mint.onchainPubkey(q.index) === q.pubkey;
+  }
+  _saveOnchain() {
+    this.state.onchain = this.onchainList().slice(-10);
+    this._save();
+    try { this.store.saveOnchain?.(this.state.onchain); } catch { /* only the backup copy is missed */ }
+  }
+  // Returns { id, mint, index, address, expiry }. The newest address at this mint that has not expired is used again: it can be paid many times.
+  onchainStart(url) {
+    return this._exclusive(async () => {
+      const mint = this.mintFor(url);
+      let ok = false;
+      try { ok = typeof mint.onchainSupported === "function" && (await mint.onchainSupported()); }
+      catch (e) { throw new EcashError("mint", e?.message || "The mint did not answer."); }
+      if (!ok) throw new EcashError("onchain", "This mint does not take on-chain deposits. Use Lightning, or choose another mint.", true);
+      const now = Date.now() / 1000;
+      const have = this.onchainList().filter((q) => q.mint === url && (q.expiry == null || q.expiry > now) && this._ownsOnchain(q)).pop();
+      if (have) return have;
+      const index = (this.state.onchainIndex = (Number(this.state.onchainIndex) || 0) + 1);
+      this._save(); // the number is used up before the mint is asked
+      let q;
+      try { q = await mint.quoteOnchain(index); }
+      catch (e) { throw new EcashError("mint", e?.message || "The mint did not give an address."); }
+      const rec = { id: q.id, mint: url, index, address: q.address, expiry: q.expiry ?? null, pubkey: q.pubkey ?? null, at: Date.now() };
+      this.state.onchain = [...this.onchainList(), rec];
+      this._saveOnchain();
+      return rec;
+    });
+  }
+  // Turn what the mint has seen paid to one address into ecash, once. Returns { state, sats, paid }:
+  // "UNPAID" (nothing confirmed yet), "ISSUED" (sats = what was added now; 0 when there was nothing new), "NONE" (no such address here).
+  claimOnchain(id) {
+    return this._exclusive(async () => {
+      const q = this.onchainList().find((x) => x.id === id);
+      if (!q) return { state: "NONE", sats: 0, paid: 0 };
+      if (!this._ownsOnchain(q)) throw new EcashError("onchain", "This address belongs to another recovery phrase. Restore with that phrase to collect it.", true);
+      const mint = this.mintFor(q.mint);
+      const st = await mint.onchainState(id);
+      const due = st.paid - st.issued;
+      if (due <= 0) return { state: st.paid > 0 ? "ISSUED" : "UNPAID", sats: 0, paid: st.paid };
+      const proofs = await mint.mintOnchain(id, q.index, due);
+      this._setProofs(q.mint, [...this._proofs(q.mint), ...proofs]);
+      this._save();
+      return { state: "ISSUED", sats: sum(proofs), paid: st.paid };
+    });
   }
 
   // ── Paying: take exactly `sats` out as a token ──
@@ -435,7 +509,16 @@ export class EcashWallet {
         rows.push(row);
         try {
           const scan = source ? source(url) : this.mintFor(url);
-          const { proofs, next } = await scan.restore();
+          let { proofs, next } = await scan.restore();
+          // Deposits sent to an on-chain address of that phrase, not yet turned into ecash: claim them with the typed phrase's key.
+          if (source && typeof scan.mintOnchain === "function") {
+            for (const q of this.onchainList().filter((x) => x.mint === url)) {
+              try {
+                const st = await scan.onchainState(q.id);
+                if (st.paid > st.issued) proofs = [...proofs, ...(await scan.mintOnchain(q.id, q.index, st.paid - st.issued, { random: true }))];
+              } catch { /* an address of another phrase: its key does not sign here */ }
+            }
+          }
           row.found = sum(proofs);
           const inFlight = new Set(this.state.pending.flatMap((p) => p.proofs.map((x) => x.secret)));
           const mine = new Set(this._proofs(url).map((p) => p.secret));

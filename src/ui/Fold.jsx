@@ -3,9 +3,10 @@
 //  section's title, an optional status chip and an arrow. The part inside stays mounted while closed (hidden), so a half-typed
 //  field is not lost. Whether a section is open is remembered on this device, per section.
 //
-//    <Fold id="ecash" title="Ecash wallet" status={{ text: "Needed", tone: "warn" }} defaultOpen={false}>…</Fold>
+//    <Fold id="ecash" title="Wallets" status={{ text: "Needed", tone: "warn" }} defaultOpen={false}>…</Fold>
 //    openFold("ecash")                    open one from anywhere (a notice's button, for example)
 //    <FoldTitle right={<Chip/>}>Title</FoldTitle>    a heading that a section draws only when it is NOT inside a Fold
+//    <SubTitle>Title</SubTitle>           a heading for a part INSIDE a Fold that holds several parts (Wallets); always drawn
 //
 //  Inside a Fold the section's own title (SectionLabel, FoldTitle) is left out, because the header already shows it.
 // ════════════════════════════════════════════════════════════
@@ -67,4 +68,9 @@ export function FoldTitle({ children, right = null, className = "" }) {
       {right}
     </div>
   );
+}
+
+// A heading for one part of a Fold that holds several parts (the Wallets fold). Unlike FoldTitle it is always drawn.
+export function SubTitle({ children }) {
+  return <h3 className="text-[13px] font-semibold uppercase tracking-wider text-neutral-500 mb-2">{children}</h3>;
 }

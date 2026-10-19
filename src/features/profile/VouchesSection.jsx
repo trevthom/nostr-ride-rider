@@ -45,11 +45,10 @@ export default function VouchesSection() {
   return (
     <section>
       <SectionLabel>Your vouches</SectionLabel>
-      <p className="text-sm text-neutral-500 mb-3">
-        Add the npub of people you know and trust. When one of them also vouches for a driver or a rider, you see
-        "2 of your vouches know and trust this person" on that person's card. A vouch is for the person, whether they ride or drive.
-        Your list is public: anyone can see who you vouch for.
+      <p className="text-sm text-neutral-500">
+        Add the npub of people you know and trust, whether they ride or drive. See the documentation to understand how they work.
       </p>
+      <p className="text-xs text-neutral-500 mt-1 mb-3">Your list is public: anyone can see who you vouch for.</p>
       <div className="flex gap-2">
         <input aria-label="npub of a person you know and trust" value={text} onChange={(e) => { setText(e.target.value); setError(""); }}
           onKeyDown={(e) => { if (e.key === "Enter" && text.trim() && !busy) { e.preventDefault(); add(); } }}

@@ -5,13 +5,15 @@
 //   const mint = await startLocalMint({ feePpk: 100 });
 //   mint.url                  http://127.0.0.1:<port>
 //   mint.payQuote(quoteId)    pretend the Lightning invoice of a mint quote was paid
+//   startLocalMint({ onchain: true }) also speaks on-chain minting (NUT-30, with the NUT-20 signature check):
+//   mint.depositOnchain(addressOrQuoteId, sats)   pretend a confirmed bitcoin payment reached the address of an on-chain quote
 //   mint.stats                { spent, melted: [sats…] }
 //   mint.signedCount()        how many blinded messages the mint has signed (it remembers them, for restore)
 //   await mint.close()
 import http from "node:http";
 import { randomBytes } from "node:crypto";
 import { secp256k1 } from "@noble/curves/secp256k1.js";
-import { hashToCurve, pointFromHex, deriveKeysetId } from "@cashu/cashu-ts";
+import { hashToCurve, pointFromHex, deriveKeysetId, verifyMintQuoteSignature } from "@cashu/cashu-ts";
 
 // A BOLT11-looking invoice for `sats` (the amount is in the human-readable part: 10 nBTC = 1 sat). It cannot be paid.
 // (The data part may not contain the digit 1: the client finds the separator with lastIndexOf("1"), as bech32 allows.)
@@ -20,13 +22,14 @@ const AMOUNTS = Array.from({ length: 21 }, (_, i) => 2 ** i);
 const hex = (b) => Buffer.from(b).toString("hex");
 const bigOf = (b) => BigInt("0x" + hex(b));
 
-export async function startLocalMint({ feePpk = 0 } = {}) {
+export async function startLocalMint({ feePpk = 0, onchain = false } = {}) {
   const priv = Object.fromEntries(AMOUNTS.map((a) => [a, randomBytes(32)]));
   const keys = Object.fromEntries(AMOUNTS.map((a) => [String(a), hex(secp256k1.getPublicKey(priv[a], true))]));
   const id = deriveKeysetId(keys, { unit: "sat", input_fee_ppk: feePpk });
   const spent = new Set(); // hex(Y) of spent proofs
   const signed = new Map(); // B_ → { amount, id, C_ }: every signature given (NUT-09 restore), and a blinded message is signed only once
   const quotes = new Map(); // mint quotes
+  const onchainQuotes = new Map(); // on-chain mint quotes (NUT-30)
   const melts = new Map();
   const stats = { spent, melted: [] };
   let n = 1;
@@ -59,7 +62,7 @@ export async function startLocalMint({ feePpk = 0 } = {}) {
   const httpError = (status, code, detail) => Object.assign(new Error(detail), { status, code, detail });
 
   const routes = {
-    "GET /v1/info": () => ({ name: "Local test mint", version: "test/0.1", nuts: { 4: { methods: [{ method: "bolt11", unit: "sat" }], disabled: false }, 5: { methods: [{ method: "bolt11", unit: "sat" }], disabled: false }, 7: { supported: true }, 9: { supported: true } } }),
+    "GET /v1/info": () => ({ name: "Local test mint", version: "test/0.1", nuts: { 4: { methods: [{ method: "bolt11", unit: "sat" }, ...(onchain ? [{ method: "onchain", unit: "sat" }] : [])], disabled: false }, 5: { methods: [{ method: "bolt11", unit: "sat" }], disabled: false }, 7: { supported: true }, 9: { supported: true } } }),
     "GET /v1/keysets": () => ({ keysets: [{ id, unit: "sat", active: true, input_fee_ppk: feePpk }] }),
     "GET /v1/keys": () => ({ keysets: [{ id, unit: "sat", keys }] }),
     [`GET /v1/keys/${id}`]: () => ({ keysets: [{ id, unit: "sat", keys }] }),
@@ -79,6 +82,27 @@ export async function startLocalMint({ feePpk = 0 } = {}) {
       q.state = "ISSUED";
       return { signatures };
     },
+    ...(onchain ? {
+      "POST /v1/mint/quote/onchain": (b) => {
+        if (!/^0[23][0-9a-f]{64}$/.test(b.pubkey || "")) throw httpError(400, 20008, "A pubkey is required to lock the quote");
+        const quote = "oq" + n++;
+        const q = { quote, request: "bcrt1q" + hex(randomBytes(20)), unit: "sat", expiry: null, pubkey: b.pubkey, amount_paid: 0, amount_issued: 0 };
+        onchainQuotes.set(quote, q);
+        return q;
+      },
+      "POST /v1/mint/onchain": (b) => {
+        const q = onchainQuotes.get(b.quote);
+        if (!q) throw httpError(404, 20000, "Unknown quote");
+        // This test mint knows the plain NUT-20 message only. The client first sends the newer "amended" signature; a mint that does not know it
+        // answers 20008 and the client retries with the plain one, which is checked here. A signature of another key fails both times.
+        if (!verifyMintQuoteSignature(q.pubkey, b.quote, b.outputs, b.signature || "")) throw httpError(400, 20008, "Quote signature invalid");
+        const amount = sumOf(b.outputs);
+        if (amount > q.amount_paid - q.amount_issued) throw httpError(400, 20001, "More than was paid");
+        const signatures = sign(b.outputs); // all or nothing
+        q.amount_issued += amount;
+        return { signatures };
+      },
+    } : {}),
     "POST /v1/swap": (b) => {
       const ys = check(b.inputs);
       if (sumOf(b.inputs) - fee(b.inputs.length) !== sumOf(b.outputs)) throw httpError(400, 11002, `Transaction is not balanced (inputs ${sumOf(b.inputs)}, fee ${fee(b.inputs.length)}, outputs ${sumOf(b.outputs)})`);
@@ -142,6 +166,11 @@ export async function startLocalMint({ feePpk = 0 } = {}) {
           const q = (quoteGet[1] === "mint" ? quotes : melts).get(quoteGet[2]);
           return q ? send(200, q) : send(404, { code: 20000, detail: "Unknown quote" });
         }
+        const onchainGet = onchain && /^GET \/v1\/mint\/quote\/onchain\/(.+)$/.exec(`${req.method} ${path}`);
+        if (onchainGet) {
+          const q = onchainQuotes.get(onchainGet[1]);
+          return q ? send(200, q) : send(404, { code: 20000, detail: "Unknown quote" });
+        }
         const handler = routes[`${req.method} ${path}`];
         if (!handler) return send(404, { code: 0, detail: "Not found: " + path });
         send(200, handler(body ? JSON.parse(body) : {}));
@@ -158,6 +187,12 @@ export async function startLocalMint({ feePpk = 0 } = {}) {
     stats,
     quotes,
     payQuote: (quote) => { quotes.get(quote).state = "PAID"; },
+    onchainQuotes,
+    depositOnchain: (addressOrId, sats) => {
+      const q = onchainQuotes.get(addressOrId) || [...onchainQuotes.values()].find((x) => x.request === addressOrId);
+      if (!q) throw new Error("no such on-chain quote");
+      q.amount_paid += sats;
+    },
     signedCount: () => signed.size,
     close: () => new Promise((r) => { server.closeAllConnections?.(); server.close(r); }),
   };

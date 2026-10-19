@@ -1,6 +1,7 @@
 // ════════════════════════════════════════════════════════════
-//  ADD FUNDS — Fill the ecash wallet by paying a Lightning invoice. The
-//  mint makes the invoice; once it is paid, the app collects the ecash.
+//  ADD FUNDS — Fill the ecash wallet. Two ways, as tabs:
+//    • Lightning: the mint makes an invoice; once it is paid, the app collects the ecash.
+//    • On-chain: the mint gives a bitcoin address (OnchainFunds.jsx; only mints that support it).
 //    • with a connected Lightning wallet (NWC) it pays the invoice in one tap;
 //    • otherwise it shows the invoice (QR / text / "open wallet") for any wallet.
 //  A paid invoice that is not collected yet (the app was closed) is collected the
@@ -21,6 +22,7 @@ import Button from "../../ui/Button.jsx";
 import Icon from "../../ui/Icon.jsx";
 import QRCode from "../../ui/QRCode.jsx";
 import { moneyText } from "../../ui/Money.jsx";
+import OnchainFunds from "./OnchainFunds.jsx";
 
 const MIN = 100, MAX = 5_000_000;
 
@@ -34,6 +36,7 @@ export default function AddFunds({ mint, needSats = 0, onClose, onDone }) {
   const [error, setError] = useState("");
   const [done, setDone] = useState(null); // sats added
   const [mode, setMode] = useState("qr");
+  const [method, setMethod] = useState("lightning"); // "lightning" | "onchain"
   const alive = useRef(true);
   useEffect(() => () => { alive.current = false; }, []);
 
@@ -69,9 +72,23 @@ export default function AddFunds({ mint, needSats = 0, onClose, onDone }) {
     if (alive.current) setBusy("");
   };
 
+  const tabs = (
+    <div className="flex gap-2 mb-4" role="tablist" aria-label="How to add funds">
+      {[["lightning", "Lightning"], ["onchain", "On-chain"]].map(([id, label]) => (
+        <button key={id} type="button" role="tab" aria-selected={method === id} onClick={() => setMethod(id)}
+          className={`flex-1 py-2 rounded-full text-sm font-semibold ${method === id ? "bg-black text-white" : "bg-neutral-100 text-neutral-600"}`}>{label}</button>
+      ))}
+    </div>
+  );
+
   return (
     <Modal open title="Add funds" onClose={onClose}>
-      {done != null ? (
+      {done == null && method === "onchain" ? (
+        <>
+          {tabs}
+          <OnchainFunds mint={mint} onDone={(sats) => { setDone(sats); onDone && onDone(sats); }} />
+        </>
+      ) : done != null ? (
         <div className="text-center py-4">
           <div className="w-14 h-14 rounded-full bg-[#e6f4ec] text-[#05944f] flex items-center justify-center mx-auto mb-3"><Icon name="check" size={28} strokeWidth={3} /></div>
           <p className="text-xl font-bold">{moneyText(done, btcPrice)} added</p>
@@ -80,6 +97,7 @@ export default function AddFunds({ mint, needSats = 0, onClose, onDone }) {
         </div>
       ) : !quote ? (
         <>
+          {tabs}
           <p className="text-neutral-600 text-[15px] mb-3">
             Rides are paid with ecash while you ride. Add money to your ecash wallet by paying a Lightning invoice.
           </p>

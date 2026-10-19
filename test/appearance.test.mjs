@@ -27,6 +27,21 @@ assert.equal(A.isDark(), true);
 assert.equal(classes.has("dark"), true, "applied at once");
 assert.equal(meta.content, A.BAR_COLORS.dark, "the phone's bar follows");
 
+// The map has its own switch. The application's dark look does not reach it, and the map's does not reach the application.
+assert.equal(A.isDarkMap(), false, "the map starts light");
+assert.equal(classes.has("dark-map"), false, "an application that is dark leaves the map light");
+A.setDarkMap(true);
+assert.equal(store.get("nostrride_darkMap"), "true", "the map choice is saved the moment it is flipped");
+assert.equal(A.isDarkMap(), true);
+assert.equal(classes.has("dark-map"), true, "applied at once");
+A.setDark(false);
+assert.equal(classes.has("dark-map"), true, "a light application leaves a dark map alone");
+assert.equal(classes.has("dark"), false);
+A.setDark(true);
+const css = fs.readFileSync(new URL("../src/index.css", import.meta.url), "utf8");
+assert.ok(!/\.dark\s+\.leaflet/.test(css), "no map rule hangs on the application's dark class");
+assert.ok(/\.dark-map\s+\.leaflet-tile-pane\s*\{\s*filter/.test(css), "the tile filter hangs on the map's class");
+
 // The script that runs before the first paint (public/theme-init.js) must read the same key and give the same result.
 // In the main repo each app has its own copy (apps/rider/public, apps/driver/public); an exported app repo has one (public/).
 const scripts = ["../apps/rider/public/theme-init.js", "../apps/driver/public/theme-init.js", "../public/theme-init.js"]
@@ -37,7 +52,16 @@ for (const u of scripts) {
   classes.clear(); meta.content = "#ffffff";
   runInit(u);
   assert.equal(classes.has("dark"), true, u.pathname + ": the first-paint script sets dark");
+  assert.equal(classes.has("dark-map"), true, u.pathname + ": and the dark map");
   assert.equal(meta.content, A.BAR_COLORS.dark);
+}
+// Only one of the two saved: only that class is set.
+A.setDarkMap(false);
+for (const u of scripts) {
+  classes.clear();
+  runInit(u);
+  assert.equal(classes.has("dark"), true);
+  assert.equal(classes.has("dark-map"), false, u.pathname + ": a light map stays light");
 }
 
 A.setDark(false);

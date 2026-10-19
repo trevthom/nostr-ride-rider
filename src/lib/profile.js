@@ -1,13 +1,17 @@
 // ════════════════════════════════════════════════════════════
 //  PROFILE — Whether a user has the info required to offer rides.
-//  Required to drive: a face photo, a vehicle photo, the license plate
-//  (state & number) and the vehicle year/make/model.
+//  Required to drive: a face photo, a vehicle photo (one is enough; up to 3 can be added, see vehiclePhotos),
+//  the license plate (state & number) and the vehicle year/make/model.
 //  Optional: a cash out location (a Lightning address: riders tip there and "Cash out" sends there),
 //  and gender (riders may prefer to see drivers of one gender first).
 //
 //  driveGaps(user) lists what is still missing, by section, so the app can
 //  tell the driver exactly what to finish.
 // ════════════════════════════════════════════════════════════
+
+export const MAX_VEHICLE_PHOTOS = 3;
+// Every photo of a vehicle, the main one first: `picture` (the only one older apps know) then `morePictures` (the others).
+export const vehiclePhotos = (v) => [v?.picture, ...(Array.isArray(v?.morePictures) ? v.morePictures : [])].filter((x) => typeof x === "string" && x).slice(0, MAX_VEHICLE_PHOTOS);
 
 // [{ id, title, missing }] for every required section that is not complete.
 // `missing` names the specific fields (empty when the whole section is missing).

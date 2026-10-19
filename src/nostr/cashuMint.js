@@ -9,18 +9,28 @@
 //  request: ecash.js counterSource). Coins that are SENT to someone else use random secrets, so a restore never brings back a
 //  token that was already handed over. restore() finds the coins again at the mint (NUT-09) after a lost device.
 //
+//  On-chain funding (NUT-30, experimental in the Cashu client): the mint gives a bitcoin address for a quote that is locked to a key
+//  (NUT-20). The key is made from the recovery seed and the quote's number, so the 12 words are enough to claim a deposit later. Only
+//  mints that list the "onchain" method in NUT-04 can do this (`onchainSupported`).
+//
 //  Unit: always "sat". Amounts leave this file as plain numbers.
 //  Proofs leave it as plain JSON objects (so they can be saved and sealed).
 //  Fees: split() includes the mint's input fee in what it sends, so the
 //  person who receives a tick gets the full amount.
 // ════════════════════════════════════════════════════════════
 
-import { Wallet, getEncodedToken, getTokenMetadata } from "@cashu/cashu-ts";
+import { Wallet, getEncodedToken, getTokenMetadata, getPubKeyFromPrivKey } from "@cashu/cashu-ts";
+import { hkdf } from "@noble/hashes/hkdf.js";
+import { sha256 } from "@noble/hashes/sha2.js";
+import { bytesToHex } from "@noble/hashes/utils.js";
 import { EcashWallet, makeStore } from "./ecash.js";
 import { makeSeedBox } from "./seedbox.js";
 import { makeRecovery } from "./ecashRecovery.js";
 
 const plain = (proofs) => JSON.parse(JSON.stringify(proofs));
+
+// The key an on-chain quote is locked to: its own HKDF label + the quote's number, from the recovery seed (never from anything else).
+const onchainKey = (seed, index) => hkdf(sha256, seed, undefined, new TextEncoder().encode("nostrride/ecash/onchain-quote/v1/" + index), 32);
 
 // An address that is a WEBSITE and not a mint (a typo, a wallet's home page) answers with a web page. The Cashu client puts that page into
 // the error message, which would fill the screen with HTML. A short, plain reason takes its place; status, code and `definitive` are kept.
@@ -86,6 +96,35 @@ export function cashuMint(url, { seed = null, counters = null } = {}) {
     async mint(sats, id) {
       return plain(await again(async () => (await w()).mintProofsBolt11(sats, id)));
     },
+    // ── On-chain funding (NUT-30) ──
+    async onchainSupported() {
+      const wl = await w();
+      try { return wl.getMintInfo().supportsMintMeltMethod("mint", "onchain", "sat") === true; } catch { return false; }
+    },
+    // The public key quote number `index` is locked to (no network). Only this recovery phrase can sign for it.
+    onchainPubkey(index) {
+      return seed ? bytesToHex(getPubKeyFromPrivKey(onchainKey(seed, index))) : null;
+    },
+    // A deposit address for quote number `index`. Resolves { id, address, expiry, pubkey }.
+    async quoteOnchain(index) {
+      if (!seed) throw new Error("There is no recovery phrase to lock the deposit to.");
+      const pubkey = adapter.onchainPubkey(index);
+      const q = await (await w()).createMintQuoteOnchain(pubkey);
+      return { id: q.quote, address: q.request, expiry: q.expiry ?? null, pubkey };
+    },
+    // What the mint has seen paid to the address, and how much ecash it has already issued for it. { paid, issued, expiry } in sats.
+    async onchainState(id) {
+      const q = await (await w()).checkMintQuoteOnchain(id);
+      return { paid: q.amount_paid.toNumber(), issued: q.amount_issued.toNumber(), expiry: q.expiry ?? null };
+    },
+    // Turn `sats` of a paid deposit into ecash. `random`: the coins get random secrets (the restore path swaps them into a wallet at once).
+    async mintOnchain(id, index, sats, { random = false } = {}) {
+      if (!seed) throw new Error("There is no recovery phrase to sign with.");
+      const wl = await w();
+      const q = await wl.checkMintQuoteOnchain(id);
+      const key = bytesToHex(onchainKey(seed, index));
+      return plain(await again(async () => wl.mintProofsOnchain(sats, q, key, undefined, random ? { type: "random" } : undefined)));
+    },
     async split(proofs, sats) {
       // With a recovery phrase: what we keep is deterministic (restorable); what we send away is random, and a swap is always
       // made (so a coin we already hold is never handed over as it is).
@@ -138,7 +177,7 @@ export function cashuMint(url, { seed = null, counters = null } = {}) {
   };
   // Every call that talks to the mint reports a short, plain error (see plainError).
   for (const [name, fn] of Object.entries(adapter)) {
-    if (typeof fn === "function" && name !== "encode") adapter[name] = async (...args) => { try { return await fn(...args); } catch (e) { throw plainError(e, url); } };
+    if (typeof fn === "function" && name !== "encode" && name !== "onchainPubkey") adapter[name] = async (...args) => { try { return await fn(...args); } catch (e) { throw plainError(e, url); } };
   }
   return adapter;
 }

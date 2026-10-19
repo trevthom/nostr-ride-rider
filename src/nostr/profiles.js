@@ -29,6 +29,9 @@ export function getMetadata(pubkey) {
 // the shape the screens render (a non-string name or an object plate
 // would otherwise crash React).
 const str = (v) => (typeof v === "string" || typeof v === "number" ? String(v) : "");
+// The extra vehicle photos: at most 2 more, only small embedded images (a remote address would tell its host who looked).
+const MORE_PHOTO_MAX = 40000;
+const morePhotos = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === "string" && x.startsWith("data:image/") && x.length <= MORE_PHOTO_MAX).slice(0, 2) : []);
 
 export function getProfile(pubkey) {
   const meta = getMetadata(pubkey);
@@ -46,6 +49,7 @@ export function getProfile(pubkey) {
     gender: meta.gender === "male" || meta.gender === "female" ? meta.gender : "", // optional, self-declared
     vehicle: v && {
       picture: str(v.picture),
+      morePictures: morePhotos(v.morePictures),
       plateState: str(v.plateState),
       plateNumber: str(v.plateNumber),
       year: str(v.year),

@@ -4,7 +4,7 @@
    font, page basics, and a few small animations. */
 
 /* ── Colors ── Light is the default. `.dark` on <html> (set by lib/appearance.js, and before the first paint by
-   public/theme-init.js) swaps them. The channels are "r g b" so Tailwind can add its opacity (see tailwind.config.js).
+   public/theme-init.js) swaps them. The map has its own switch (`dark-map`, see below). The channels are "r g b" so Tailwind can add its opacity (see tailwind.config.js).
    "black" and "white" trade places in the dark look; keep a color fixed with a value such as text-[#fff]. */
 :root {
   --c-white: 255 255 255; --c-black: 0 0 0;
@@ -27,7 +27,7 @@
   --c-amber-50: 52 40 12; --c-amber-700: 252 211 77; --c-amber-800: 253 224 130; --c-amber-900: 254 240 180;
   --c-green-50: 16 41 27; --c-green-200: 31 94 59; --c-green-700: 74 222 128;
   --c-blue-600: 96 165 250;
-  --page: 10 10 10; --map-bg: 26 26 26; --go-text: 52 199 123; --go-deep: 74 222 128; --go-soft: 16 41 27;
+  --page: 10 10 10; --go-text: 52 199 123; --go-deep: 74 222 128; --go-soft: 16 41 27;
   color-scheme: dark;
 }
 /* The green used as text and as a soft badge background is written as a fixed value in many places; it follows the look here. */
@@ -75,10 +75,12 @@ button:disabled { cursor: not-allowed; }
 /* The map: neutral background while tiles load, and no Leaflet chrome that
    fights the app's own controls. */
 .leaflet-container { background: rgb(var(--map-bg)); font-family: inherit; }
-/* Dark look: the map tiles are turned dark (the pins, route and price tags sit above the tile layer and keep their colors). */
-.dark .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.88); }
-.dark .leaflet-control-attribution { background: rgba(23, 23, 23, 0.8) !important; color: #a3a3a3; }
-.dark .leaflet-control-attribution a { color: #d0d0d0; }
+/* Dark map (its own switch, `dark-map` on <html>; the application's `dark` does not touch the map): the tiles are turned dark
+   (the pins, route and price tags sit above the tile layer and keep their colors). */
+.dark-map { --map-bg: 26 26 26; }
+.dark-map .leaflet-tile-pane { filter: invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.88); }
+.dark-map .leaflet-control-attribution { background: rgba(23, 23, 23, 0.8) !important; color: #a3a3a3; }
+.dark-map .leaflet-control-attribution a { color: #d0d0d0; }
 .leaflet-control-attribution { font-size: 9px !important; opacity: 0.8; margin-bottom: 0 !important; }
 /* The credit line stays visible above the bottom sheet (MapPage sets --nr-sheet to the sheet's height). */
 .leaflet-bottom.leaflet-right { bottom: var(--nr-sheet, 0px); }
