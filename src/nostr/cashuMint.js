@@ -23,9 +23,10 @@ import { Wallet, getEncodedToken, getTokenMetadata, getPubKeyFromPrivKey } from 
 import { hkdf } from "@noble/hashes/hkdf.js";
 import { sha256 } from "@noble/hashes/sha2.js";
 import { bytesToHex } from "@noble/hashes/utils.js";
-import { EcashWallet, makeStore } from "./ecash.js";
+import { EcashWallet, EcashError, makeStore } from "./ecash.js";
 import { makeSeedBox } from "./seedbox.js";
 import { makeRecovery } from "./ecashRecovery.js";
+import { checkPhrase } from "../lib/recovery.js";
 
 const plain = (proofs) => JSON.parse(JSON.stringify(proofs));
 
@@ -148,7 +149,7 @@ export function cashuMint(url, { seed = null, counters = null } = {}) {
     },
     async melt(quote, proofs) {
       const r = await again(async () => (await w()).meltProofsBolt11(quote.raw, proofs));
-      return { paid: r.quote.state === "PAID", change: plain(r.change || []) };
+      return { paid: r.quote.state === "PAID", change: plain(r.change || []), preimage: r.quote.payment_preimage || null };
     },
     async states(proofs) {
       return (await (await w()).checkProofsStates(proofs)).map((s) => s.state);
@@ -192,7 +193,7 @@ export function tokenInfo(token) {
 
 // The wallet of the logged-in user, with real mints. One per user key.
 const wallets = new WeakMap();
-// After the wallet was disconnected from this device: the next userWallet(user) makes a new, empty wallet with a new phrase.
+// After the wallet was disconnected from this device (or a restore found nothing): the next userWallet(user) starts again.
 export function forgetWallet(user) { wallets.delete(user.sk); }
 export function userWallet(user) {
   let ec = wallets.get(user.sk);
@@ -203,4 +204,33 @@ export function userWallet(user) {
     wallets.set(user.sk, ec);
   }
   return ec;
+}
+
+// Restore: the typed 12 words BECOME this device's wallet phrase (nothing is swept into another phrase). Allowed only on a device with no
+// wallet. The words are saved first, the mints are asked for the coins that were signed for them (NUT-09), and every coin found is swapped
+// for a fresh one under the same phrase (so a copy on a lost phone is spent). The words are marked as written down: the person has them.
+// If no mint knows any coin for these words (a typo that still passes the check, the wrong mint, mints that did not answer), everything is
+// undone, so the device stays without a wallet and the person can try again. Returns { rows, kept }.
+export async function restoreWallet(user, text, urls) {
+  const c = checkPhrase(text);
+  if (c.error) throw new EcashError("phrase", c.error, true);
+  const list = [...new Set((urls || []).filter(Boolean))];
+  if (!list.length) throw new EcashError("mint", "Add the address of at least one mint to look in.", true);
+  const box = makeSeedBox(user);
+  if (box.load() || wallets.has(user.sk)) throw new EcashError("wallet", "This device already has an ecash wallet. Disconnect it first to restore another one.", true);
+  box.save({ v: 1, phrase: c.phrase, backedUp: true, at: Date.now() });
+  const undo = () => {
+    try { wallets.get(user.sk)?.wipe(); } catch { /* nothing to wipe */ }
+    box.erase();
+    forgetWallet(user);
+  };
+  let rows;
+  try {
+    rows = await userWallet(user).restore(list);
+  } catch (e) {
+    undo();
+    throw e;
+  }
+  if (!rows.some((r) => r.found > 0)) { undo(); return { rows, kept: false }; }
+  return { rows, kept: true };
 }

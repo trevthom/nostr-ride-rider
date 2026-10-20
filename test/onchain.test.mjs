@@ -20,8 +20,10 @@ const { startLocalMint } = await import("./helpers/localmint.mjs");
 
 const memBox = () => { let saved = null; return { load: () => saved && { ...saved }, save: (r) => { saved = { ...r }; }, erase: () => { saved = null; } }; };
 // One device with its own phrase. A store that is ALSO the real makeStore (so the plain setting that the backup carries is written).
-function device(user) {
-  const recovery = makeRecovery({ box: memBox(), newAdapter: cashuMint });
+function device(user, phrase = null) {
+  const box = memBox();
+  if (phrase) box.save({ v: 1, phrase, backedUp: true, at: 1 }); // a device that was given the person's 12 words (Restore)
+  const recovery = makeRecovery({ box, newAdapter: cashuMint });
   const wallet = new EcashWallet({ store: makeStore(user), mintFor: recovery.mintFor, tokenInfo });
   recovery.attach(wallet);
   return { wallet, recovery };
@@ -78,12 +80,13 @@ try {
   const q2 = await A.wallet.onchainStart(withChain.url); // same address
   withChain.depositOnchain(q2.id, 7000); // paid, but this device is lost before it claims
   const phraseA = A.recovery.phrase();
-  const NEW = device(generateKeypair()); // another phone: its own phrase, an empty wallet
+  const NEW = device(generateKeypair(), phraseA); // another phone that was given the 12 words (Restore my wallet)
   assert.equal(NEW.wallet.total(), 0);
   // The backup note was restored on the new phone: the plain setting with the address is there.
   NEW.wallet.store.saveOnchain(A.wallet.onchainList());
-  const rows = await NEW.recovery.restore(phraseA, [withChain.url]);
+  const rows = await NEW.wallet.restore([withChain.url]);
   assert.equal(rows[0].error, "");
+  await NEW.wallet.claimAll(); // the deposit that was paid while the old phone was gone
   assert.equal(NEW.wallet.balance(withChain.url), 7000 + (A.wallet.balance(withChain.url)), "the unspent coins AND the unclaimed deposit are now in the new wallet");
   assert.equal((await withChain.onchainQuotes.get(q2.id).amount_issued) - 0 >= 7000, true, "the mint counts the deposit as issued");
 

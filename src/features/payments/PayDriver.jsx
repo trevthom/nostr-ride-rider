@@ -1,8 +1,9 @@
 // ════════════════════════════════════════════════════════════
 //  PAY DRIVER — Pays `amountSats` to the driver's Lightning address
 //  (lud16 in their profile). Two ways:
-//    • Connected wallet — gets an invoice from the driver's address
-//      and pays it over NWC. Done when the wallet confirms.
+//    • My ecash — gets an invoice from the driver's address and pays
+//      it from the rider's ecash wallet (the mint pays it over Lightning,
+//      for a small fee). Done when the mint confirms.
 //    • Any other wallet — shows the driver's invoice (QR / string /
 //      lightning: link). If the driver's server supports LUD-21 we
 //      watch for payment; otherwise the rider confirms by hand.
@@ -14,7 +15,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useApp } from "../../state/AppContext.jsx";
 import { moneyText } from "../../ui/Money.jsx";
-import { payInvoice } from "../../nostr/wallet.js";
 import { requestInvoice, invoiceStatus } from "../../lib/lnurl.js";
 import { proofLevel } from "../../lib/evidence.js";
 import QRCode from "../../ui/QRCode.jsx";
@@ -22,8 +22,12 @@ import Button from "../../ui/Button.jsx";
 import Icon from "../../ui/Icon.jsx";
 
 export default function PayDriver({ amountSats, address, memo = "NostrRide fare", onPaid }) {
-  const { wallet, btcPrice } = useApp();
-  const [busy, setBusy] = useState(""); // "" | "wallet" | "invoice" | "check"
+  const { ecash, btcPrice } = useApp();
+  // The mint that holds the most ecash pays; the tip needs a little more than its face value for the mint's fee.
+  const balances = ecash ? ecash.balances() : {};
+  const payMint = Object.keys(balances).sort((a, b) => balances[b] - balances[a])[0] || "";
+  const canPay = !!payMint && balances[payMint] > amountSats;
+  const [busy, setBusy] = useState(""); // "" | "ecash" | "invoice" | "check"
   const [error, setError] = useState("");
   const [invoice, setInvoice] = useState(null); // { pr, verify }
   const [mode, setMode] = useState("qr"); // "qr" | "string" | "url"
@@ -59,18 +63,15 @@ export default function PayDriver({ amountSats, address, memo = "NostrRide fare"
     );
   }
 
-  const payWithWallet = async () => {
-    setBusy("wallet");
+  const payWithEcash = async () => {
+    setBusy("ecash");
     setError("");
     try {
       const { pr } = await requestInvoice(address, amountSats, memo);
-      const res = await payInvoice(wallet, pr);
+      const res = await ecash.payInvoice(payMint, pr);
       finish({ via: "wallet", pr, preimage: res?.preimage });
     } catch (e) {
-      setError(
-        (e.message || "Payment failed.") +
-          " Check your wallet's history before you try again, so you don't pay twice."
-      );
+      setError(e.message || "Payment failed. Your ecash is still here.");
     }
     setBusy("");
   };
@@ -110,12 +111,12 @@ export default function PayDriver({ amountSats, address, memo = "NostrRide fare"
   const amountText = moneyText(amountSats, btcPrice);
   return (
     <div>
-      {/* Option 1: connected wallet */}
-      <Button onClick={payWithWallet} disabled={!wallet.connected} loading={busy === "wallet"} className="mb-2">
-        {busy === "wallet" ? "Paying…" : <><Icon name="zap" size={18} />Pay {amountText} with wallet</>}
+      {/* Option 1: my ecash */}
+      <Button onClick={payWithEcash} disabled={!canPay} loading={busy === "ecash"} className="mb-2">
+        {busy === "ecash" ? "Paying…" : <><Icon name="zap" size={18} />Pay {amountText} with my ecash</>}
       </Button>
-      {!wallet.connected && (
-        <p className="text-neutral-500 text-xs text-center mb-3">Connect a wallet in Account to pay in one tap.</p>
+      {!canPay && (
+        <p className="text-neutral-500 text-xs text-center mb-3">You need a little more ecash than the tip, for the mint's fee. Add funds in Account.</p>
       )}
 
       {/* Option 2: the driver's invoice, for any wallet */}

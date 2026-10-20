@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════
-//  UNITS — Account → Units: show distances in miles or kilometers. It saves and applies at once (lib/units.js).
+//  UNITS — Account → Appearance → Units (drawn inside AppearanceSection): show distances in miles or kilometers. It saves and applies at once (lib/units.js).
 //  Only what is shown changes: fares are still worked out per mile underneath, so everyone agrees to the cent.
 // ════════════════════════════════════════════════════════════
 

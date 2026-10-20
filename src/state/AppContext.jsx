@@ -1,8 +1,7 @@
 // ════════════════════════════════════════════════════════════
 //  APP STATE — The state BOTH apps share: the logged-in user, which
 //  tab is showing, the ride requests from the relays, transient
-//  banners, the local currency and the BTC prices, the ecash wallet,
-//  and the connected Lightning (NWC) wallet.
+//  banners, the local currency and the BTC prices, and the ecash wallet.
 //
 //  Role-specific state lives next to each app:
 //    src/rider/state/RiderContext.jsx    (requesting + riding)
@@ -17,7 +16,6 @@ import { relay } from "../nostr/relay.js";
 import { EVENT_KINDS, APP_TAG } from "../nostr/eventKinds.js";
 import { buildSignedEvent } from "../nostr/events.js";
 import { latestVersions } from "../nostr/replaceable.js";
-import { emptyWalletState } from "../nostr/wallet.js";
 import { syncVouches } from "../nostr/vouchSync.js";
 import MilesSync from "../features/profile/MilesSync.jsx";
 import AudienceSync from "./AudienceSync.jsx";
@@ -75,7 +73,6 @@ export function AppProvider({ initialView, children }) {
   const [profileModalPubkey, setProfileModalPubkey] = useState(null); // user-info modal
   const [notices, setNotices] = useState([]); // transient swipe-away banners
   const [liveTick, setLiveTick] = useState(0); // bumped on incoming relay events to re-render
-  const [wallet, setWallet] = useState(emptyWalletState()); // connected NWC wallet
   const [settingsEpoch, setSettingsEpoch] = useState(0); // bumped when a backup is put back: the screens are drawn again with the restored settings
 
   // Show a transient banner. Also fires a system notification when the app
@@ -173,11 +170,15 @@ export function AppProvider({ initialView, children }) {
   // opened with the user's key, and anything paid but not yet claimed is claimed. `ecashTick` re-renders screens.
   const [ecash, setEcash] = useState(null);
   const [, setEcashTick] = useState(0);
-  // "Disconnected": the person removed the ecash wallet from THIS device (recovery.disconnect). The wallet is not loaded, and a new one
-  // is made only when they connect again. Read from the device each render (it is one small flag per user).
+  // "No wallet on this device" (`ecashOff`): nothing makes a wallet by itself. The person chooses Create New Wallet (new 12 words) or
+  // Restore (their own 12 words) in Account → Wallets, and until then no wallet is loaded. A device that already holds a wallet (its saved
+  // words or coins) is "on" without a choice. The flag `ecashOff_<pk16>` is true after Disconnect and false after Create / Restore.
   const [offTick, setOffTick] = useState(0);
   const offKey = user?.publicKey ? "ecashOff_" + user.publicKey.slice(0, 16) : null;
-  const ecashOff = offKey ? getSetting(offKey, false) === true : false;
+  const pk16 = user?.publicKey ? user.publicKey.slice(0, 16) : "";
+  const flag = offKey ? getSetting(offKey, undefined) : undefined;
+  const hasWalletData = !!pk16 && (typeof getSetting("ecashphrase_" + pk16, null) === "string" || Array.isArray(getSetting("ecash_" + pk16, null)));
+  const ecashOff = offKey ? flag === true || (flag !== false && !hasWalletData) : false;
   void offTick;
   useEffect(() => {
     if (!user?.sk || ecashOff) { setEcash(null); return undefined; }
@@ -207,11 +208,22 @@ export function AppProvider({ initialView, children }) {
     setOffTick((t) => t + 1);
     return out;
   }, [ecash, user, offKey]);
-  const connectEcash = useCallback(() => {
+  // Create New Wallet: the wallet loads and makes its own 12 words (the screen shows them at once).
+  const createEcash = useCallback(() => {
     if (!offKey) return;
     setSetting(offKey, false);
     setOffTick((t) => t + 1);
   }, [offKey]);
+  // Restore: the 12 words the person typed BECOME this wallet's words (nothing is swept into another phrase). Kept only if the mints
+  // had ecash for them; otherwise nothing is left on the device. Returns { rows, kept }.
+  const restoreEcash = useCallback(async (text, urls) => {
+    if (!offKey) return { rows: [], kept: false };
+    setSetting(offKey, true); // while the words are being tried, the wallet stays "not on this device" (a saved phrase alone must not switch it on)
+    const m = await import("../nostr/cashuMint.js");
+    const out = await m.restoreWallet(user, text, urls);
+    if (out.kept) { setSetting(offKey, false); setOffTick((t) => t + 1); }
+    return out;
+  }, [user, offKey]);
 
   // Vouches (lib/vouches.js): bring in my list and the lists of the people I vouch for, so the badge on a card can say
   // "N of your vouches know and trust this person". At login, every 5 minutes, and after I change my own list.
@@ -362,7 +374,6 @@ export function AppProvider({ initialView, children }) {
     forgetKey();
     setUser(null);
     setProfileModalPubkey(null);
-    setWallet(emptyWalletState());
     setEcash(null);
     setNotices([]);
     setView(initialView);
@@ -434,13 +445,12 @@ export function AppProvider({ initialView, children }) {
     refreshData,
     pullRecent,
     publish,
-    wallet,
-    setWallet,
     refreshVouches,
     ecash,
     ecashOff,
     disconnectEcash,
-    connectEcash,
+    createEcash,
+    restoreEcash,
     currency,
     setCurrency,
     prices,

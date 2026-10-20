@@ -317,7 +317,7 @@ export class EcashWallet {
 
   // ── Cashing out to Lightning ──
   // getInvoice(sats) → a bolt11 invoice for exactly that amount (for example from a Lightning address).
-  // Pays as much of the balance as the mint's fee allows. Returns { paidSats, feeSats }.
+  // Pays as much of the balance as the mint's fee allows. Returns { paidSats, feeSats, preimage }.
   cashOut(url, getInvoice) {
     return this._exclusive(async () => {
       const mint = this.mintFor(url);
@@ -352,7 +352,7 @@ export class EcashWallet {
   }
 
   // The last steps of every Lightning payment: the coins that pay it leave the balance and wait in `pending`; the mint pays; the
-  // change comes back. A payment that fails puts the coins back. Runs inside the money lock. Returns { paidSats, feeSats }.
+  // change comes back. A payment that fails puts the coins back. Runs inside the money lock. Returns { paidSats, feeSats, preimage }.
   async _meltWith(url, mint, q, need, split) {
     this._setProofs(url, split.keep);
     this.state.pending.push({ id: "melt-" + q.id, mint: url, sats: need, proofs: split.send, at: Date.now() });
@@ -367,12 +367,12 @@ export class EcashWallet {
     if (!res.paid) { this.unreserve("melt-" + q.id); throw new EcashError("mint", "The Lightning payment failed. Your ecash is still here."); }
     this._setProofs(url, [...this._proofs(url), ...res.change]);
     this.settle("melt-" + q.id);
-    return { paidSats: q.sats, feeSats: need - sum(res.change) - q.sats };
+    return { paidSats: q.sats, feeSats: need - sum(res.change) - q.sats, preimage: res.preimage || null };
   }
 
   // ── Sending to another wallet ──
   // Pay a Lightning invoice (any wallet's) from the ecash held at `url`. The invoice must name an amount. The mint's fee comes on top
-  // (and the fee for spending the coins), so the wallet needs a little more than the invoice. Returns { paidSats, feeSats }.
+  // (and the fee for spending the coins), so the wallet needs a little more than the invoice. Returns { paidSats, feeSats, preimage }.
   payInvoice(url, invoice) {
     return this._exclusive(async () => {
       const mint = this.mintFor(url);
@@ -495,49 +495,27 @@ export class EcashWallet {
     return { sats: sum(fresh) };
   }
 
-  // Find the ecash that belongs to a recovery phrase at each mint, and make it this wallet's own.
-  //   no `source`  : the wallet's own phrase (a new device that took the person's phrase). The coins found are kept at
-  //                  once, then all of them are swapped for fresh ones.
-  //   `source(url)`: an adapter made from ANOTHER phrase (this wallet already holds ecash under its own phrase). Its
-  //                  coins are swapped into this wallet; the other phrase is not needed afterwards.
-  // Only coins the mint calls UNSPENT are taken. Returns [{ mint, found, added, rotated, error }] per mint.
-  restore(urls, { source = null } = {}) {
+  // Find the ecash that belongs to this wallet's recovery phrase at each mint (a device that took the person's phrase: nostr/cashuMint.js
+  // restoreWallet). The coins the mint still calls UNSPENT are kept at once, the counters move past the numbers already used, then the
+  // coins are swapped for fresh ones under the same phrase, so a copy on a lost phone is spent. Deposits sent to an on-chain address of
+  // this phrase are collected afterwards by claimAll. Returns [{ mint, found, added, rotated, error }] per mint.
+  restore(urls) {
     return this._exclusive(async () => {
       const rows = [];
       for (const url of [...new Set(urls)]) {
         const row = { mint: url, found: 0, added: 0, rotated: false, error: "" };
         rows.push(row);
         try {
-          const scan = source ? source(url) : this.mintFor(url);
-          let { proofs, next } = await scan.restore();
-          // Deposits sent to an on-chain address of that phrase, not yet turned into ecash: claim them with the typed phrase's key.
-          if (source && typeof scan.mintOnchain === "function") {
-            for (const q of this.onchainList().filter((x) => x.mint === url)) {
-              try {
-                const st = await scan.onchainState(q.id);
-                if (st.paid > st.issued) proofs = [...proofs, ...(await scan.mintOnchain(q.id, q.index, st.paid - st.issued, { random: true }))];
-              } catch { /* an address of another phrase: its key does not sign here */ }
-            }
-          }
+          let { proofs, next } = await this.mintFor(url).restore();
           row.found = sum(proofs);
           const inFlight = new Set(this.state.pending.flatMap((p) => p.proofs.map((x) => x.secret)));
           const mine = new Set(this._proofs(url).map((p) => p.secret));
           const take = proofs.filter((p) => !inFlight.has(p.secret) && !mine.has(p.secret));
-          if (source) {
-            if (take.length) {
-              const fresh = await this.mintFor(url).receive(scan.encode(take));
-              this._setProofs(url, [...this._proofs(url), ...fresh]);
-              this._save();
-              row.added = sum(fresh);
-            }
-            row.rotated = true;
-          } else {
-            for (const [id, n] of Object.entries(next || {})) await this.counterSource().advanceToAtLeast(id, n);
-            this._setProofs(url, [...this._proofs(url), ...take]);
-            this._save();
-            row.added = sum(take);
-            try { await this._rotate(url); row.rotated = true; } catch { /* the coins are kept; rotating can be tried again */ }
-          }
+          for (const [id, n] of Object.entries(next || {})) await this.counterSource().advanceToAtLeast(id, n);
+          this._setProofs(url, [...this._proofs(url), ...take]);
+          this._save();
+          row.added = sum(take);
+          try { await this._rotate(url); row.rotated = true; } catch { /* the coins are kept; rotating can be tried again */ }
         } catch (e) {
           row.error = e?.message || "The mint did not answer.";
         }

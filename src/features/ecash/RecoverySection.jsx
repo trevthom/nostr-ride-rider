@@ -1,9 +1,10 @@
 // ════════════════════════════════════════════════════════════
 //  RECOVERY — The Account part for the 12-word recovery phrase of the ecash wallet (nostr/ecashRecovery.js, lib/recovery.js).
-//  The ecash is kept on this device. If the phone is lost, the 12 words bring the money back on a new one. The words ARE the money:
-//  they are shown only on request, are never sent anywhere, and the app never asks for them except on this screen.
+//  The ecash is kept on this device. If the phone is lost, the 12 words bring the money back on a new one (Restore my wallet, in
+//  Wallets: features/ecash/WalletStart.jsx + RestoreWallet.jsx). The words ARE the money: they are shown only on request, are never
+//  sent anywhere, and the app never asks for them except on the restore dialog.
 //
-//    <RecoveryFold />     the Account section (a Fold): write the words down, show them again, restore, "I lost my phone"
+//    <RecoveryFold />     the Account section (a Fold): write the words down, show them again, "I lost my phone"
 //    <RecoveryNotice />   a short warning at the top of Account while there is ecash and the words are not written down yet
 //
 //  Writing down: the 12 words are shown once in a numbered list; the person then types three of them back (asked by number) before
@@ -18,7 +19,6 @@ import Button from "../../ui/Button.jsx";
 import Icon from "../../ui/Icon.jsx";
 import { pickCheckPositions, checkAnswers } from "../../lib/recovery.js";
 import { mintLabel } from "../../lib/mints.js";
-import RestorePanel from "./RestorePanel.jsx";
 
 const EVENT = "nostrride-recovery";
 const SHOW_MS = 30000; // the words hide themselves after this long
@@ -124,7 +124,7 @@ function Panel() {
     const id = setTimeout(() => setShown(false), SHOW_MS);
     return () => clearTimeout(id);
   }, [shown]);
-  if (ecashOff) return <p className="text-sm text-neutral-500" role="status">The ecash wallet is not connected on this device. Connect it in Wallets first; then you can restore ecash here.</p>;
+  if (ecashOff) return <p className="text-sm text-neutral-500" role="status">This phone has no ecash wallet. Create or restore one in Wallets; then its 12 words are shown here.</p>;
   if (!recovery) return <p className="text-sm text-neutral-500" role="status">Loading your wallet…</p>;
 
   const safe = recovery.backedUp();
@@ -170,8 +170,6 @@ function Panel() {
         </div>
       )}
       {msg && <p className="text-sm text-neutral-700 mb-3" role="status">{msg}</p>}
-
-      <RestorePanel recovery={recovery} ecash={ecash} onRestored={(rows) => { if (rows.some((r) => r.added > 0) && !recovery.backedUp()) setSetup(true); }} />
 
       {setup && <SetupModal recovery={recovery} onClose={(done) => { setSetup(false); if (done) pushNotice("Your ecash is protected. Keep the paper safe."); }} />}
       <ConfirmDialog open={ask} title="Swap all your coins?" confirmLabel="Swap them" cancelLabel="Not now"

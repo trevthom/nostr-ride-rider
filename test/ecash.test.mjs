@@ -16,7 +16,7 @@ const q = await rider.fundStart(MINT, 5000);
 assert.match(q.invoice, /^lnbc5000n/);
 assert.deepEqual(await rider.claim(q.id), { state: "UNPAID", sats: 0 }, "not paid yet: nothing is minted");
 assert.equal(rider.balance(MINT), 0);
-net[MINT].quotes[q.id].state = "PAID"; // the rider pays the invoice (NWC or any Lightning wallet)
+net[MINT].quotes[q.id].state = "PAID"; // the rider pays the invoice (any Lightning wallet)
 assert.deepEqual(await rider.claim(q.id), { state: "ISSUED", sats: 5000 });
 assert.equal(rider.balance(MINT), 5000);
 assert.deepEqual(await rider.claim(q.id), { state: "ISSUED", sats: 0 }, "claiming twice adds nothing");

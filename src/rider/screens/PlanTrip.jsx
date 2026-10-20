@@ -12,6 +12,7 @@
 //  planning and returns to the home screen (resetPlan).
 // ════════════════════════════════════════════════════════════
 
+import { WalletPrompt } from "../../features/ecash/WalletStart.jsx";
 import { formatDistance, ratePerUnit, unitName } from "../../lib/units.js";
 import { useEffect, useRef, useState } from "react";
 import { useApp } from "../../state/AppContext.jsx";
@@ -127,6 +128,7 @@ function Idle() {
             ? `${drivers.length} driver${drivers.length === 1 ? "" : "s"} online nearby${eta ? ` · about ${eta} min away` : ""}`
             : "No drivers online nearby right now. You can still request a ride."}
         </p>
+        <WalletPrompt className="mt-3" />
       </Sheet>
     </MapPage>
   );
