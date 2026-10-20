@@ -197,16 +197,15 @@ export function AppProvider({ initialView, children }) {
     return () => { alive = false; if (off) off(); if (timer) clearInterval(timer); };
   }, [user?.publicKey, ecashOff]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Remove the ecash wallet from this device (swap the coins, then erase them and the phrase here), and the other way round.
-  const disconnectEcash = useCallback(async (opts) => {
-    if (!ecash || !offKey) return { swapped: 0 };
-    const out = await ecash.recovery.disconnect(opts);
+  // Remove the ecash wallet from this device (erase the coins and the phrase here; nothing is swapped).
+  const disconnectEcash = useCallback(async () => {
+    if (!ecash || !offKey) return;
+    await ecash.recovery.disconnect();
     const m = await import("../nostr/cashuMint.js");
     m.forgetWallet(user);
     setSetting(offKey, true);
     setEcash(null);
     setOffTick((t) => t + 1);
-    return out;
   }, [ecash, user, offKey]);
   // Create New Wallet: the wallet loads and makes its own 12 words (the screen shows them at once).
   const createEcash = useCallback(() => {

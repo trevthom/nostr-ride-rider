@@ -27,7 +27,6 @@ export default function GenderPref({ className = "" }) {
           </button>
         ))}
       </div>
-      <p className="text-neutral-500 text-xs mt-1.5">Those drivers show at the top of your list. Other drivers still appear below them.</p>
     </div>
   );
 }

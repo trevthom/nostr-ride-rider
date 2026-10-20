@@ -232,7 +232,7 @@ function Quote() {
           <div className="text-right">
             {quote ? (
               <>
-                <p className="text-[11px] text-neutral-500">Suggested</p>
+                <p className="text-[11px] text-neutral-500">Estimated</p>
                 <Money sats={suggestedSats} stacked className="font-bold text-lg" />
               </>
             ) : <span className="block w-14 h-6 rounded bg-neutral-200 animate-pulse" />}
@@ -241,11 +241,8 @@ function Quote() {
 
         {quote && (
           <div className="mt-3 rounded-2xl bg-neutral-100 px-4 py-3">
-            <p className="text-sm text-neutral-800">
-              You pay the driver's own rates as you ride: a base rate when the ride starts, then every mile and every minute. About <span className="font-semibold">{moneyText(suggestedSats, btcPrice)}</span> for this trip. Traffic can make it cost more.
-            </p>
             {typicals.length > 0 ? (
-              <div className="mt-3 pt-3 border-t border-neutral-200">
+              <div>
                 <p className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500 mb-1.5">Drivers nearby</p>
                 <ul className="flex flex-wrap gap-1.5">
                   {typicals.slice(0, 6).map((t) => (
@@ -257,8 +254,8 @@ function Quote() {
                 </ul>
               </div>
             ) : (
-              <p className="text-xs text-neutral-500 mt-2">
-                {`App rates: ${formatFiat(FARE_RATES.base, "USD")} base + ${formatFiat(ratePerUnit(FARE_RATES.perMile), "USD")}/${unitName()} + ${formatFiat(FARE_RATES.perMinute, "USD")}/min.`}
+              <p className="text-xs text-neutral-500">
+                {`Driver's rates: ${formatFiat(FARE_RATES.base, "USD")} base + ${formatFiat(ratePerUnit(FARE_RATES.perMile), "USD")}/${unitName()} + ${formatFiat(FARE_RATES.perMinute, "USD")}/min.`}
               </p>
             )}
           </div>
@@ -309,19 +306,15 @@ function Quote() {
 
         <GenderPref className="mt-4" />
 
+        <p className="text-sm font-semibold mt-4 mb-1.5">Notes</p>
         <input
           aria-label="Note for the driver"
           value={plan.notes}
           onChange={(e) => setPlan({ notes: e.target.value })}
           placeholder="Note for the driver (luggage, door, …)"
           maxLength={140}
-          className={`${inputCls} mt-3`}
+          className={inputCls}
         />
-
-        <div className="flex items-center gap-2 text-sm text-neutral-600 mt-3">
-          <Icon name="zap" size={16} className="text-[#f7931a]" />
-          You pay in ecash while you ride, from your wallet in Account.
-        </div>
 
         {error && <p className="text-red-600 text-sm mt-2">{error}</p>}
         <StickyActions className="mt-4">
@@ -329,10 +322,7 @@ function Quote() {
             {!quote ? "Finding route…" : <>Request ride · about {moneyText(suggestedSats, btcPrice)}</>}
           </Button>
         </StickyActions>
-        <Button variant="secondary" className="mt-2" onClick={resetPlan}>Cancel and go home</Button>
-        <p className="text-neutral-500 text-xs text-center mt-2">
-          Drivers who accept charge their own rates. You choose who to ride with, and drivers see only the approximate area until you do.
-        </p>
+        <Button variant="secondary" className="mt-2" onClick={resetPlan}>Cancel</Button>
       </Sheet>
     </MapPage>
   );

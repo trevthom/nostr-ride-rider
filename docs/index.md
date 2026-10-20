@@ -63,7 +63,7 @@ Needs internet for fonts, the map, and the relays. Location needs `https://` or 
 | Tabs | Ride · Activity · Account | Drive · Earnings · Account |
 | Account | Every setting is a section that opens and closes (closed at first; what you opened is remembered on the device) | The same |
 | Tab bar | Always visible, on every screen | Always visible, on every screen |
-| Home | "Where to?" → the suggested fare → request | GO button → request cards (accept or decline) |
+| Home | "Where to?" → the estimated fare → request | GO button → request cards (accept or decline) |
 | During a trip | Live car, ETA, **your ecash balance**, fare so far, paid, estimated total, start code, contact, **Finish ride**, **Add stop / update fare** | Route, arrived (within 150 m) / start code / **Finish ride**, fare and payments so far |
 | After a trip | Receipt (anything still owed), tip | Summary, waive part of the fare |
 
@@ -117,7 +117,7 @@ reverse. The Vite *mode* picks the app (`vite --mode rider|driver`).
 8. Either person taps **Finish ride** and confirms. The rider pays what the ride earned, up to that moment. The driver may waive part of the fare. There are no star ratings and no reviews (see [Vouches](#vouches-i-know-and-trust-this-person)).
 
 **Going back while planning.** The back arrow on *Plan your ride* goes one screen back: to the home screen, or to the fare quote if the rider came from there with *Edit*.
-The back arrow on the quote goes to the search page. **Cancel** on the search page, **Cancel and go home** under the *Request ride* button, the **X** on the quote and pin pages, and a tap on the *Ride* tab all cancel the planning and show the home screen.
+The back arrow on the quote goes to the search page. **Cancel** on the search page, **Cancel** under the *Request ride* button, the **X** on the quote and pin pages, and a tap on the *Ride* tab all cancel the planning and show the home screen.
 Nothing is published until the rider taps *Request ride*. The tab bar is visible on every screen, including the quote and *Finding your driver*.
 
 **Choosing a driver.** Each reply shows the driver's photo, name, the vouch badge (when someone you vouch for knows and trusts them), car, plate, **gender (when the driver gave one)**, price, rates and mint. The rider taps **Choose**, or
@@ -273,21 +273,18 @@ still calls unspent (NUT-09), and the money is back. No server, no account, no r
   **swaps them for fresh coins under the same phrase** (a copy of the old coins on a lost phone is spent). **If no mint knows a coin for the words** (a typo that still passes the check, the wrong mint, a mint that did not answer) **everything is undone**
   and the phone stays without a wallet, so a wrong guess leaves nothing behind. **The last phone to restore holds the money:** another phone that still uses the same words loses its coins (it drops them the next time it asks the mint).
   A phone that already has a wallet does not offer Restore; to restore other words there, first *Disconnect ecash from this device*.
-- **"I lost a phone: swap my coins"** (shown once the words are written down) does the same swap from the device that still has the wallet.
 - **A device whose coins were moved elsewhere shows the truth.** The wallet asks the mint which of its coins are spent (when it opens and every 5 minutes) and drops them (`syncSpent`), so an old phone stops
   showing money that a restore on another device moved. The mint is asked without holding the money lock, so a slow mint never holds up a payment.
-- **Disconnect ecash from this device** (*Account → Wallets*): for a phone you are about to lose, sell or stop trusting. The app first drops spent coins, then **swaps every coin for a new one** (a copy taken
-  earlier is worth nothing), then **erases the coins, the counters and the recovery phrase from this device** and remembers that the wallet is disconnected. The money stays at the mint and comes back with the 12 words.
-  It is **refused** while a payment is being sent, and while there is money and the words are **not written down** (that money would be lost). If a mint cannot be reached for the swap, the person may disconnect
-  anyway (a copy taken earlier could still be spent). It is not offered while a ride is running. While disconnected: a **driver cannot go online** and a **rider cannot confirm a driver** (nobody could be paid),
-  and the ecash part of Wallets offers **Create New Wallet** (new, empty, new 12 words) or **Restore my wallet** (the old 12 words bring the money back; that phone takes over).
-  If a phone may already have been compromised, use *I lost a phone: swap my coins* from a safe device, or restore on a safe device first (the coins on the old phone are then spent), then disconnect the old one.
+- **Disconnect ecash from this device** (*Account → Wallets*): for a phone you are about to lose, sell or stop trusting. The app drops spent coins, then **erases the coins, the counters and the recovery phrase from this device** and remembers that the wallet is disconnected.
+  **Nothing is swapped at the mint.** The money stays at the mint and comes back with the 12 words (*Restore my wallet*). It is **refused** while a payment is being sent, and while there is money and the words are **not written down** (that money would be lost).
+  It is not offered while a ride is running. While disconnected: a **driver cannot go online** and a **rider cannot confirm a driver** (nobody could be paid), and the ecash part offers **Create New Wallet** (new, empty, new 12 words) or **Restore my wallet** (the old 12 words bring the money back; that phone takes over).
+  A copy of the old coins made before the disconnect stays spendable until someone moves the money: restoring on a safe phone swaps every coin there, which makes the old copies worthless.
 - **Two devices with the same phrase** at the same time can pick the same counter. The mint then refuses ("already signed"); the app looks where the mint's records end, moves its counters past them
   and tries again. It does not take the other device's coins until the person restores there.
 - **Limits.** The mint must support restore (NUT-09) and must still exist. A top-up invoice paid but not yet collected when the phone was lost is not covered. The list of payments is not restored.
   Whoever has the 12 words can take the ecash, so they belong on paper, not in a photo, a note or a cloud.
 - Tests: `test/recovery.test.mjs` (words, the NUT-13 specification vector, the encrypted box), `test/restore.test.mjs` (the real Cashu client against a local mint that remembers what it signed:
-  restore under a new phrase, a sent token not brought back, old copies spent, a stale device dropping spent coins, disconnect (swap, wipe, refusals), a crash between "signed" and "saved", counters, two devices,
+  restore under a new phrase, a sent token not brought back, old copies spent, a stale device dropping spent coins, disconnect (wipe, no swap, refusals), a crash between "signed" and "saved", counters, two devices,
   old coins moved, no phrase on the wire), `scripts/e2e/recovery.mjs` (the screens, a fresh browser, new words, disconnect and connect, no phrase on any relay), `scripts/e2e/disconnect.mjs` (a driver's GO while disconnected).
 
 ### What is built and what is not
@@ -340,7 +337,7 @@ still calls unspent (NUT-09), and the money is back. No server, no account, no r
 - Both screens use the trip as the request publishes it (miles to a tenth), so the cents match.
 
 ## The fare (each driver's own rates)
-- The rider's quote screen shows the **suggested price** (the middle of the nearby drivers' fares, or the app's formula with no driver near) and the drivers nearby. The request carries
+- The rider's quote screen shows the **estimated price** (the middle of the nearby drivers' fares, or the app's formula with no driver near) and the drivers nearby. The request carries
   `fareMode: "standard"` and the estimate (`fareSats`, in sats). A driver's reply is an offer with `mode: "metered"`: the price in it is only that driver's estimate, because the
   ride is paid tick by tick at the rates in the offer.
 - **The rider names no price and a driver makes no counter-offer.** (Earlier versions had a *flat price*: the rider typed an amount and a driver accepted it or countered with a higher one.

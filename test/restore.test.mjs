@@ -3,7 +3,7 @@
 //   • every coin the wallet makes is under the phrase; after "the phone was lost", the same phrase on a new device (Restore my wallet)
 //     brings the balance back under the SAME phrase (nothing is swept into another one); the lost phone is left with spent coins
 //   • a device whose coins were moved elsewhere drops them from its balance (syncSpent)
-//   • "Disconnect": coins swapped, then wallet and phrase erased on the device; refused while money is unprotected or a payment is in flight
+//   • "Disconnect": wallet and phrase erased on the device, nothing swapped at the mint; refused while money is unprotected or a payment is in flight
 //   • a token already SENT to someone is not brought back (it uses random secrets), and the driver can still redeem it
 //   • after a restore every coin is swapped for a fresh one, so a copy on the lost phone is worth nothing
 //   • a crash between "the mint signed" and "the wallet saved" loses nothing
@@ -133,16 +133,6 @@ try {
   await lost2.wallet.restore([mint.url]); // a restore on a phone that already uses the phrase takes everything the phrase still owns (and swaps it)
   assert.equal(lost2.wallet.balance(mint.url), 40 + 50 + 700, "two phones on one phrase: the last restore holds it all (the 700 sat on the restore above): " + lost2.wallet.balance(mint.url));
 
-  // ── "I lost my phone" from another device: swap every coin ──
-  note("\"I lost my phone\" from another device: swap every coin");
-  const F = device();
-  await fund(F, mint.url, 800);
-  const copy = F.wallet.state.mints[mint.url].proofs.map((x) => ({ ...x }));
-  const swapped = await F.recovery.rotateAll();
-  assert.equal(swapped[0].error, "");
-  assert.equal(F.wallet.balance(mint.url), 800);
-  assert.ok((await cashuMint(mint.url).states(copy)).every((s) => s === "SPENT"), "the copy is spent");
-
   // ── Old coins (random secrets) are moved under the phrase once it is written down ──
   note("Old coins (random secrets) are moved under the phrase once it is writt");
   const oldStore = memStore();
@@ -199,19 +189,18 @@ try {
   assert.equal(makeSeedBox(user).load().phrase, phrase, "and the first wallet is untouched");
   forgetWallet(user);
 
-  // ── Disconnect: swap the coins, then erase the wallet and the phrase from this device ──
-  note("Disconnect: swap the coins, then erase the wallet and the phrase from this device");
+  // ── Disconnect: erase the wallet and the phrase from this device (nothing is swapped at the mint) ──
+  note("Disconnect: erase the wallet and the phrase from this device, with no swap");
   const X = device();
   await fund(X, mint.url, 2000);
-  const copyX = X.wallet.state.mints[mint.url].proofs.map((p) => ({ ...p })); // what a thief who copied the device would hold
+  const copyX = X.wallet.state.mints[mint.url].proofs.map((p) => ({ ...p }));
   await assert.rejects(() => X.recovery.disconnect(), (e) => e.code === "phrase", "money and the words not written down: refused");
   assert.equal(X.wallet.balance(mint.url), 2000, "nothing was touched by the refusal");
   assert.ok(X.box.load(), "and the phrase is still there");
   await X.recovery.confirmBackup();
   const phraseX = X.recovery.phrase();
-  const gone = await X.recovery.disconnect();
-  assert.equal(gone.swapped, 2000);
-  assert.ok((await cashuMint(mint.url).states(copyX)).every((s) => s === "SPENT"), "a copy taken before is worth nothing");
+  await X.recovery.disconnect();
+  assert.ok((await cashuMint(mint.url).states(copyX)).every((s) => s === "UNSPENT"), "nothing was swapped at the mint: the coins are untouched");
   assert.equal(X.wallet.total(), 0, "the coins are gone from the device");
   assert.deepEqual(X.wallet.state.counters, {}, "and the counters");
   assert.equal(X.box.load(), null, "and the recovery phrase");
@@ -219,20 +208,6 @@ try {
   const X2 = device({ phrase: phraseX });
   await X2.wallet.restore([mint.url]);
   assert.equal(X2.wallet.balance(mint.url), 2000, "the money was not lost: the 12 words bring it back");
-
-  // A mint that cannot be reached for the swap: refused, unless the person goes on anyway; the money is still recoverable.
-  const flaky = (url, o) => { const a = cashuMint(url, o); return { ...a, async receive() { throw new Error("the mint did not answer"); } }; };
-  const Y = device({ adapter: flaky });
-  await fund(Y, mint.url, 500);
-  await Y.recovery.confirmBackup();
-  const phraseY = Y.recovery.phrase();
-  await assert.rejects(() => Y.recovery.disconnect(), (e) => e.code === "swap" && /Try again, or disconnect anyway/.test(e.message));
-  assert.equal(Y.wallet.balance(mint.url), 500, "a failed swap changes nothing");
-  assert.ok(Y.box.load(), "the phrase is still here too");
-  await Y.recovery.disconnect({ force: true });
-  assert.equal(Y.wallet.total(), 0);
-  assert.equal(Y.box.load(), null);
-  assert.equal(await under(phraseY), 500, "going on anyway still leaves the money recoverable from the 12 words");
 
   // A payment still being sent: refused, and nothing is lost.
   const Z = device();
@@ -244,9 +219,9 @@ try {
   Z.wallet.settle(sending.id);
   await Z.recovery.disconnect();
   assert.equal(Z.wallet.total(), 0);
-  // No money: nothing to protect, nothing to swap.
+  // No money: nothing to protect.
   const W = device();
-  assert.deepEqual(await W.recovery.disconnect(), { swapped: 0 });
+  await W.recovery.disconnect();
   assert.equal(W.box.load(), null);
 
   // ── The counter source obeys the Cashu client's rules ──

@@ -1,12 +1,11 @@
 // ════════════════════════════════════════════════════════════
 //  APPEARANCE — Two dark switches: "Dark Mode (application)" for the screens and "Dark Mode (map)" for the map only, and the
-//  distance units (Units: miles or kilometers, lib/units.js). Each saves and applies as soon as it is flipped: there is no Save button
+//  distance units (a third switch: off = miles, on = kilometers, lib/units.js). Each saves and applies as soon as it is flipped: there is no Save button
 //  (lib/appearance.js and lib/units.js keep them on this device).
 // ════════════════════════════════════════════════════════════
 
 import { useDark, useDarkMap } from "../../lib/appearance.js";
 import { SectionLabel, Toggle } from "../../ui/Parts.jsx";
-import { SubTitle } from "../../ui/Fold.jsx";
 import UnitsSection from "./UnitsSection.jsx";
 
 export default function AppearanceSection() {
@@ -24,10 +23,7 @@ export default function AppearanceSection() {
           <p className="flex-1 min-w-0 text-[15px] font-medium">Dark Mode (map)</p>
           <Toggle checked={darkMap} onChange={setDarkMap} label="Dark Mode (map)" />
         </div>
-        <div>
-          <SubTitle>Units</SubTitle>
-          <UnitsSection />
-        </div>
+        <UnitsSection />
       </div>
     </section>
   );

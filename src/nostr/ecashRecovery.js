@@ -13,8 +13,7 @@
 //    wallet.recovery.phrase()            the 12 words (show only on request; never log, never send)
 //    wallet.recovery.backedUp()          true after confirmBackup()
 //    wallet.recovery.confirmBackup()     the person has the words on paper; old coins are moved under the phrase
-//    wallet.recovery.rotateAll()         "I lost my phone": swap every coin for a fresh one so a copy is worth nothing
-//    wallet.recovery.disconnect({force}) remove the wallet from this device (swap, then erase the coins and the phrase here)
+//    wallet.recovery.disconnect()        remove the wallet from this device (erase the coins and the phrase here; no swap)
 // ════════════════════════════════════════════════════════════
 
 import { EcashError } from "./ecash.js";
@@ -58,37 +57,17 @@ export function makeRecovery({ box, newAdapter }) {
       return wallet.migrate();
     },
 
-    // Remove the wallet from THIS device: the coins are swapped for new ones first (a copy taken earlier is then worth nothing), then the
-    // coins, the counters and the recovery phrase are erased here. The money stays at the mint and comes back with the 12 words.
+    // Remove the wallet from THIS device: the coins, the counters and the recovery phrase are erased here, and nothing else happens (no swap at the
+    // mint). The money stays at the mint and comes back with the 12 words (Restore my wallet).
     // Refused while a payment is being sent, and refused while there is money and the words were not written down (it would be lost).
-    // `force` goes on even if a mint could not be reached to swap the coins (a copy taken earlier could still be spent).
-    async disconnect({ force = false } = {}) {
+    async disconnect() {
       await wallet.syncSpent().catch(() => {}); // coins that were moved elsewhere (a restore on another device) are not money here any more
       await wallet.recoverPending().catch(() => {}); // a token made but never published goes back into the wallet
       if (wallet.pendingList().length) throw new EcashError("busy", "A payment is still being sent. Try again in a minute.");
-      const total = wallet.total();
-      if (total > 0 && !rec.backedUp) throw new EcashError("phrase", "Write down your 12 words first (Recovery phrase). Without them, disconnecting would lose this money.", true);
-      let swapped = 0;
-      if (total > 0) {
-        const failed = [];
-        for (const row of await recovery.rotateAll()) {
-          if (row.error) failed.push(row.mint); else swapped += row.sats || 0;
-        }
-        if (failed.length && !force) throw Object.assign(new EcashError("swap", `Could not swap the coins at ${failed.join(", ")}: the mint did not answer. Try again, or disconnect anyway (a copy of the old coins could still be spent).`), { failed });
-      }
+      if (wallet.total() > 0 && !rec.backedUp) throw new EcashError("phrase", "Write down your 12 words first (Recovery phrase). Without them, disconnecting would lose this money.", true);
       wallet.wipe();
       box.erase?.();
       mints.clear();
-      return { swapped };
-    },
-
-    async rotateAll() {
-      const rows = [];
-      for (const url of Object.keys(wallet.balances())) {
-        try { rows.push({ mint: url, ...(await wallet.rotate(url)), error: "" }); }
-        catch (e) { rows.push({ mint: url, sats: wallet.balance(url), error: e?.message || "The mint did not answer." }); }
-      }
-      return rows;
     },
   };
   return recovery;

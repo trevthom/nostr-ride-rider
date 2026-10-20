@@ -4,7 +4,7 @@
 //  Wallets: features/ecash/WalletStart.jsx + RestoreWallet.jsx). The words ARE the money: they are shown only on request, are never
 //  sent anywhere, and the app never asks for them except on the restore dialog.
 //
-//    <RecoveryFold />     the Account section (a Fold): write the words down, show them again, "I lost my phone"
+//    <RecoveryFold />     the Account section (a Fold): write the words down, show them again
 //    <RecoveryNotice />   a short warning at the top of Account while there is ecash and the words are not written down yet
 //
 //  Writing down: the 12 words are shown once in a numbered list; the person then types three of them back (asked by number) before
@@ -14,11 +14,10 @@
 import { useEffect, useState } from "react";
 import { useApp } from "../../state/AppContext.jsx";
 import Fold, { openFold } from "../../ui/Fold.jsx";
-import { ConfirmDialog, Modal, inputCls } from "../../ui/Parts.jsx";
+import { Modal, inputCls } from "../../ui/Parts.jsx";
 import Button from "../../ui/Button.jsx";
 import Icon from "../../ui/Icon.jsx";
 import { pickCheckPositions, checkAnswers } from "../../lib/recovery.js";
-import { mintLabel } from "../../lib/mints.js";
 
 const EVENT = "nostrride-recovery";
 const SHOW_MS = 30000; // the words hide themselves after this long
@@ -111,9 +110,6 @@ function Panel() {
   const recovery = ecash?.recovery;
   const [setup, setSetup] = useState(false);
   const [shown, setShown] = useState(false);
-  const [ask, setAsk] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState("");
   useEffect(() => {
     const on = (e) => { if (e.detail === "setup") setSetup(true); };
     window.addEventListener(EVENT, on);
@@ -128,15 +124,6 @@ function Panel() {
   if (!recovery) return <p className="text-sm text-neutral-500" role="status">Loading your wallet…</p>;
 
   const safe = recovery.backedUp();
-  const rotate = async () => {
-    setAsk(false); setBusy(true); setMsg("");
-    const rows = await recovery.rotateAll();
-    setBusy(false);
-    const bad = rows.filter((r) => r.error);
-    setMsg(bad.length ? `Could not swap the ecash at ${bad.map((r) => mintLabel(r.mint)).join(", ")}. Try again when the mint answers.` : rows.length ? "Done. Every coin is new. Copies of the old coins are worth nothing." : "There is no ecash to swap.");
-    if (!bad.length) pushNotice("Your ecash was swapped for new coins.");
-  };
-
   return (
     <>
       <p className="text-sm text-neutral-500 mb-3">
@@ -165,16 +152,10 @@ function Panel() {
           ) : (
             <Button variant="secondary" size="md" onClick={() => setShown(true)}>Show my 12 words</Button>
           )}
-          <Button variant="secondary" size="md" onClick={() => setAsk(true)} loading={busy}>I lost a phone: swap my coins</Button>
-          <p className="text-xs text-neutral-500">Swapping makes every old copy of your coins worth nothing. It costs the mint’s small swap fee.</p>
         </div>
       )}
-      {msg && <p className="text-sm text-neutral-700 mb-3" role="status">{msg}</p>}
 
       {setup && <SetupModal recovery={recovery} onClose={(done) => { setSetup(false); if (done) pushNotice("Your ecash is protected. Keep the paper safe."); }} />}
-      <ConfirmDialog open={ask} title="Swap all your coins?" confirmLabel="Swap them" cancelLabel="Not now"
-        message="Every coin in this wallet is swapped for a new one. Anyone who copied the old ones, for example from a lost phone, ends up with nothing."
-        onConfirm={rotate} onCancel={() => setAsk(false)} />
     </>
   );
 }

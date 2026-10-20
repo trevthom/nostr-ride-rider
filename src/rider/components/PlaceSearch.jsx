@@ -81,7 +81,7 @@ export default function PlaceSearch({ pickup, dropoff, here, near, recents, onCh
         </button>
         <h1 className="text-xl font-bold">Plan your ride</h1>
         {onExit && (
-          <button type="button" onClick={onExit} aria-label="Cancel and go home" className="ml-auto px-3 py-2 -mr-1 rounded-full text-[15px] font-semibold active:bg-neutral-100">
+          <button type="button" onClick={onExit} className="ml-auto px-3 py-2 -mr-1 rounded-full text-[15px] font-semibold active:bg-neutral-100">
             Cancel
           </button>
         )}
