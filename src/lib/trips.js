@@ -7,7 +7,9 @@
 //    activeRideFor(requests, me)   rider: my open or running request
 //    activeDriveFor(requests, me)  driver: the ride I am driving now
 //    offersForRide(request)        offers the rider can still pick (not stale)
-//    rankOffers(offers, pref)      put drivers of the rider's preferred gender first
+//    onlyPreferredOffers(offers, pref)  keep the offers of drivers who declared the rider's preferred gender ("Female only" / "Male only")
+//    isDirected(request)           the rider sent this request to chosen drivers only (browse list, map, or "notify nearest")
+//    driverDeclines(request)       the drivers who turned this request down; driverDeclineEvent(request) is the event a driver sends
 //    offerFrom(request, driver)    one driver's newest offer, however old
 //    pendingOfferFor(me)           driver: my offer still waiting on a rider
 //    acceptFor(request, driver)    the rider's RIDE_ACCEPT sent to this driver
@@ -131,19 +133,45 @@ export function offersForRide(request) {
 }
 
 // The gender a driver declared: in their offer, else in their profile. "" if none.
-// It is self-declared and optional, so it only orders the list; it never hides a driver.
+// It is self-declared and optional. A rider who asks for "Female only" or "Male only" sees only drivers who declared that gender.
 export function offerGender(offer) {
   const g = parse(offer)?.gender;
   if (g === "male" || g === "female") return g;
   return getProfile(offer.pubkey)?.gender || "";
 }
 
-// Put drivers of the preferred gender ("male" | "female") first. Everyone else stays on the
-// list, in the same order. With no preference the list is returned unchanged.
-export function rankOffers(offers, pref) {
+// With a preference ("male" | "female") only the offers of drivers who declared that gender stay; a driver with no declared gender is
+// not shown. With no preference the list is returned unchanged.
+export function onlyPreferredOffers(offers, pref) {
   if (pref !== "male" && pref !== "female") return offers;
-  const rank = (o) => (offerGender(o) === pref ? 0 : 1);
-  return offers.map((o, i) => ({ o, i })).sort((a, b) => rank(a.o) - rank(b.o) || a.i - b.i).map((x) => x.o);
+  return offers.filter((o) => offerGender(o) === pref);
+}
+
+// ── A request sent to chosen drivers only ──
+// The rider picked drivers from the list or the map (or ticked "Notify nearest driver immediately"). Such a request carries `directed: true`;
+// it reaches only the drivers the rider named (lib/audienceStore.js), and AudienceSync does not spread it to others.
+export const isDirected = (request) => parse(request)?.directed === true;
+
+const dOf = (e) => (e.tags.find((t) => t[0] === "d") || [])[1];
+
+// The drivers who turned the request down. A decline counts only from the driver who signed it (it can only take THAT driver off the list).
+export function driverDeclines(request) {
+  const ids = rideVersions(request).map((e) => e.id);
+  const out = new Set();
+  relay.query({ kinds: [EVENT_KINDS.RIDE_DRIVER_DECLINE], "#e": ids }).forEach((e) => {
+    if (e.pubkey !== request.pubkey) out.add(e.pubkey);
+  });
+  return out;
+}
+
+// The event a driver sends to say no to a request that was sent to them: { kind, content, tags } for publish(). The rider's app shows it.
+export function driverDeclineEvent(request) {
+  const latest = rideVersions(request)[0] || request;
+  return {
+    kind: EVENT_KINDS.RIDE_DRIVER_DECLINE,
+    content: { requestId: latest.id },
+    tags: [["e", latest.id], ["p", request.pubkey], ["d", "driver-decline-" + dOf(request)], ["t", "driver-decline"]],
+  };
 }
 
 // One driver's newest offer on a ride, however old (the price and plate of

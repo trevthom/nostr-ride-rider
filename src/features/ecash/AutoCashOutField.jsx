@@ -9,14 +9,14 @@ import { useState } from "react";
 import { useApp } from "../../state/AppContext.jsx";
 import { CURRENCIES, digitsOf } from "../../lib/currency.js";
 import { satsFromFiat } from "../../lib/currency.js";
-import { getAutoCashOut, setAutoCashOut, AUTO_MAX } from "../../lib/autocashout.js";
+import { getAutoCashOut, setAutoCashOut, autoThresholdSats, AUTO_MAX } from "../../lib/autocashout.js";
 import { AUTO_EVENT } from "./useAutoCashOut.js";
 import { inputCls } from "../../ui/Parts.jsx";
 import { IS_DRIVER_APP } from "../../config/app.js";
 import { useCashOutTo } from "./useCashOutTo.js";
 
 export default function AutoCashOutField() {
-  const { user, currency, priceFor } = useApp();
+  const { user, currency, priceFor, ecash } = useApp();
   const { pinned, state } = useCashOutTo();
   const ready = state === "ok" && !!pinned;
   const saved = getAutoCashOut(user.publicKey);
@@ -31,7 +31,10 @@ export default function AutoCashOutField() {
   const commit = () => {
     if (!okAmount) return setNote(`Enter an amount between 0 and ${AUTO_MAX.toLocaleString()}, or leave it empty to turn this off.`);
     setAutoCashOut(user.publicKey, text.trim() === "" ? 0 : amount, code);
-    setNote(text.trim() === "" ? "Automatic cash out is off." : "Saved.");
+    // Tell the person BEFORE money moves if they already hold that much: it is sent right away.
+    const need = text.trim() === "" ? null : autoThresholdSats({ amount, code }, price);
+    const over = need != null && ecash && Object.values(ecash.balances()).some((sats) => sats >= need);
+    setNote(text.trim() === "" ? "Automatic cash out is off." : over ? "Saved. You already hold that much, so the app sends it to your cash out location now." : "Saved.");
     window.dispatchEvent(new Event(AUTO_EVENT));
   };
 

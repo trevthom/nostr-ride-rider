@@ -9,7 +9,7 @@
 //    • back up the wallet as tokens (ecash is cash: whoever holds a token owns it)
 //    (the 12-word recovery phrase that brings the ecash back on a new phone is its own Account part: RecoverySection.jsx)
 //    • Cash out (a tap) and "Automatically cash out at: $" (AutoCashOutField, runs in useAutoCashOut) in both faces. Both send to the cash out address PINNED
-//      on this device (lib/cashoutto.js); a tap on a profile address this device never confirmed asks first.
+//      on this device (lib/cashoutto.js). Nothing asks the person to confirm an address.
 //    • Send ecash (SendEcash): a token for another ecash wallet, or a Lightning invoice / address
 //    • Disconnect ecash from this device: the coins and the recovery phrase are erased HERE (nothing is swapped); the money stays at the mint and
 //      comes back with the 12 words.
@@ -20,7 +20,7 @@
 import { useState } from "react";
 import { useApp } from "../../state/AppContext.jsx";
 import { IS_DRIVER_APP } from "../../config/app.js";
-import { getCashOutTo, setCashOutTo, cleanAddress } from "../../lib/cashoutto.js";
+import { adoptProfileAddress } from "../../lib/cashoutto.js";
 import { SectionLabel, ConfirmDialog, inputCls } from "../../ui/Parts.jsx";
 import Button from "../../ui/Button.jsx";
 import Icon from "../../ui/Icon.jsx";
@@ -45,7 +45,6 @@ export default function EcashSection({ locked = false, children = null }) {
   const [busy, setBusy] = useState("");
   const [backup, setBackup] = useState("");
   const [askOff, setAskOff] = useState(false);
-  const [askOut, setAskOut] = useState(null); // { url, address }: a tap on Cash out with an address this device has not confirmed
   const { pinned } = useCashOutTo();
   const draftUrl = cleanMintUrl(draft);
   const balances = ecash ? ecash.balances() : {};
@@ -82,21 +81,24 @@ export default function EcashSection({ locked = false, children = null }) {
     setBusy("");
   };
 
-  // Money goes to the address pinned on this device. A profile address this device never confirmed is shown first: "is this yours?"
-  const tapCashOut = (url) => {
-    const to = getCashOutTo(user.publicKey);
-    if (to) return cashOut(url, to);
-    setAskOut({ url, address: cleanAddress(user.lud16) });
-  };
-  const cashOut = async (url, to) => {
+  // Cash out (a tap): everything held at each mint goes to the address pinned on this device. A device with no pin takes the profile's address; nobody is asked.
+  // With no address at all the person is told where to set one.
+  const tapCashOut = async () => {
+    const to = adoptProfileAddress(user.publicKey, user.lud16);
+    if (!to) return setMsg("Set your cash out location (a Lightning address) below, then tap Cash out.");
     setBusy("out");
     setMsg("");
+    let sent = 0, fee = 0;
     try {
-      const r = await ecash.cashOut(url, async (sats) => (await requestInvoice(to, sats, "NostrRide cash out")).pr);
-      setMsg(`Sent ${moneyText(r.paidSats, btcPrice)} to ${to}. Mint fee: ${r.feeSats} sats.`);
-      pushNotice("Cash out sent.");
+      for (const [url, sats] of Object.entries(ecash.balances())) {
+        if (!(sats > 0)) continue;
+        const r = await ecash.cashOut(url, async (amount) => (await requestInvoice(to, amount, "NostrRide cash out")).pr);
+        sent += r.paidSats; fee += r.feeSats;
+      }
+      if (sent > 0) { setMsg(`Sent ${moneyText(sent, btcPrice)} to ${to}. Mint fee: ${fee} sats.`); pushNotice("Cash out sent."); }
+      else setMsg("There is nothing to cash out yet.");
     } catch (e) {
-      setMsg(e.message || "The cash out failed. Your ecash is still here.");
+      setMsg(sent > 0 ? `Sent ${moneyText(sent, btcPrice)} to ${to}. The rest did not go: ${e.message || "the cash out failed"} Your ecash is still here.` : e.message || "The cash out failed. Your ecash is still here.");
     }
     setBusy("");
   };
@@ -143,16 +145,12 @@ export default function EcashSection({ locked = false, children = null }) {
               <div key={url} className="flex items-center gap-2 mt-3 text-sm">
                 <span className="flex-1 min-w-0 truncate text-neutral-600">{mintLabel(url)}</span>
                 <span className="font-semibold tabular-nums">{sats.toLocaleString()} sats</span>
-                {(pinned || user.lud16) && (
-                  <button type="button" onClick={() => tapCashOut(url)} disabled={busy === "out" || locked} className="text-xs font-semibold underline disabled:text-neutral-400">
-                    {busy === "out" ? "Sending…" : "Cash out"}
-                  </button>
-                )}
               </div>
             ))}
             <div className="flex gap-2 mt-4">
               <Button size="md" onClick={() => setAdding(true)}><Icon name="zap" size={16} /> Add funds</Button>
               <Button size="md" variant="outline" onClick={() => setSending(true)} disabled={locked || total <= 0}>Send</Button>
+              <Button size="md" variant="outline" onClick={tapCashOut} loading={busy === "out"} disabled={locked || total <= 0}>Cash out</Button>
             </div>
             {total > 0 && !pinned && !user.lud16 && <p className="text-xs text-amber-700 mt-2">Set a cash out location (a Lightning address) below to cash out.</p>}
             {locked && <p className="text-xs text-neutral-500 mt-2">Cash out and sending are paused while a ride is running.</p>}
@@ -214,9 +212,6 @@ export default function EcashSection({ locked = false, children = null }) {
       )}
       {adding && <AddFunds mint={mint} onClose={() => setAdding(false)} />}
       {sending && <SendEcash onClose={() => setSending(false)} />}
-      <ConfirmDialog open={!!askOut} title="Cash out to this address?" confirmLabel="Yes, it is mine" cancelLabel="Cancel"
-        message={askOut ? `Your ecash will be sent to ${askOut.address}. Only continue if this address is yours. This device will remember it as your cash out location.` : ""}
-        onConfirm={() => { const a = askOut; setAskOut(null); setCashOutTo(user.publicKey, a.address); cashOut(a.url, a.address); }} onCancel={() => setAskOut(null)} />
       <ConfirmDialog open={askOff} title="Disconnect ecash from this device?" confirmLabel="Disconnect" cancelLabel="Keep it"
         message={`The wallet and its 12 words are erased from this device.${total > 0 ? ` ${moneyText(total, btcPrice)} stays at the mint: you get it back with Restore my wallet and your 12 words.` : ""}`}
         onConfirm={disconnect} onCancel={() => setAskOff(false)} />

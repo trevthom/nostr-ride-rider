@@ -38,3 +38,14 @@ export function audienceFor(content, people, { me, blocked = [], limit = AUDIENC
   take(pool, limit - out.length);
   return out;
 }
+
+// The online driver closest to `point` ({lat,lng}): the presence entry, or null when there is none. ("Notify nearest driver immediately".)
+export function nearestDriver(drivers, point) {
+  if (!point || typeof point.lat !== "number" || typeof point.lng !== "number") return null;
+  let best = null, bestMiles = Infinity;
+  for (const d of drivers || []) {
+    const miles = haversineDistance(point.lat, point.lng, d.lat, d.lng);
+    if (Number.isFinite(miles) && miles < bestMiles) { best = d; bestMiles = miles; }
+  }
+  return best;
+}

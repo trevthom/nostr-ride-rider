@@ -20,6 +20,7 @@ import { syncVouches } from "../nostr/vouchSync.js";
 import MilesSync from "../features/profile/MilesSync.jsx";
 import AudienceSync from "./AudienceSync.jsx";
 import { audienceFor } from "../lib/audience.js";
+import { onlyPreferred } from "../lib/gender.js";
 import { trustFor } from "../lib/vouches.js";
 import { getPeople, getAudience, addAudience, answerersOf } from "../lib/audienceStore.js";
 import { useBackup } from "./useBackup.js";
@@ -287,7 +288,7 @@ export function AppProvider({ initialView, children }) {
   // `localOnly` keeps it in the cache (replies to demo data must not
   // reach public relays) and resolves to false.
   const publish = useCallback(
-    (kind, content, tags, { localOnly = false, durable = false } = {}) => {
+    (kind, content, tags, { localOnly = false, durable = false, audience = null } = {}) => {
       if (!user?.sk) return Promise.resolve(false);
       // Tag every event so other devices can tell our events apart from
       // unrelated apps that reuse the same kind numbers on public relays.
@@ -305,7 +306,13 @@ export function AppProvider({ initialView, children }) {
         const d = (tagged.find((t) => t[0] === "d") || [])[1];
         let c = null;
         try { c = typeof content === "string" ? JSON.parse(content) : content; } catch { /* no audience */ }
-        const asked = c && c.status === "requested" ? audienceFor(c, getPeople(), { me: user.publicKey, blocked, trusted: (pk) => !!trustFor(pk, user.publicKey) }) : [];
+        // `audience` (a list of drivers) = the rider chose these drivers: the request goes to them and nobody else (lib/trips.js isDirected).
+        // Otherwise it goes to the online drivers near the pickup; a rider who asked for "Female only" / "Male only" sends it only to those.
+        const asked = Array.isArray(audience)
+          ? audience.filter((pk) => /^[0-9a-f]{64}$/.test(pk) && pk !== user.publicKey)
+          : c && c.status === "requested" && !c.directed
+            ? audienceFor(c, onlyPreferred(getPeople(), getSetting("genderPref", "")), { me: user.publicKey, blocked, trusted: (pk) => !!trustFor(pk, user.publicKey) })
+            : [];
         to.push(...asked, ...getAudience(d), ...answerersOf(d, user.publicKey));
         addAudience(d, asked);
       }

@@ -13,6 +13,8 @@ import { audienceFor, AUDIENCE_LIMIT } from "../lib/audience.js";
 import { trustFor } from "../lib/vouches.js";
 import { setPeople, getPeople, getAudience, addAudience, answerersOf } from "../lib/audienceStore.js";
 import { rideStatus, rideExpiryMs } from "../lib/rides.js";
+import { onlyPreferred } from "../lib/gender.js";
+import { getSetting } from "../config/relays.js";
 
 const parse = (e) => { try { return JSON.parse(e.content); } catch { return null; } };
 const dOf = (e) => (e.tags.find((t) => t[0] === "d") || [])[1];
@@ -42,9 +44,10 @@ export default function AudienceSync() {
       const d = dOf(r);
       const c = parse(r);
       if (!d || !c) continue;
+      if (c.directed) continue; // the rider chose the drivers for this request: it is never spread to others
       const have = new Set([...getAudience(d), ...answerersOf(d, me)]);
       // Only the places not yet taken: a request is sent to at most AUDIENCE_LIMIT people in all.
-      const fresh = audienceFor(c, getPeople().filter((x) => !have.has(x.pubkey)), { me, blocked, limit: AUDIENCE_LIMIT - have.size, trusted: (pk) => !!trustFor(pk, me) });
+      const fresh = audienceFor(c, onlyPreferred(getPeople(), getSetting("genderPref", "")).filter((x) => !have.has(x.pubkey)), { me, blocked, limit: AUDIENCE_LIMIT - have.size, trusted: (pk) => !!trustFor(pk, me) });
       if (!fresh.length) continue;
       addAudience(d, fresh);
       relay.sealTo(r, fresh);

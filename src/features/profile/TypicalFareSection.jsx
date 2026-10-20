@@ -73,7 +73,7 @@ export default function TypicalFareSection({ rates, onSave, locked = false }) {
     <section>
       <SectionLabel>Your rates</SectionLabel>
       <p className="text-sm text-neutral-500 mb-3">
-        Set your own rates in {currency}. A ride is paid as it runs: your base rate when it starts, then each {getUnits() === "km" ? "kilometer" : "mile"} and each minute. Riders see what you would charge for their trip, next to your name.
+        Riders see what you would charge for their trip, next to your name.
       </p>
       {locked && <p className="text-sm text-amber-800 bg-amber-50 rounded-xl px-3 py-2 mb-3" role="status">Your rates are frozen while a ride is running. You can change them when it ends.</p>}
       {saved && saved.currency !== currency && <p className="text-xs text-amber-700 mb-2" role="status">Your saved rates are in {saved.currency}. Save to use {currency} instead.</p>}
@@ -94,7 +94,6 @@ export default function TypicalFareSection({ rates, onSave, locked = false }) {
           ? <>A {formatDistance(5, { digits: 0 })}, 15 minute trip: <span className="font-semibold">{formatFiat(example, currency)}</span>.</>
           : "Enter all three rates."}
       </p>
-      <p className="text-xs text-neutral-500">There is no minimum fare: the ride costs exactly the base rate plus the miles and minutes.</p>
       {msg && <p className="text-red-600 text-xs mt-1" role="alert">{msg}</p>}
       <div className="flex items-center gap-4 mt-3">
         <button

@@ -12,7 +12,7 @@ import { useEffect, useRef } from "react";
 import { useApp } from "../../state/AppContext.jsx";
 import { requestInvoice } from "../../lib/lnurl.js";
 import { getAutoCashOut, autoCashOutDue } from "../../lib/autocashout.js";
-import { getCashOutTo, cashOutState, onCashOutToChange } from "../../lib/cashoutto.js";
+import { getCashOutTo, cashOutState, onCashOutToChange, adoptProfileAddress } from "../../lib/cashoutto.js";
 import { moneyText } from "../../ui/Money.jsx";
 
 export const AUTO_EVENT = "nostrride-autocashout";
@@ -33,11 +33,11 @@ export function useAutoCashOut({ locked = false } = {}) {
       const { locked: busy, user: u, priceFor: price, btcPrice: shown, pushNotice: notify } = latest.current;
       const choice = getAutoCashOut(u.publicKey);
       if (!choice) return;
-      const to = getCashOutTo(u.publicKey);
+      const to = adoptProfileAddress(u.publicKey, u.lud16); // the pinned address; a device with none takes the profile's
       const st = cashOutState({ profile: u.lud16, pinned: to });
-      if (st === "changed" || st === "unconfirmed") {
-        // The address was not confirmed on this device, or it was changed elsewhere: no money moves until the person decides (Account → Wallets).
-        if (!paused.current) { paused.current = true; notify(st === "changed" ? "Your cash out location was changed outside this device. Automatic cash out is paused. Open Account → Wallets to decide." : "Automatic cash out is paused until you confirm your cash out location in Account → Wallets."); }
+      if (st === "changed" || !to) {
+        // The address was changed elsewhere (or there is none): no money moves until the person decides (Account → Wallets).
+        if (!paused.current) { paused.current = true; if (st === "changed") notify("Your cash out location was changed outside this device. Automatic cash out is paused. Open Account → Wallets to decide."); }
         return;
       }
       paused.current = false;

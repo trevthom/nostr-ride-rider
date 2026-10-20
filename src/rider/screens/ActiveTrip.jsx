@@ -1,8 +1,9 @@
 // ════════════════════════════════════════════════════════════
 //  ACTIVE TRIP (before pickup) — What the rider sees after requesting:
-//    Searching     "Finding your driver…" while no one has replied
-//    ChooseDriver  drivers who accepted, each with their own rates (preferred gender first if
-//                  the rider asked, then fastest)
+//    Searching     "Finding your driver…" while no one has replied (a request sent to every driver nearby)
+//    Asked         a request the rider sent to chosen drivers (list, map, or "Notify nearest driver immediately") while none has accepted:
+//                  who was asked, who declined, and the list/map to ask another driver (components/DriverBrowser.jsx)
+//    ChooseDriver  drivers who accepted, each with their own rates (only the preferred gender if the rider asked, then fastest)
 //    ConfirmDriver the chosen driver's terms and the rider's ecash balance. There is no deposit:
 //                  the rider pays tick by tick once the ride starts.
 //  Once a driver is confirmed the ride is in_progress → OnTrip.jsx.
@@ -15,7 +16,10 @@ import { useRider } from "../state/RiderContext.jsx";
 import { getProfile } from "../../nostr/profiles.js";
 import { rideStatus } from "../../lib/rides.js";
 import { exactTrip } from "../../lib/privacy.js";
-import { offersForRide, offerGender, rankOffers } from "../../lib/trips.js";
+import { offersForRide, onlyPreferredOffers, isDirected, driverDeclines, declinedDrivers } from "../../lib/trips.js";
+import { getAudience } from "../../lib/audienceStore.js";
+import { rememberRates, seenRates, ratesChanged, rateDirection } from "../../lib/ratechange.js";
+import DriverBrowser from "../components/DriverBrowser.jsx";
 import { offerEstimate } from "../../lib/fare.js";
 import { normalizeTerms, unitSats } from "../../lib/ticks.js";
 import Icon from "../../ui/Icon.jsx";
@@ -41,9 +45,10 @@ const STUCK_MS = 15000; // how long the request must have waited before we say s
 
 export default function ActiveTrip({ request }) {
   const { user, liveTick, isBlockedPk } = useApp();
-  const { finishRide, focused, focusRide, genderPref, declineOffer } = useRider();
-  const [picked, setPicked] = useState(null); // offer id being confirmed
+  const { finishRide, focused, focusRide, genderPref, declineOffer, drivers, notifyDriver } = useRider();
+  const [picked, setPicked] = useState(null); // the driver being confirmed (their newest offer is shown: a driver may change it)
   const [asking, setAsking] = useState(false);
+  const [browsing, setBrowsing] = useState(false); // ask another driver, although a reply is already here
   void liveTick;
 
   const content = parse(request) || {};
@@ -52,9 +57,10 @@ export default function ActiveTrip({ request }) {
 
   if (status === "in_progress") return <OnTrip request={request} trip={trip} />;
 
-  // Never show a blocked driver. The rider's gender preference only changes the order.
-  const offers = rankOffers(offersForRide(request).filter((o) => !isBlockedPk(o.pubkey)), genderPref);
-  const chosen = offers.find((o) => o.id === picked);
+  // Never show a blocked driver. With "Female only" / "Male only" only the drivers who declared that gender stay.
+  const offers = onlyPreferredOffers(offersForRide(request).filter((o) => !isBlockedPk(o.pubkey)), genderPref);
+  const chosen = offers.find((o) => o.pubkey === picked);
+  const d = (request.tags.find((t) => t[0] === "d") || [])[1];
   const back = focused ? <FloatButton icon="chevron-left" label="Back to home" onClick={() => focusRide(null)} /> : null;
   const closeDialog = (
     <ConfirmDialog
@@ -72,10 +78,55 @@ export default function ActiveTrip({ request }) {
   if (chosen) {
     return <ConfirmDriver request={request} trip={trip} offer={chosen} onBack={() => setPicked(null)} onDecline={() => { setPicked(null); declineOffer(request, chosen); }} />;
   }
+
+  // A request sent to chosen drivers: who was asked, who said no, and the list / map to ask another driver.
+  const directed = isDirected(request);
+  const showAsked = directed && (!offers.length || browsing);
+  if (showAsked) {
+    const content = parse(request) || {};
+    const tripMiles = { miles: Number(content.distanceMiles) || 0, minutes: Number(content.durationMin) || 0 };
+    const said = driverDeclines(request), turnedDown = declinedDrivers(request);
+    const replied = new Set(offers.map((o) => o.pubkey));
+    const asked = new Set(getAudience(d));
+    const status = {};
+    for (const x of drivers) {
+      if (said.has(x.pubkey)) status[x.pubkey] = "declined";
+      else if (turnedDown.has(x.pubkey)) status[x.pubkey] = "passed";
+      else if (asked.has(x.pubkey)) status[x.pubkey] = "waiting";
+    }
+    const waitingNames = drivers.filter((x) => status[x.pubkey] === "waiting" && !replied.has(x.pubkey)).map((x) => x.name || "A driver");
+    const intro = waitingNames.length
+      ? `Waiting for a reply from ${waitingNames.join(", ")}. You can ask another driver too.`
+      : said.size
+        ? "That driver declined. Choose another driver."
+        : "Choose a driver to ask. They can accept or decline.";
+    return (
+      <>
+        <DriverBrowser
+          pickup={trip.pickup}
+          drivers={drivers.filter((x) => !replied.has(x.pubkey))}
+          trip={tripMiles}
+          status={status}
+          onRequest={(pk) => notifyDriver(request, pk, drivers.find((x) => x.pubkey === pk)?.rates)}
+          title="Choose a driver"
+          intro={intro}
+          fitKey={request.id}
+          top={back}
+          footer={
+            <div className="mt-3 space-y-2">
+              {offers.length > 0 && <Button size="md" onClick={() => setBrowsing(false)}>See replies ({offers.length})</Button>}
+              <Button variant="secondary" size="md" onClick={() => setAsking(true)}>Close request</Button>
+            </div>
+          }
+        />
+        {closeDialog}
+      </>
+    );
+  }
   if (offers.length) {
     return (
       <>
-        <ChooseDriver request={request} trip={trip} offers={offers} onPick={(o) => setPicked(o.id)} onDecline={(o) => declineOffer(request, o)} onCancel={() => setAsking(true)} top={back} />
+        <ChooseDriver request={request} trip={trip} offers={offers} onPick={(o) => setPicked(o.pubkey)} onDecline={(o) => declineOffer(request, o)} onCancel={() => setAsking(true)} onAskMore={directed ? () => setBrowsing(true) : null} top={back} />
         {closeDialog}
       </>
     );
@@ -149,8 +200,9 @@ function Searching({ request, trip, onCancel, top }) {
   );
 }
 
-function ChooseDriver({ request, trip, offers, onPick, onDecline, onCancel, top }) {
-  const { drivers, genderPref } = useRider();
+function ChooseDriver({ request, trip, offers, onPick, onDecline, onCancel, onAskMore = null, top }) {
+  const { drivers } = useRider();
+  const dTag = (request.tags.find((t) => t[0] === "d") || [])[1];
   const { prices: btcPrices } = useApp();
   const requestContent = parse(request);
   // The price shown is OUR estimate from the driver's rates and the trip, never the driver's own `priceSats` (lib/fare.js offerEstimate).
@@ -170,7 +222,7 @@ function ChooseDriver({ request, trip, offers, onPick, onDecline, onCancel, top 
         <ul className="divide-y divide-neutral-100">
           {offers.map((o, i) => {
             const c = parse(o);
-            const preferred = !!genderPref && offerGender(o) === genderPref;
+            const changed = ratesChanged(seenRates(dTag, o.pubkey), c.rates); // the rider saw other rates next to this driver when asking
             return (
               <li key={o.id} className="py-3">
                 <DriverInfo pubkey={o.pubkey} offerEvent={o} compact />
@@ -180,7 +232,7 @@ function ChooseDriver({ request, trip, offers, onPick, onDecline, onCancel, top 
                       {c.etaMinutes} min away
                       {fastest != null && c.etaMinutes === fastest && <span className="ml-2 text-[11px] bg-black text-white rounded-full px-2 py-0.5 align-middle">Fastest</span>}
                       {cheapest != null && estimates.get(o.id) === cheapest && <span className="ml-1.5 text-[11px] bg-[#e6f4ec] text-[#05683a] rounded-full px-2 py-0.5 align-middle">Lowest price</span>}
-                      {preferred && <span className="ml-1.5 text-[11px] bg-neutral-100 text-neutral-700 rounded-full px-2 py-0.5 align-middle">Your preference</span>}
+                      {changed && <span className="ml-1.5 text-[11px] bg-amber-50 text-amber-800 rounded-full px-2 py-0.5 align-middle">Rates changed</span>}
                     </p>
                     {estimates.get(o.id) != null && (
                       <p className="text-sm">
@@ -197,6 +249,7 @@ function ChooseDriver({ request, trip, offers, onPick, onDecline, onCancel, top 
             );
           })}
         </ul>
+        {onAskMore && <Button variant="secondary" size="md" className="mt-2" onClick={onAskMore}>Ask another driver</Button>}
         <Button variant="secondary" size="md" className="mt-2" onClick={onCancel}>Close request</Button>
       </Sheet>
     </MapPage>
@@ -222,6 +275,13 @@ function ConfirmDriver({ request, trip, offer, onBack, onDecline }) {
   const [adding, setAdding] = useState(false);
   const [trusted, setTrusted] = useState(false);
   const busy = useRef(false);
+  // The driver may change their rates while the rider decides (a new offer replaces the old one). The rider must see that before accepting:
+  // `baseline` = the rates the rider last saw for this driver; when the rates in front of the rider differ, a popup stops the confirm (lib/ratechange.js).
+  const dTag = (request.tags.find((t) => t[0] === "d") || [])[1];
+  const nowRates = offerRates(c);
+  const [baseline, setBaseline] = useState(() => seenRates(dTag, offer.pubkey) || nowRates);
+  const rateChange = ratesChanged(baseline, nowRates);
+  const acceptNewRates = () => { rememberRates(dTag, offer.pubkey, nowRates); setBaseline(nowRates); };
   void liveTick; // the balance changes when funds arrive
   const rates = offerRates(c);
   const mint = isMintUrl(c.mint) ? c.mint : null;
@@ -230,13 +290,13 @@ function ConfirmDriver({ request, trip, offer, onBack, onDecline }) {
   const need = parts ? parts.total : null;
   const have = ecash && mint ? ecash.balance(mint) : 0;
   const short = need != null ? Math.max(0, need - have) : 0;
-  const ready = !!rates && !!mint && need != null && short === 0 && !ecashOff;
+  const ready = !!rates && !!mint && need != null && short === 0 && !ecashOff && !rateChange;
   // The driver chose this mint. One the rider has never used is not trusted on the driver's word (features/ecash/myMint.js).
   const unknownMint = !!mint && !trusted && !isKnownMint(mint, ecash);
   void prices;
 
   const go = () => {
-    if (busy.current || !ready) return;
+    if (busy.current || !ready || rateChange) return;
     busy.current = true;
     setDone(true);
     confirmDriver(request, offer);
@@ -290,6 +350,26 @@ function ConfirmDriver({ request, trip, offer, onBack, onDecline }) {
           {!done && <p className="text-neutral-500 text-xs text-center">Your request stays open. Other drivers can still accept it.</p>}
         </div>
         {adding && mint && <AddFunds mint={mint} needSats={short} onClose={() => setAdding(false)} />}
+        <ConfirmDialog
+          open={rateChange && !done}
+          title={`${getProfile(offer.pubkey)?.name || "This driver"} changed their rates`}
+          danger={rateDirection(baseline, nowRates, parse(request)?.distanceMiles, parse(request)?.durationMin) === "higher"}
+          confirmLabel="Continue with the new rates"
+          cancelLabel="Choose a different driver"
+          message={
+            <span>
+              <span className="block">Before: <RatesLine rates={baseline} /></span>
+              <span className="block font-semibold text-black">Now: <RatesLine rates={nowRates} /></span>
+              {(() => {
+                const before = offerEstimate({ rates: baseline }, parse(request), prices), after = estimate;
+                return before != null && after != null ? <span className="block mt-1">Estimated fare: {moneyText(before, btcPrice)} before, {moneyText(after, btcPrice)} now.</span> : null;
+              })()}
+              <span className="block mt-1">Nothing was paid. Continue only if the new rates are fine with you.</span>
+            </span>
+          }
+          onConfirm={acceptNewRates}
+          onCancel={onBack}
+        />
       </Sheet>
     </MapPage>
   );

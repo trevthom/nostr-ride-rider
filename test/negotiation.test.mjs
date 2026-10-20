@@ -62,14 +62,13 @@ const o3 = offer(d3, 8000, 6, "");
 const all = T.offersForRide(req);
 assert.deepEqual(all.map((o) => o.pubkey), [d2.publicKey, d3.publicKey, d1.publicKey], "no preference: soonest first");
 
-// ── Gender preference only orders the list ──
+// ── Gender preference: "Female only" / "Male only" show only the drivers who declared that gender ──
 assert.equal(T.offerGender(o2), "female");
 assert.equal(T.offerGender(o3), "", "no gender set");
-assert.deepEqual(T.rankOffers(all, "male").map((o) => o.pubkey), [d1.publicKey, d2.publicKey, d3.publicKey], "male first, the rest keep their order");
-assert.deepEqual(T.rankOffers(all, "female").map((o) => o.pubkey), [d2.publicKey, d3.publicKey, d1.publicKey]);
-assert.equal(T.rankOffers(all, "female").length, all.length, "nobody is hidden");
-assert.equal(T.rankOffers(all, "").map((o) => o.id).join(), all.map((o) => o.id).join(), "no preference: unchanged");
-assert.equal(T.rankOffers(all, "other").map((o) => o.id).join(), all.map((o) => o.id).join(), "unknown value: unchanged");
+assert.deepEqual(T.onlyPreferredOffers(all, "male").map((o) => o.pubkey), [d1.publicKey], "Male only: just the drivers who declared male");
+assert.deepEqual(T.onlyPreferredOffers(all, "female").map((o) => o.pubkey), [d2.publicKey], "Female only: a driver who declared nothing (d3) is not shown either");
+assert.equal(T.onlyPreferredOffers(all, "").map((o) => o.id).join(), all.map((o) => o.id).join(), "no preference: unchanged");
+assert.equal(T.onlyPreferredOffers(all, "other").map((o) => o.id).join(), all.map((o) => o.id).join(), "unknown value: unchanged");
 
 // A driver's rates travel in their profile; junk is dropped.
 pub(K.METADATA, { name: "D2", rates: { base: 4, perMile: 1.5, perMinute: 0.35 } }, [], d2);

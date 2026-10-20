@@ -128,6 +128,22 @@ assert.equal(V.trustFor(tB.publicKey, nameless.publicKey) === null, true, "a per
 relay.pool.querySync = async () => { throw new Error("relay down"); };
 await syncVouches(meB.publicKey);
 
+// ── Add, then remove at once: the screen follows the cache, whether or not any relay took the change ──
+{
+  const me2 = generateKeypair(), friend = generateKeypair();
+  const send = (list) => { const e = V.vouchEvent(list); const s = buildSignedEvent(e.kind, e.content, [...e.tags, ["t", "nostrride"]], me2.sk); relay._store(s); return s; };
+  const added = send([friend.publicKey]);
+  assert.deepEqual(V.vouchList(me2.publicKey), [friend.publicKey]);
+  const removed = send([]); // no relay answers: the event only sits in the cache (and the outbox)
+  assert.ok(removed.created_at > added.created_at, "two changes in the same second still order correctly");
+  assert.deepEqual(V.vouchList(me2.publicKey), [], "the vouch is gone at once");
+  assert.equal(V.trustFor(friend.publicKey, me2.publicKey), null, "and no badge says the person is vouched for");
+  // A relay that still holds the OLD list sends it back later: it must not bring the vouch back.
+  relay.pool.querySync = async () => [added];
+  await syncVouches(me2.publicKey);
+  assert.deepEqual(V.vouchList(me2.publicKey), [], "an older list from a relay never undoes a newer change");
+}
+
 // ── The new kind is in the live subscription ──
 assert.match(fs.readFileSync(new URL("../src/nostr/relay.js", import.meta.url), "utf8"), /EVENT_KINDS\.VOUCH_LIST/, "new lists reach the app live");
 console.log("vouches: ok");

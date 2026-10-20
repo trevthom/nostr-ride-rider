@@ -49,12 +49,13 @@ export function presenceTs(createdAtSec, claimed) {
 // Publish one presence beat. Call this on an interval while online.
 // Addressable (d-tag "presence") so each driver has exactly one current
 // presence on the relay, with a short expiration.
-export async function publishPresence(user, { lat, lng, vehicle, rates, hide }) {
+export async function publishPresence(user, { lat, lng, vehicle, rates, hide, gender }) {
   const content = JSON.stringify({
     name: user.name,
     npub: user.npub,
     vehicle: vehicle || "",
     ...(rates && { rates }), // the driver's own typical-fare rates (public, like the rest of presence)
+    ...((gender === "male" || gender === "female") && { gender }), // optional, self-declared (also in the public profile): a rider can ask for "Female only" / "Male only"
     ...(hide?.length && { hide }), // tokens of the riders this driver blocked: their apps do not show this car (lib/blocks.js)
     lat: coarse(lat),
     lng: coarse(lng),

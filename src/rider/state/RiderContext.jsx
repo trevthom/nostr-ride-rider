@@ -30,6 +30,11 @@ import { stopRequestEvent } from "../../lib/stops.js";
 import { activeRideFor, isOpenRide, upcomingRidesFor } from "../../lib/trips.js";
 import { rideDriver, rideEnding, rideKey, rideStatus, rideVersions, rideTimes, rideExpiryMs, isRideExpired } from "../../lib/rides.js";
 import { hideList } from "../../lib/blocks.js";
+import { onlyPreferred } from "../../lib/gender.js";
+import { nearestDriver } from "../../lib/audience.js";
+import { addAudience } from "../../lib/audienceStore.js";
+import { getProfile } from "../../nostr/profiles.js";
+import { rememberRates } from "../../lib/ratechange.js";
 import { declineEvent } from "../../lib/trips.js";
 import { rideTerms, rideMint } from "../../lib/terms.js";
 import { ledgerSummary } from "../../lib/ridemoney.js";
@@ -72,19 +77,35 @@ export function RiderProvider({ children }) {
 
   // ── Online drivers nearby (public, coarsened presence) ──
   const [allDrivers, setAllDrivers] = useState([]);
+  const allDriversRef = useRef([]);
+  allDriversRef.current = allDrivers; // the banners below read the names from here
   useEffect(() => subscribePresence(setAllDrivers, { excludePubkey: me, viewerSk: user.sk }), [me]);
-  const drivers = (myPosition
-    ? allDrivers.filter((d) => haversineDistance(myPosition.lat, myPosition.lng, d.lat, d.lng) <= 25)
-    : allDrivers).filter((d) => !isBlockedPk(d.pubkey));
+  // The optional driver preference: "Female only" / "Male only" shows only the drivers who declared that gender (lib/gender.js).
+  // It stays on this device and is never published.
+  const [genderPref, setGenderPrefState] = useState(() => getSetting("genderPref", ""));
+  const setGenderPref = useCallback((v) => { setGenderPrefState(v); setSetting("genderPref", v); }, []);
+  const [notifyNearest, setNotifyNearestState] = useState(() => getSetting("notifyNearest", false) === true);
+  const setNotifyNearest = useCallback((v) => { setNotifyNearestState(!!v); setSetting("notifyNearest", !!v); }, []);
+  const drivers = onlyPreferred(
+    (myPosition
+      ? allDrivers.filter((d) => haversineDistance(myPosition.lat, myPosition.lng, d.lat, d.lng) <= 25)
+      : allDrivers).filter((d) => !isBlockedPk(d.pubkey)),
+    genderPref
+  );
+  // A driver whose presence does not say the gender (an older app) may have it in their profile: fetch the profiles of the nearby ones.
+  const askedProfiles = useRef(new Set());
+  useEffect(() => {
+    if (genderPref !== "male" && genderPref !== "female") return;
+    allDrivers.filter((d) => !d.gender && !getProfile(d.pubkey)?.gender && !askedProfiles.current.has(d.pubkey)).slice(0, 20).forEach((d) => {
+      askedProfiles.current.add(d.pubkey);
+      relay.fetchProfile(d.pubkey);
+    });
+  }, [genderPref, allDrivers]);
 
   // ── The trip being planned ──
   const [plan, setPlanState] = useState(EMPTY_PLAN);
   const setPlan = useCallback((patch) => setPlanState((p) => ({ ...p, ...patch })), []);
   const resetPlan = useCallback(() => setPlanState(EMPTY_PLAN), []);
-
-  // ── Driver gender preference: orders the driver list, never hides anyone ──
-  const [genderPref, setGenderPrefState] = useState(() => getSetting("genderPref", ""));
-  const setGenderPref = useCallback((v) => { setGenderPrefState(v); setSetting("genderPref", v); }, []);
 
   // ── The current ride, from events ──
   void liveTick; // re-derive when relay events arrive
@@ -165,6 +186,7 @@ export function RiderProvider({ children }) {
       if (!(ev.tags || []).some((t) => t[0] === "p" && t[1] === me)) return;
       const c = parse(ev);
       if (ev.kind === EVENT_KINDS.RIDE_OFFER && !isBlockedPk(ev.pubkey)) pushNotice("A driver can pick you up. Check the offer.");
+      else if (ev.kind === EVENT_KINDS.RIDE_DRIVER_DECLINE) pushNotice(`${allDriversRef.current.find((x) => x.pubkey === ev.pubkey)?.name || getProfile(ev.pubkey)?.name || "The driver"} declined your ride request. Choose another driver.`);
       else if (ev.kind === EVENT_KINDS.RIDE_STAGE && c?.stage === "arrived") pushNotice("Your driver has arrived.");
       else if (ev.kind === EVENT_KINDS.RIDE_COMPLETE) pushNotice("Your driver finished the ride.");
       else if (ev.kind === EVENT_KINDS.RIDE_FINISH) pushNotice("Your driver finished the ride.");
@@ -234,10 +256,16 @@ export function RiderProvider({ children }) {
   // Publish a ride request. Only an approximate area is public; the exact
   // trip is sealed to the rider (and to the driver after they are chosen).
   const requestRide = useCallback(
-    ({ pickup, dropoff, when, notes, miles, minutes, fareSats, suggestedSats }) => {
+    ({ pickup, dropoff, when, notes, miles, minutes, fareSats, suggestedSats, to = null, ratesSeen = null }) => {
+      // `to` (a list of drivers): the rider chose them (browse list, map, "Notify nearest driver immediately"). The request goes to them only.
+      const directed = Array.isArray(to) && to.length > 0;
+      const d = "ride-" + Date.now();
+      // The rates the rider saw for each chosen driver: if the driver's offer carries other rates, the rider is told before accepting (lib/ratechange.js).
+      if (ratesSeen) Object.entries(ratesSeen).forEach(([pk, rates]) => rememberRates(d, pk, rates));
       publish(
         EVENT_KINDS.RIDE_REQUEST,
         {
+          ...(directed && { directed: true }),
           pickup: publicPlace(pickup),
           dropoff: publicPlace(dropoff),
           time: when,
@@ -251,7 +279,8 @@ export function RiderProvider({ children }) {
           durationMin: minutes,
           sealed: seal(user.sk, me, { pickup, dropoff }),
         },
-        [["d", "ride-" + Date.now()], ["t", "ride-request"]]
+        [["d", d], ["t", "ride-request"]],
+        directed ? { audience: to } : undefined
       );
       refreshData();
       resetPlan();
@@ -260,6 +289,7 @@ export function RiderProvider({ children }) {
         pushNotice(`Ride reserved for ${new Date(when).toLocaleString([], { weekday: "short", hour: "numeric", minute: "2-digit" })}. Drivers can accept it from now on.`);
         setView("activity");
       }
+      return d;
     },
     [publish, refreshData, resetPlan, user.sk, me, pushNotice, setView, blocked]
   );
@@ -399,6 +429,16 @@ export function RiderProvider({ children }) {
     [publish, refreshData]
   );
 
+  // "Request this driver": send an open request to one more driver, chosen from the list or the map. The driver can accept or decline.
+  const notifyDriver = useCallback((request, driverPubkey, rates = null) => {
+    const d = (request.tags.find((t) => t[0] === "d") || [])[1];
+    if (!d || !/^[0-9a-f]{64}$/.test(driverPubkey) || driverPubkey === me) return false;
+    rememberRates(d, driverPubkey, rates); // what the rider saw next to this driver's name
+    addAudience(d, [driverPubkey]);
+    relay.sealTo(rideVersions(request)[0] || request, [driverPubkey]);
+    return true;
+  }, [me]);
+
   // Logging out closes the requests still waiting for a driver (reservations too): the app will not be here to
   // choose a driver or pay, so nobody should be left waiting for it. A ride that is already under way is not touched.
   const reqsRef = useRef(rideRequests);
@@ -469,7 +509,8 @@ export function RiderProvider({ children }) {
     plan, setPlan, resetPlan,
     share, startShare, stopShare, shareUpdate, shareUrl,
     activeRide, focused: !!focused, focusRide: (r) => setFocusId(r ? r.id : null), upcoming, receipt, dismissReceipt,
-    genderPref, setGenderPref,
+    genderPref, setGenderPref, notifyNearest, setNotifyNearest,
+    notifyDriver, nearestOf: (to) => nearestDriver(drivers, to)?.pubkey || null,
     requestRide, proposePickup, confirmDriver, recordPayment, confirmRide, proposeStop, finishRide, declineOffer, recentPlaces,
     money, payNow, allowMore, reportMiles, payTerms, payMint, screenMayDim,
     nearestDriverEta: (to) => {

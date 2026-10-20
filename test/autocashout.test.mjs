@@ -50,7 +50,14 @@ console.log("autocashout tests ok");
   const pk = "ab".repeat(32);
   assert.equal(C.getCashOutTo(pk), "", "nothing is pinned at first");
   assert.equal(C.cashOutState({ profile: "", pinned: "" }), "none");
-  assert.equal(C.cashOutState({ profile: "Me@Wallet.com", pinned: "" }), "unconfirmed", "a profile address alone is not enough: this device never confirmed it");
+  assert.equal(C.cashOutState({ profile: "Me@Wallet.com", pinned: "" }), "unconfirmed", "a profile address with no pin is the state in which the device adopts it (adoptProfileAddress)");
+  // Nobody is asked to confirm an address: a device with no pin takes the profile's, and a device with a pin keeps it.
+  assert.equal(C.adoptProfileAddress(pk, "  Me@Wallet.com "), "me@wallet.com", "no pin yet: the profile's address is adopted");
+  assert.equal(C.getCashOutTo(pk), "me@wallet.com");
+  assert.equal(C.adoptProfileAddress(pk, "thief@evil.com"), "me@wallet.com", "a pin is never replaced by the profile");
+  assert.equal(C.getCashOutTo(pk), "me@wallet.com");
+  C.setCashOutTo(pk, "");
+  assert.equal(C.adoptProfileAddress(pk, ""), "", "an empty profile address pins nothing");
   C.setCashOutTo(pk, "  Me@Wallet.com ");
   assert.equal(C.getCashOutTo(pk), "me@wallet.com", "kept in one clean form");
   assert.equal(C.cashOutState({ profile: "me@wallet.com", pinned: C.getCashOutTo(pk) }), "ok");

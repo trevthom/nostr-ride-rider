@@ -1,13 +1,12 @@
 // ════════════════════════════════════════════════════════════
-//  GENDER PREFERENCE — Optional. The rider can ask to see drivers of one
-//  gender first. It only changes the ORDER of the driver list: nobody is
-//  hidden, and the choice stays on this device (it is never published).
-//  Drivers set their own gender, also optional, in the driver app.
+//  GENDER PREFERENCE — Optional. "Female only" or "Male only" shows the rider ONLY the drivers who declared that gender
+//  (their own setting, also optional). A driver who has not declared a gender is not shown to a rider who asked. The choice
+//  stays on this device (it is never published). "No preference" shows everyone.
 // ════════════════════════════════════════════════════════════
 
 import { useRider } from "../state/RiderContext.jsx";
 
-const CHOICES = [["", "No preference"], ["female", "Female first"], ["male", "Male first"]];
+const CHOICES = [["", "No preference"], ["female", "Female only"], ["male", "Male only"]];
 
 export default function GenderPref({ className = "" }) {
   const { genderPref, setGenderPref } = useRider();

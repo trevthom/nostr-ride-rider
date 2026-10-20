@@ -21,6 +21,7 @@ import Icon from "../../ui/Icon.jsx";
 import QRCode from "../../ui/QRCode.jsx";
 import { moneyText } from "../../ui/Money.jsx";
 import OnchainFunds from "./OnchainFunds.jsx";
+import AutoCashWarning from "./AutoCashWarning.jsx";
 
 const MIN = 100, MAX = 5_000_000;
 
@@ -83,6 +84,7 @@ export default function AddFunds({ mint, needSats = 0, onClose, onDone }) {
       {done == null && method === "onchain" ? (
         <>
           {tabs}
+          <AutoCashWarning mint={mint} />
           <OnchainFunds mint={mint} onDone={(sats) => { setDone(sats); onDone && onDone(sats); }} />
         </>
       ) : done != null ? (
@@ -102,6 +104,7 @@ export default function AddFunds({ mint, needSats = 0, onClose, onDone }) {
             <AmountInput sats={sats} rate={btcPrice} min={MIN} max={MAX} onChange={setSats} label="Amount to add" />
           </div>
           {needSats > 0 && <p className="text-xs text-neutral-500 mt-2">This ride needs about {moneyText(needSats, btcPrice)} to start.</p>}
+          <AutoCashWarning mint={mint} sats={Number.isFinite(sats) ? Math.round(sats) : null} />
           {error && <p className="text-red-600 text-sm mt-3" role="alert">{error}</p>}
           <div className="mt-4 space-y-2">
             <Button onClick={make} disabled={!ok || !ecash} loading={busy === "making"}>Show invoice</Button>
