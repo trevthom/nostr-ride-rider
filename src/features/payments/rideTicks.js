@@ -22,6 +22,7 @@ import { rideDriver } from "../../lib/rides.js";
 import { tickEvent, ticksOf, sentSats, forgivenSats } from "../../lib/payments.js";
 import { dueSats } from "../../lib/ticks.js";
 import { recoverRefused } from "./recoverRefused.js";
+import { releaseWhenSafe } from "./handoff.js";
 
 export const MIN_TICK_SATS = 3; // below this the difference is just a mint fee; it is paid with the next tick
 const busy = new Set(); // ride keys with a payment in flight (one at a time, so a tick is never paid twice)
@@ -65,10 +66,9 @@ export async function payDue({ request, user, ecash, publish, terms, mint, price
     }
     const last = ledger.final ? "final" : (ledger.units[ledger.units.length - 1] || {}).id || "";
     const ev = tickEvent(request, driver, user, { seq: ticksOf(request).length + 1, trigger: last, amountSats: pay.sats, mint, token: pay.token });
-    // The event now holds the money. publish() caches it and queues it for re-sending if no relay answers,
-    // so the pending token can be released.
-    publish(ev.kind, ev.content, ev.tags).catch(() => {});
-    ecash.settle(pay.id);
+    // The event now holds the money. A durable publish saves it in the outbox BEFORE it is sent, and only then is the token released
+    // from the wallet (handoff.js): a closed tab or a killed app in the next seconds loses nothing.
+    releaseWhenSafe(ecash, pay.id, publish(ev.kind, ev.content, ev.tags, { durable: true }));
     return { status: amount < due ? "short" : "paid", due: due - pay.sats, shortSats: due - pay.sats, sentNow: pay.sats, ...base };
   } finally {
     busy.delete(lock);

@@ -35,6 +35,7 @@ import { showSystemNotification } from "../lib/notify.js";
 import { PRICE_CODES, PRICE_MAX_AGE_MS, acceptPrices, getCurrency, setCurrency as saveCurrency, onCurrencyChange } from "../lib/currency.js";
 import { FALLBACK_BTC_USD } from "../config/settings.js";
 import { link } from "../nostr/link.js";
+import { holdWalletLock } from "../nostr/walletlock.js";
 
 const AppContext = createContext(null);
 
@@ -180,21 +181,32 @@ export function AppProvider({ initialView, children }) {
   const hasWalletData = !!pk16 && (typeof getSetting("ecashphrase_" + pk16, null) === "string" || Array.isArray(getSetting("ecash_" + pk16, null)));
   const ecashOff = offKey ? flag === true || (flag !== false && !hasWalletData) : false;
   void offTick;
+  const [ecashWaiting, setEcashWaiting] = useState(false); // the wallet is open in another window of this browser
   useEffect(() => {
-    if (!user?.sk || ecashOff) { setEcash(null); return undefined; }
-    let alive = true, off = null, timer = null;
-    import("../nostr/cashuMint.js").then((m) => {
+    if (!user?.sk || ecashOff) { setEcash(null); setEcashWaiting(false); return undefined; }
+    let alive = true, off = null, timer = null, saveTimer = null, warned = false;
+    // One window at a time holds the wallet (nostr/walletlock.js): two windows would overwrite each other's coins.
+    const hold = holdWalletLock("nostrride-wallet-" + user.publicKey.slice(0, 16), { onWait: () => { if (alive) setEcashWaiting(true); } });
+    hold.ready.then(() => import("../nostr/cashuMint.js")).then((m) => {
       if (!alive) return;
+      setEcashWaiting(false);
       const w = m.userWallet(user);
-      off = w.onChange(() => setEcashTick((t) => t + 1));
+      off = w.onChange(() => {
+        setEcashTick((t) => t + 1);
+        // The browser would not keep the wallet (a full or blocked storage): say so, once, while it lasts.
+        if (!w.saveOk && !warned) { warned = true; pushNotice("This browser will not save your wallet right now (the storage is full or blocked). Free some space. Until then no money moves."); }
+        if (w.saveOk) warned = false;
+      });
       setEcash(w);
       w.claimAll().catch(() => {});
       w.recoverPending().catch(() => {});
       // Coins that were moved elsewhere (a restore on another device swaps them) are spent: drop them, so this device shows the truth.
       w.syncSpent().catch(() => {});
       timer = setInterval(() => w.syncSpent().catch(() => {}), 5 * 60000);
+      // A Lightning payment the mint was still working on is settled when the mint is done; an unsaved wallet is saved again when it can be.
+      saveTimer = setInterval(() => { w.retrySave(); w.recoverPending().catch(() => {}); }, 30000);
     }).catch(() => {});
-    return () => { alive = false; if (off) off(); if (timer) clearInterval(timer); };
+    return () => { alive = false; hold.release(); if (off) off(); if (timer) clearInterval(timer); if (saveTimer) clearInterval(saveTimer); };
   }, [user?.publicKey, ecashOff]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Remove the ecash wallet from this device (erase the coins and the phrase here; nothing is swapped).
@@ -275,7 +287,7 @@ export function AppProvider({ initialView, children }) {
   // `localOnly` keeps it in the cache (replies to demo data must not
   // reach public relays) and resolves to false.
   const publish = useCallback(
-    (kind, content, tags, { localOnly = false } = {}) => {
+    (kind, content, tags, { localOnly = false, durable = false } = {}) => {
       if (!user?.sk) return Promise.resolve(false);
       // Tag every event so other devices can tell our events apart from
       // unrelated apps that reuse the same kind numbers on public relays.
@@ -297,7 +309,7 @@ export function AppProvider({ initialView, children }) {
         to.push(...asked, ...getAudience(d), ...answerersOf(d, user.publicKey));
         addAudience(d, asked);
       }
-      return relay.publish(event, { to });
+      return relay.publish(event, { to, durable }); // durable: a job event that carries money (the promise has .stored, see relay.publish)
     },
     [user, blocked]
   );
@@ -447,6 +459,7 @@ export function AppProvider({ initialView, children }) {
     refreshVouches,
     ecash,
     ecashOff,
+    ecashWaiting,
     disconnectEcash,
     createEcash,
     restoreEcash,

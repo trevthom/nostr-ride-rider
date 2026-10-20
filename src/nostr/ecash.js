@@ -74,11 +74,12 @@ export function makeStore(user) {
         return JSON.parse(pieces.map((p) => nip44.decrypt(p, ck())).join(""));
       } catch { return null; }
     },
+    // Returns false when the browser would not keep it (a full or blocked storage): the wallet then refuses to move money (see _needStorage).
     save(state) {
       const text = JSON.stringify(state);
       const pieces = [];
       for (let i = 0; i < text.length; i += CHUNK) pieces.push(nip44.encrypt(text.slice(i, i + CHUNK), ck()));
-      setSetting(key, pieces);
+      return setSetting(key, pieces) !== false;
     },
     erase() { setSetting(key, null); },
     // The on-chain deposit addresses (quote ids, numbers, addresses: no key, no coin) are ALSO kept as a plain setting, which the encrypted
@@ -99,12 +100,37 @@ export class EcashWallet {
     this.state = { ...emptyState(), ...(store.load() || {}) };
     this.listeners = new Set();
     this.busy = Promise.resolve(); // one money move at a time, so two taps cannot spend the same proofs
+    this.saveOk = true; // false while the browser will not keep the wallet (a full or blocked storage)
+    this._melting = new Set(); // pending ids of Lightning payments that are being sent right now
   }
 
   onChange(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); }
+  _persist() {
+    let ok = false;
+    try { ok = this.store.save(this.state) !== false; } catch { ok = false; }
+    this.saveOk = ok;
+    return ok;
+  }
   _save() {
-    this.store.save(this.state);
+    this._persist();
     this.listeners.forEach((fn) => { try { fn(); } catch { /* ignore */ } });
+  }
+  // Try again to save a wallet the browser would not keep (screens call it on a timer). Returns true when it is saved.
+  retrySave() {
+    if (this.saveOk) return true;
+    const ok = this._persist();
+    this.listeners.forEach((fn) => { try { fn(); } catch { /* ignore */ } });
+    return ok;
+  }
+  // Before a move that changes what the wallet holds: the new state must be savable, or the money could be lost on the next reload.
+  _needStorage() {
+    if (this._persist()) return;
+    this.listeners.forEach((fn) => { try { fn(); } catch { /* ignore */ } });
+    throw new EcashError("storage", "This browser will not save your wallet right now (the storage is full or blocked, or this is a private window). Nothing was moved. Free some space or leave the private window, then try again.", false);
+  }
+  // A money move: one at a time, and only when the wallet can be saved.
+  _guarded(fn) {
+    return this._exclusive(async () => { this._needStorage(); return fn(); });
   }
   _exclusive(fn) {
     const run = this.busy.then(fn, fn);
@@ -123,7 +149,7 @@ export class EcashWallet {
   // ── Funding: pay a Lightning invoice, get ecash ──
   // Returns { id, invoice, expiry }. Pay `invoice` with the NWC wallet or any Lightning wallet, then claim().
   fundStart(url, sats) {
-    return this._exclusive(async () => {
+    return this._guarded(async () => {
       const amount = Math.round(sats);
       if (!(amount >= 1)) throw new EcashError("amount", "Enter an amount of at least 1 sat.");
       const q = await this.mintFor(url).quoteMint(amount);
@@ -137,7 +163,7 @@ export class EcashWallet {
   // Claim one funding invoice if it has been paid. Returns { state, sats }:
   // state "UNPAID" (not yet), "ISSUED" (claimed now or before). Never claims twice.
   claim(id) {
-    return this._exclusive(async () => {
+    return this._guarded(async () => {
       const q = this.state.quotes.find((x) => x.id === id);
       if (!q) return { state: "ISSUED", sats: 0 };
       const mint = this.mintFor(q.mint);
@@ -187,7 +213,7 @@ export class EcashWallet {
   }
   // Returns { id, mint, index, address, expiry }. The newest address at this mint that has not expired is used again: it can be paid many times.
   onchainStart(url) {
-    return this._exclusive(async () => {
+    return this._guarded(async () => {
       const mint = this.mintFor(url);
       let ok = false;
       try { ok = typeof mint.onchainSupported === "function" && (await mint.onchainSupported()); }
@@ -210,7 +236,7 @@ export class EcashWallet {
   // Turn what the mint has seen paid to one address into ecash, once. Returns { state, sats, paid }:
   // "UNPAID" (nothing confirmed yet), "ISSUED" (sats = what was added now; 0 when there was nothing new), "NONE" (no such address here).
   claimOnchain(id) {
-    return this._exclusive(async () => {
+    return this._guarded(async () => {
       const q = this.onchainList().find((x) => x.id === id);
       if (!q) return { state: "NONE", sats: 0, paid: 0 };
       if (!this._ownsOnchain(q)) throw new EcashError("onchain", "This address belongs to another recovery phrase. Restore with that phrase to collect it.", true);
@@ -229,7 +255,7 @@ export class EcashWallet {
   // Returns { id, token, sats }. Call settle(id) once the event carrying the token is published
   // (or queued), or unreserve(id) if it never will be. Throws EcashError "funds" when short.
   pay(url, sats) {
-    return this._exclusive(async () => {
+    return this._guarded(async () => {
       const amount = Math.round(sats);
       if (!(amount >= 1)) throw new EcashError("amount", "Nothing to pay.");
       const have = this._proofs(url);
@@ -274,9 +300,11 @@ export class EcashWallet {
   }
   // After a crash: a pending token older than `afterMs` whose proofs the mint still calls unspent was never
   // delivered, so it goes back into the wallet. Spent ones were delivered and are dropped.
+  // A Lightning payment that was left open (see _meltWith) is looked at sooner: after 20 seconds.
   async recoverPending(afterMs = 5 * 60000) {
     for (const p of this.pendingList()) {
-      if (Date.now() - p.at < afterMs) continue;
+      if (this._melting.has(p.id)) continue; // being sent right now
+      if (Date.now() - p.at < (p.melt || String(p.id).startsWith("melt-") ? Math.min(afterMs, 20000) : afterMs)) continue;
       try {
         const states = await this.mintFor(p.mint).states(p.proofs);
         if (states.every((s) => s === "UNSPENT")) this.unreserve(p.id);
@@ -290,7 +318,7 @@ export class EcashWallet {
   // token's fingerprint, so the SAME payment seen again is recognised (`EcashError.ref` / `.sats` on a "used" error) while the same
   // token inside ANOTHER payment is a replay. Returns { sats, mint }. Throws EcashError.
   redeem(token, { only, ref } = {}) {
-    return this._exclusive(async () => {
+    return this._guarded(async () => {
       const meta = this.tokenInfo(token);
       if (!meta) throw new EcashError("token", "That is not an ecash token.", true);
       if (only && !only.includes(meta.mint)) throw new EcashError("mint", "This token is from a mint we do not accept.", true);
@@ -319,7 +347,7 @@ export class EcashWallet {
   // getInvoice(sats) → a bolt11 invoice for exactly that amount (for example from a Lightning address).
   // Pays as much of the balance as the mint's fee allows. Returns { paidSats, feeSats, preimage }.
   cashOut(url, getInvoice) {
-    return this._exclusive(async () => {
+    return this._guarded(async () => {
       const mint = this.mintFor(url);
       const have = this._proofs(url);
       const balance = sum(have);
@@ -352,29 +380,55 @@ export class EcashWallet {
   }
 
   // The last steps of every Lightning payment: the coins that pay it leave the balance and wait in `pending`; the mint pays; the
-  // change comes back. A payment that fails puts the coins back. Runs inside the money lock. Returns { paidSats, feeSats, preimage }.
+  // change comes back. Runs inside the money lock. Returns { paidSats, feeSats, preimage }.
+  // The mint's answer is trusted only when it says PAID. Any other answer ("no", "still working", an error, no answer at all) does NOT
+  // mean the payment failed: the mint may still be sending it, or may have sent it when the answer was lost. So the app asks the mint what
+  // became of the coins (_meltFate) and only a clear answer moves them: unspent → back in the wallet, spent → the payment went out.
+  // Anything else leaves them in `pending` (they are not counted in the balance), and recoverPending() settles it a little later.
   async _meltWith(url, mint, q, need, split) {
+    const id = "melt-" + q.id;
     this._setProofs(url, split.keep);
-    this.state.pending.push({ id: "melt-" + q.id, mint: url, sats: need, proofs: split.send, at: Date.now() });
+    this.state.pending.push({ id, mint: url, sats: need, proofs: split.send, at: Date.now(), melt: true });
+    this._melting.add(id);
     this._save();
-    let res;
     try {
-      res = await mint.melt(q, split.send);
-    } catch (e) {
-      this.unreserve("melt-" + q.id);
-      throw new EcashError("mint", e?.message || "The mint could not pay the invoice.");
+      let res = null, err = null;
+      try { res = await mint.melt(q, split.send); } catch (e) { err = e; }
+      if (res && res.paid) {
+        this._setProofs(url, [...this._proofs(url), ...res.change]);
+        this.settle(id);
+        return { paidSats: q.sats, feeSats: need - sum(res.change) - q.sats, preimage: res.preimage || null };
+      }
+      const fate = await this._meltFate(id);
+      if (fate === "back") throw new EcashError("mint", `${err?.message || "The Lightning payment failed."} Your ecash is still here.`);
+      if (fate === "paid") {
+        // The payment went out but the change did not reach this phone. The change coins have recoverable secrets: Restore my wallet finds them.
+        return { paidSats: q.sats, feeSats: need - q.sats, preimage: null };
+      }
+      throw new EcashError("pending", "The payment is still going through at the mint. Your ecash is held until it ends, which can take a few minutes. Check your balance later before you try again.");
+    } finally {
+      this._melting.delete(id);
     }
-    if (!res.paid) { this.unreserve("melt-" + q.id); throw new EcashError("mint", "The Lightning payment failed. Your ecash is still here."); }
-    this._setProofs(url, [...this._proofs(url), ...res.change]);
-    this.settle("melt-" + q.id);
-    return { paidSats: q.sats, feeSats: need - sum(res.change) - q.sats, preimage: res.preimage || null };
+  }
+
+  // What became of the coins of a Lightning payment? Asks the mint. "back" (unspent: they return to the balance), "paid" (spent: the
+  // payment went out; they are forgotten) or "wait" (the mint is still working, or could not be asked: nothing moves).
+  async _meltFate(id) {
+    const p = this.state.pending.find((x) => x.id === id);
+    if (!p) return "paid";
+    let states;
+    try { states = await this.mintFor(p.mint).states(p.proofs); } catch { return "wait"; }
+    if (!Array.isArray(states) || states.length !== p.proofs.length) return "wait";
+    if (states.every((x) => x === "UNSPENT")) { this.unreserve(id); return "back"; }
+    if (states.every((x) => x === "SPENT")) { this.settle(id); return "paid"; }
+    return "wait";
   }
 
   // ── Sending to another wallet ──
   // Pay a Lightning invoice (any wallet's) from the ecash held at `url`. The invoice must name an amount. The mint's fee comes on top
   // (and the fee for spending the coins), so the wallet needs a little more than the invoice. Returns { paidSats, feeSats, preimage }.
   payInvoice(url, invoice) {
-    return this._exclusive(async () => {
+    return this._guarded(async () => {
       const mint = this.mintFor(url);
       const have = this._proofs(url);
       const balance = sum(have);

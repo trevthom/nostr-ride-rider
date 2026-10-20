@@ -35,6 +35,7 @@ import { rideTerms, rideMint } from "../../lib/terms.js";
 import { ledgerSummary } from "../../lib/ridemoney.js";
 import { rideSpendCap, allowMoreSpend } from "../../lib/spendcap.js";
 import { payDue } from "../../features/payments/rideTicks.js";
+import { useAutoCashOut } from "../../features/ecash/useAutoCashOut.js";
 import { redeemWaiversFor } from "../../features/payments/redeemWaivers.js";
 import { moneyText } from "../../ui/Money.jsx";
 import { getSetting, setSetting } from "../../config/relays.js";
@@ -115,6 +116,9 @@ export function RiderProvider({ children }) {
       return next;
     });
   }, []);
+
+  // Cashes out by itself at the amount set in Account → Wallets, but never while a ride runs or its last payments may still be due.
+  useAutoCashOut({ locked: !!activeRide || !!receipt });
 
   // ── "Share my trip": a friend follows a link (see nostr/share.js) ──
   const [shareState, setShareState] = useState(() => getSetting("tripShare", null)); // { key, token, sos }

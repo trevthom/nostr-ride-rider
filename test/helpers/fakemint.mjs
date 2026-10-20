@@ -36,17 +36,27 @@ export class FakeMint {
     return this._proofs(proofs.reduce((s, p) => s + Number(p.amount), 0) - 1);
   }
   async quoteMelt(invoice) { const sats = Number(/lnbc(\d+)n/.exec(invoice)[1]); return { id: "m" + this.db.n++, sats, fee: 2 }; }
+  // db.meltMode: null (works), "pending" (the mint is still sending it: the coins are held, no answer yet), "lost" (the payment goes
+  // out but the answer never arrives), "dropped" (the request never reaches the mint). db.failMelt: the Lightning payment fails and the coins stay unspent.
   async melt(quote, proofs) {
+    const mode = this.db.meltMode;
+    if (mode === "dropped") throw new Error("network error before the payment");
+    if (this.db.failMelt) return { paid: false, change: [] };
+    if (mode === "pending") { proofs.forEach((p) => this.db.pending.add(p.secret)); return { paid: false, change: [], state: "PENDING" }; }
     this._spend(proofs);
     const total = proofs.reduce((s, p) => s + Number(p.amount), 0);
     this.db.paidInvoices.push(quote.sats);
-    return { paid: !this.db.failMelt, change: this._proofs(total - quote.sats - 1) };
+    if (mode === "lost") throw new Error("network error after the payment");
+    return { paid: true, change: this._proofs(total - quote.sats - 1) };
   }
-  async states(proofs) { return proofs.map((p) => (this.db.spent.has(p.secret) ? "SPENT" : "UNSPENT")); }
+  async states(proofs) {
+    if (this.db.statesDown) throw new Error("mint unreachable");
+    return proofs.map((p) => (this.db.spent.has(p.secret) ? "SPENT" : this.db.pending.has(p.secret) ? "PENDING" : "UNSPENT"));
+  }
 }
 
 export const MINT = "https://mint.test";
-export const newNet = () => ({ [MINT]: { n: 1, quotes: {}, spent: new Set(), paidInvoices: [], failMelt: false, down: false } });
+export const newNet = () => ({ [MINT]: { n: 1, quotes: {}, spent: new Set(), paidInvoices: [], failMelt: false, down: false, meltMode: null, pending: new Set(), statesDown: false } });
 export const tokenInfo = (t) => {
   if (!String(t).startsWith("cashuBfake")) return null;
   try {

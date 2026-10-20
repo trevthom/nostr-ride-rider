@@ -82,11 +82,15 @@ export function getSetting(key, fallback) {
 const writeListeners = new Set();
 export const onSettingWrite = (fn) => { writeListeners.add(fn); return () => writeListeners.delete(fn); };
 
+// Returns true when the browser kept the value, false when it would not (a full or blocked storage). Most settings can live with
+// a miss; the ecash wallet cannot, so it reads the answer (nostr/ecash.js).
 export function setSetting(key, value) {
+  let saved = true;
   try {
     localStorage.setItem("nostrride_" + key, JSON.stringify(value));
   } catch {
-    /* ignore */
+    saved = false;
   }
   writeListeners.forEach((fn) => { try { fn(key); } catch { /* ignore */ } });
+  return saved;
 }

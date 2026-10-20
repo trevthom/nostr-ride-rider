@@ -1,8 +1,8 @@
 // ════════════════════════════════════════════════════════════
-//  AUTO CASH OUT FIELD — "Automatically cash out at: $ [ ]" (driver app, Account → Wallets).
-//  The driver types an amount. When the ecash reaches it, the app cashes out to the cash out location by itself
-//  (useAutoCashOut.js). Empty = off. The choice is saved when the field is left or Enter is pressed (NOT on every key:
-//  typing "15" must never cash out at "1"). Needs a cash out location.
+//  AUTO CASH OUT FIELD — "Automatically cash out at: $ [ ]" (Account → Wallets, in the Ride and the Drive face).
+//  The person types an amount. When the ecash reaches it, the app sends it all to the cash out address PINNED on this device
+//  (lib/cashoutto.js) by itself (useAutoCashOut.js). Empty = off. The choice is saved when the field is left or Enter is pressed (NOT on every key:
+//  typing "15" must never cash out at "1"). Needs a confirmed cash out location.
 // ════════════════════════════════════════════════════════════
 
 import { useState } from "react";
@@ -12,9 +12,13 @@ import { satsFromFiat } from "../../lib/currency.js";
 import { getAutoCashOut, setAutoCashOut, AUTO_MAX } from "../../lib/autocashout.js";
 import { AUTO_EVENT } from "./useAutoCashOut.js";
 import { inputCls } from "../../ui/Parts.jsx";
+import { IS_DRIVER_APP } from "../../config/app.js";
+import { useCashOutTo } from "./useCashOutTo.js";
 
 export default function AutoCashOutField() {
   const { user, currency, priceFor } = useApp();
+  const { pinned, state } = useCashOutTo();
+  const ready = state === "ok" && !!pinned;
   const saved = getAutoCashOut(user.publicKey);
   const code = saved?.code || currency;
   const digits = digitsOf(code);
@@ -40,7 +44,7 @@ export default function AutoCashOutField() {
           inputMode="decimal"
           autoComplete="off"
           value={text}
-          disabled={!user.lud16}
+          disabled={!ready}
           placeholder="Off"
           onChange={(e) => {
             const v = e.target.value.replace(/[^0-9.]/g, "");
@@ -52,10 +56,12 @@ export default function AutoCashOutField() {
         />
       </label>
       <p className="text-xs text-neutral-500 mt-1">
-        {!user.lud16
-          ? "Set a cash out location (a Lightning address) first."
-          : "When your ecash reaches this amount, the app sends it to your cash out location. Leave it empty to turn this off."}
-        {user.lud16 && saved && price ? ` That is about ${satsFromFiat(saved.amount, price).toLocaleString()} sats.` : ""}
+        {ready
+          ? `When your ecash reaches this amount, the app sends all of it to ${pinned}.${IS_DRIVER_APP ? "" : " Add funds again before your next ride."} Leave it empty to turn this off.`
+          : state === "changed" || state === "unconfirmed"
+            ? "Confirm your cash out location below first. Automatic cash out waits until you do."
+            : "Set a cash out location (a Lightning address) first."}
+        {ready && saved && price ? ` That is about ${satsFromFiat(saved.amount, price).toLocaleString()} sats.` : ""}
       </p>
       {note && <p className="text-xs text-neutral-700 mt-1" role="status">{note}</p>}
     </div>

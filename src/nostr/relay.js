@@ -256,9 +256,13 @@ class NostrRelay {
   // soon as ANY relay accepts the event, or false once all have failed.
   // Every relay's promise gets a handler, so a dead relay never throws an
   // unhandled rejection.
-  publish(event, { to = [] } = {}) {
+  //
+  // `durable` (a job event that carries money, such as a tick): the wraps are written to the outbox BEFORE the first send, and leave it
+  // only when a relay accepts them. The returned promise then has `.stored`: true when every wrap is safely saved on this device. Until
+  // then the caller must not let go of the ecash the event carries (features/payments/handoff.js).
+  publish(event, { to = [], durable = false } = {}) {
     this._store(event);
-    if (SEALED_KINDS.has(event.kind)) return this._publishSealed(event, recipientsOf(event, to));
+    if (SEALED_KINDS.has(event.kind)) return this._publishSealed(event, recipientsOf(event, to), durable);
     return this._send(event).then((ok) => {
       if (!ok) this._enqueue(event);
       return ok;
@@ -266,13 +270,28 @@ class NostrRelay {
   }
 
   // A job event goes out ONLY inside gift wraps, one for each person who must read it (nostr/sealing.js). True when any wrap was accepted.
-  _publishSealed(inner, recipients) {
-    return Promise.all(recipients.map((pk) => this._sendWrap(inner, wrap(inner, pk)))).then((r) => r.some(Boolean));
+  _publishSealed(inner, recipients, durable = false) {
+    const wraps = recipients.map((pk) => wrap(inner, pk));
+    let stored = durable && wraps.length > 0;
+    if (durable) for (const w of wraps) if (!this._enqueue(w, inner, { sending: true })) stored = false;
+    const sent = Promise.all(wraps.map((w) => this._sendWrap(inner, w, durable))).then((r) => r.some(Boolean));
+    sent.stored = stored;
+    return sent;
   }
 
-  async _sendWrap(inner, w) {
+  async _sendWrap(inner, w, durable = false) {
     const ok = await this._send(w);
-    if (!ok) this._enqueue(w, inner);
+    const waiting = this.outbox.get(w.id);
+    if (ok) {
+      if (waiting) { this.outbox.delete(w.id); this._saveOutbox(); }
+    } else if (durable && waiting) {
+      waiting.sending = false; // the first try failed: it is an ordinary waiting update now
+      waiting.tries++;
+      this._saveOutbox();
+      this._schedule();
+    } else if (!durable) {
+      this._enqueue(w, inner);
+    }
     return ok;
   }
 
@@ -283,27 +302,31 @@ class NostrRelay {
   }
 
   // ── Outbox: events no relay has accepted yet ──
-  outboxSize() { return this.outbox.size; }
+  // An entry whose FIRST send is still running (`sending`, a durable publish) is not "waiting" yet: it is counted and aged only once that try failed.
+  outboxSize() { let n = 0; for (const o of this.outbox.values()) if (!o.sending) n++; return n; }
   // How long (ms) this event has been waiting in the outbox; 0 if it is not waiting (sent, or never failed).
   // `id` is a plain event's id or the id of a sealed event (the oldest of its waiting wraps counts).
   outboxAge(id) {
     let at = 0;
-    for (const [k, o] of this.outbox) if ((k === id || o.inner?.id === id) && (!at || o.at < at)) at = o.at;
+    for (const [k, o] of this.outbox) if (!o.sending && (k === id || o.inner?.id === id) && (!at || o.at < at)) at = o.at;
     return at ? Date.now() - at : 0;
   }
-  oldestOutboxAge() { let m = 0; for (const o of this.outbox.values()) m = Math.max(m, Date.now() - o.at); return m; }
+  oldestOutboxAge() { let m = 0; for (const o of this.outbox.values()) if (!o.sending) m = Math.max(m, Date.now() - o.at); return m; }
   onOutbox(fn) { this.outboxListeners.add(fn); return () => this.outboxListeners.delete(fn); }
 
-  _enqueue(event, inner = null) {
-    if (event.kind >= 20000 && event.kind < 30000) return; // ephemeral: stale by the time it could be re-sent
-    if (!this.outbox.has(event.id)) this.outbox.set(event.id, { event, inner, tries: 0, at: Date.now() });
-    this._saveOutbox();
-    this._schedule();
+  // Returns true when the event is saved in the outbox on this device (false: an ephemeral event, or the browser would not save it).
+  _enqueue(event, inner = null, { sending = false } = {}) {
+    if (event.kind >= 20000 && event.kind < 30000) return false; // ephemeral: stale by the time it could be re-sent
+    if (!this.outbox.has(event.id)) this.outbox.set(event.id, { event, inner, tries: 0, at: Date.now(), sending });
+    const saved = this._saveOutbox();
+    if (!sending) this._schedule();
+    return saved;
   }
 
   _schedule() {
-    if (this._retryTimer || !this.outbox.size) return;
-    const tries = Math.min(...[...this.outbox.values()].map((o) => o.tries));
+    const waiting = [...this.outbox.values()].filter((o) => !o.sending);
+    if (this._retryTimer || !waiting.length) return;
+    const tries = Math.min(...waiting.map((o) => o.tries));
     const delay = this.retryDelays[Math.min(tries, this.retryDelays.length - 1)];
     this._retryTimer = setTimeout(() => { this._retryTimer = null; this.flushOutbox(); }, delay);
   }
@@ -313,7 +336,7 @@ class NostrRelay {
     const day = 86400000;
     for (const [id, o] of this.outbox) if (Date.now() - o.at > day) this.outbox.delete(id);
     await Promise.all(
-      [...this.outbox.values()].map(async (o) => {
+      [...this.outbox.values()].filter((o) => !o.sending).map(async (o) => {
         o.tries++;
         if (await this._send(o.event)) this.outbox.delete(o.event.id);
       })
@@ -322,9 +345,12 @@ class NostrRelay {
     this._schedule();
   }
 
+  // Writes the outbox to the browser's storage. Returns false when the browser would not save it (a full or blocked storage).
   _saveOutbox() {
-    try { localStorage.setItem("nostrride_outbox", JSON.stringify([...this.outbox.values()].map((o) => ({ event: o.event, inner: o.inner, at: o.at })))); } catch { /* no storage */ }
-    this.outboxListeners.forEach((fn) => { try { fn(this.outbox.size); } catch { /* ignore */ } });
+    let saved = true;
+    try { localStorage.setItem("nostrride_outbox", JSON.stringify([...this.outbox.values()].map((o) => ({ event: o.event, inner: o.inner, at: o.at })))); } catch { saved = false; }
+    this.outboxListeners.forEach((fn) => { try { fn(this.outboxSize()); } catch { /* ignore */ } });
+    return saved;
   }
 
   _loadOutbox() {

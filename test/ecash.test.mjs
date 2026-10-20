@@ -125,6 +125,81 @@ await assert.rejects(() => unlucky.payInvoice(MINT, "lnbc100n1fails"), (e) => /s
 assert.equal(unlucky.balance(MINT), 1000, "a failed Lightning payment loses nothing");
 assert.equal(unlucky.pendingList().length, 0);
 net[MINT].failMelt = false;
+
+// ── A Lightning payment whose outcome is NOT clear: the app asks the mint before it decides ──
+const fund = async (sats) => { const w = build(net); const f = await w.fundStart(MINT, sats); net[MINT].quotes[f.id].state = "PAID"; await w.claim(f.id); return w; };
+{
+  // The mint is still sending it (PENDING): the coins are held, the balance does not count them, nothing is called "failed".
+  const w = await fund(1000);
+  net[MINT].meltMode = "pending";
+  await assert.rejects(() => w.payInvoice(MINT, "lnbc200n1slow"), (e) => e instanceof EcashError && e.code === "pending" && !/failed/i.test(e.message));
+  assert.equal(w.pendingList().length, 1, "the coins wait in pending");
+  assert.ok(w.balance(MINT) < 800, "and are not in the balance: " + w.balance(MINT));
+  await w.recoverPending(0);
+  assert.equal(w.pendingList().length, 1, "still pending at the mint: nothing moves");
+  // The payment goes through.
+  for (const p of w.pendingList()[0].proofs) { net[MINT].pending.delete(p.secret); net[MINT].spent.add(p.secret); }
+  await w.recoverPending(0);
+  assert.equal(w.pendingList().length, 0, "it went out: the coins are forgotten");
+  assert.ok(w.balance(MINT) < 800);
+  // A second one fails at the end: the coins come back.
+  const v = await fund(1000);
+  await assert.rejects(() => v.payInvoice(MINT, "lnbc200n1slow"), (e) => e.code === "pending");
+  for (const p of v.pendingList()[0].proofs) net[MINT].pending.delete(p.secret);
+  await v.recoverPending(0);
+  assert.equal(v.pendingList().length, 0);
+  assert.equal(v.balance(MINT), 1000, "the mint released the coins: they are back");
+  net[MINT].meltMode = null;
+}
+{
+  // The payment went out but the answer was lost: the mint says the coins are spent, so it is paid. No second try is invited.
+  const w = await fund(1000);
+  net[MINT].meltMode = "lost";
+  const paidBefore = net[MINT].paidInvoices.length;
+  const r = await w.payInvoice(MINT, "lnbc300n1lost");
+  assert.equal(r.paidSats, 300);
+  assert.equal(net[MINT].paidInvoices.length, paidBefore + 1);
+  assert.equal(w.pendingList().length, 0);
+  assert.ok(w.balance(MINT) <= 1000 - 300 - 2, "the coins are gone: " + w.balance(MINT));
+  // The request never reached the mint: the coins are unspent and come back, with a plain message.
+  const v = await fund(1000);
+  net[MINT].meltMode = "dropped";
+  await assert.rejects(() => v.payInvoice(MINT, "lnbc300n1dropped"), (e) => /still here/.test(e.message));
+  assert.equal(v.balance(MINT), 1000);
+  assert.equal(v.pendingList().length, 0);
+  // The mint cannot be asked afterwards: nothing is guessed, the coins stay pending.
+  const u = await fund(1000);
+  net[MINT].meltMode = "lost";
+  net[MINT].statesDown = true;
+  await assert.rejects(() => u.payInvoice(MINT, "lnbc300n1unknown"), (e) => e.code === "pending");
+  assert.equal(u.pendingList().length, 1);
+  net[MINT].statesDown = false;
+  await u.recoverPending(0);
+  assert.equal(u.pendingList().length, 0, "a minute later the mint says spent: forgotten");
+  net[MINT].meltMode = null;
+}
+
+// ── A browser that will not keep the wallet: no money moves ──
+{
+  let full = false, saves = 0;
+  let saved = null;
+  const store = { load: () => saved && JSON.parse(saved), save: (s) => { saves++; if (full) return false; saved = JSON.stringify(s); return true; }, erase: () => { saved = null; } };
+  const w = build(net, store);
+  const f = await w.fundStart(MINT, 500); net[MINT].quotes[f.id].state = "PAID"; await w.claim(f.id);
+  const bal = w.balance(MINT);
+  full = true;
+  await assert.rejects(() => w.pay(MINT, 100), (e) => e.code === "storage" && e.definitive === false);
+  await assert.rejects(() => w.fundStart(MINT, 100), (e) => e.code === "storage");
+  await assert.rejects(() => w.redeem("cashuBfakeAAAA"), (e) => e.code === "storage");
+  assert.equal(w.balance(MINT), bal, "nothing was moved");
+  assert.equal(w.saveOk, false, "the wallet knows it is not saved");
+  assert.equal(w.retrySave(), false);
+  full = false;
+  assert.equal(w.retrySave(), true);
+  const ok = await w.pay(MINT, 100);
+  assert.equal(ok.sats, 100, "money moves again once the browser keeps the wallet");
+  assert.equal(w.saveOk, true);
+}
 await assert.rejects(() => build(net).payInvoice(MINT, "lnbc10n1empty"), (e) => e.code === "funds", "an empty wallet cannot pay");
 
 // ── Sending to another wallet: a token to hand over, and taking it back ──

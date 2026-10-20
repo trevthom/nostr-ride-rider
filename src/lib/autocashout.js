@@ -7,7 +7,7 @@
 //    getAutoCashOut(pk) / setAutoCashOut(pk, amount, code)   the saved choice: { amount, code } or null (off). Per account, per device
 //    autoThresholdSats(choice, price)                        the amount in sats at the BTC price (in the choice's own currency)
 //    autoCashOutDue({...})                                   should the app cash out this mint now?
-//  Rules: it needs a cash out location; it never runs while a ride is running (the wallet is busy with the ride);
+//  Rules: it needs a PINNED cash out address (lib/cashoutto.js: confirmed on this device; the profile's address alone is not enough); it never runs while a ride is running (the wallet is busy with the ride);
 //  a price must be known (never guess one); after a failure it waits AUTO_RETRY_MS before it tries again.
 // ════════════════════════════════════════════════════════════
 
@@ -41,10 +41,10 @@ export function autoThresholdSats(choice, price) {
   return Math.max(1, satsFromFiat(choice.amount, price));
 }
 
-// choice: the saved choice. price: BTC price in the choice's currency (null when unknown). balanceSats: what is held at ONE mint.
+// choice: the saved choice. price: BTC price in the choice's currency (null when unknown). balanceSats: what is held at ONE mint. to: the pinned address.
 // failedAt: ms of the last failed try (0 for none). Returns true when the app should cash out now.
-export function autoCashOutDue({ choice, price, balanceSats, lud16, locked = false, failedAt = 0, now = Date.now() }) {
-  if (!choice || !lud16 || locked) return false;
+export function autoCashOutDue({ choice, price, balanceSats, to, locked = false, failedAt = 0, now = Date.now() }) {
+  if (!choice || !to || locked) return false;
   const need = autoThresholdSats(choice, price);
   if (need == null || !(balanceSats >= need)) return false;
   if (failedAt && now - failedAt < AUTO_RETRY_MS) return false;
