@@ -1,6 +1,7 @@
 // ════════════════════════════════════════════════════════════
 //  SAFETY SECTION (both Account screens) — Trusted contacts for "Share my trip"
-//  and SOS. Stored on this device only; the app never uploads them.
+//  and SOS. Saved on this device and in the encrypted settings backup, so they follow the person to the other app; never
+//  published in the clear.
 // ════════════════════════════════════════════════════════════
 
 import { useState } from "react";
@@ -22,7 +23,7 @@ export default function SafetySection() {
   return (
     <div>
       <SectionLabel>Trusted contacts</SectionLabel>
-      <p className="text-neutral-500 text-sm mb-3">People you can text a live link to during a trip. Saved on this device only.</p>
+      <p className="text-neutral-500 text-sm mb-3">People you can text a live link to during a trip. Saved on this device and in your encrypted backup, so they follow you to the driver app.</p>
       {list.map((c) => (
         <div key={c.phone} className="flex items-center justify-between py-2 border-b border-neutral-100">
           <span className="text-[15px]">{c.name} <span className="text-neutral-500">{c.phone}</span></span>

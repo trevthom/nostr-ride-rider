@@ -156,7 +156,7 @@ export function ContactMethods() {
     <div>
       <SectionLabel>Contact methods</SectionLabel>
       <p className="text-neutral-500 text-sm mb-3">
-        The other person can use these to reach you during a trip.
+        The other person can use these to reach you during a trip. They are saved in your profile, so they follow you to the driver app.
       </p>
       {comm.map((c, i) => (
         <div key={i} className="flex items-center justify-between py-2 border-b border-neutral-100">
@@ -208,7 +208,7 @@ export function BlockedSection() {
     <div>
       <SectionLabel>Blocked users</SectionLabel>
       <p className="text-neutral-500 text-sm mb-3">
-        Add someone by npub, or from their profile. Blocking is saved on this device and the other person is not told.
+        Add someone by npub, or from their profile. Blocking is saved on this device and in your encrypted backup, so it follows you to the driver app. The other person is not told.
       </p>
       <div className="flex gap-2">
         <input

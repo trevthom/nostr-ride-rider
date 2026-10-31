@@ -1,7 +1,7 @@
 // ════════════════════════════════════════════════════════════
 //  ACTIVE TRIP (before pickup) — What the rider sees after requesting:
 //    Searching     "Finding your driver…" while no one has replied (a request sent to every driver nearby)
-//    Asked         a request the rider sent to chosen drivers (list, map, or "Notify nearest driver immediately") while none has accepted:
+//    Asked         a request the rider sent to chosen drivers (from the list or the map) while none has accepted:
 //                  who was asked, who declined, and the list/map to ask another driver (components/DriverBrowser.jsx)
 //    ChooseDriver  drivers who accepted, each with their own rates (only the preferred gender if the rider asked, then fastest)
 //    ConfirmDriver the chosen driver's terms and the rider's ecash balance. There is no deposit:

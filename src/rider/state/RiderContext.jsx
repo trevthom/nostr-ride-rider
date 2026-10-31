@@ -33,7 +33,6 @@ import { activeRideFor, isOpenRide, upcomingRidesFor } from "../../lib/trips.js"
 import { rideDriver, rideEnding, rideKey, rideStage, rideStatus, rideVersions, rideTimes, rideExpiryMs, isRideExpired } from "../../lib/rides.js";
 import { hideList } from "../../lib/blocks.js";
 import { onlyPreferred } from "../../lib/gender.js";
-import { nearestDriver } from "../../lib/audience.js";
 import { addAudience } from "../../lib/audienceStore.js";
 import { getProfile } from "../../nostr/profiles.js";
 import { rememberRates } from "../../lib/ratechange.js";
@@ -94,8 +93,6 @@ export function RiderProvider({ children }) {
   // It stays on this device and is never published.
   const [genderPref, setGenderPrefState] = useState(() => getSetting("genderPref", ""));
   const setGenderPref = useCallback((v) => { setGenderPrefState(v); setSetting("genderPref", v); }, []);
-  const [notifyNearest, setNotifyNearestState] = useState(() => getSetting("notifyNearest", false) === true);
-  const setNotifyNearest = useCallback((v) => { setNotifyNearestState(!!v); setSetting("notifyNearest", !!v); }, []);
   const drivers = onlyPreferred(
     (myPosition
       ? allDrivers.filter((d) => haversineDistance(myPosition.lat, myPosition.lng, d.lat, d.lng) <= 25)
@@ -303,7 +300,7 @@ export function RiderProvider({ children }) {
         pushNotice(`You need at least ${moneyText(lowBalanceSats(usdPrice), btcPrice)} in your ecash wallet to request a ride. Add funds in Account → Wallets.`);
         return null;
       }
-      // `to` (a list of drivers): the rider chose them (browse list, map, "Notify nearest driver immediately"). The request goes to them only.
+      // `to` (a list of drivers): the rider chose them from the browse list or the map. The request goes to them only.
       const directed = Array.isArray(to) && to.length > 0;
       const d = "ride-" + Date.now();
       // The rates the rider saw for each chosen driver: if the driver's offer carries other rates, the rider is told before accepting (lib/ratechange.js).
@@ -567,8 +564,8 @@ export function RiderProvider({ children }) {
     plan, setPlan, resetPlan,
     share, startShare, stopShare, shareUpdate, shareUrl,
     activeRide, focused: !!focused, focusRide: (r) => setFocusId(r ? r.id : null), upcoming, receipt, dismissReceipt,
-    genderPref, setGenderPref, notifyNearest, setNotifyNearest,
-    notifyDriver, nearestOf: (to) => nearestDriver(drivers, to)?.pubkey || null,
+    genderPref, setGenderPref,
+    notifyDriver,
     requestRide, proposePickup, confirmDriver, recordPayment, confirmRide, proposeStop, finishRide, declineOffer, recentPlaces,
     money, payNow, allowMore, reportMiles, payTerms, payMint, screenMayDim,
     nearestDriverEta: (to) => {

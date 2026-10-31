@@ -15,6 +15,7 @@ const { EVENT_KINDS: K } = await import(`${R}/nostr/eventKinds.js`);
 const me = generateKeypair(), other = generateKeypair(), friend = generateKeypair();
 setSetting("blocked", [{ pubkey: other.publicKey, name: "Mallory", at: 1 }]);
 setSetting("units", "km"); setSetting("currency", "EUR"); setSetting("dark", true); setSetting("requestRadius", 40);
+setSetting("trustedContacts", [{ name: "Ana", phone: "+15550100" }]); // shared with the driver app through the backup
 setSetting("autoCashOut_" + me.publicKey.slice(0, 16), { amount: 25, code: "USD" });
 setSetting("ecash_" + me.publicKey.slice(0, 16), ["SECRET-COINS"]); // must never be backed up
 setSetting("prices", { prices: { USD: 1 }, at: 1 });
@@ -27,6 +28,7 @@ const data = B.collectBackup(me.publicKey, 1000);
 assert.equal(data.v, 1); assert.equal(data.at, 1000);
 assert.deepEqual(data.settings.blocked, [{ pubkey: other.publicKey, name: "Mallory", at: 1 }]);
 assert.equal(data.settings.units, "km"); assert.equal(data.settings.currency, "EUR"); assert.equal(data.settings.dark, true);
+assert.deepEqual(data.settings.trustedContacts, [{ name: "Ana", phone: "+15550100" }]);
 assert.deepEqual(data.settings["autoCashOut_" + me.publicKey.slice(0, 16)], { amount: 25, code: "USD" });
 assert.deepEqual(data.settings.relays, ["wss://relay.one", "wss://relay.two"]);
 assert.deepEqual(data.vouches, [friend.publicKey]);
@@ -58,6 +60,7 @@ const set = B.applyBackup(data);
 assert.ok(set.includes("blocked") && set.includes("relays") && set.includes("currency"));
 assert.deepEqual(getSetting("blocked", []), [{ pubkey: other.publicKey, name: "Mallory", at: 1 }]);
 assert.equal(getSetting("units", "mi"), "km"); assert.equal(getSetting("requestRadius", 0), 40);
+assert.deepEqual(getSetting("trustedContacts", []), [{ name: "Ana", phone: "+15550100" }], "trusted contacts follow the person to the other app");
 assert.deepEqual(getRelays(), ["wss://relay.one", "wss://relay.two"]);
 assert.deepEqual(getSetting("riderDone", []), ["keep me"], "settings outside the backup are left alone");
 // a hostile or damaged backup cannot write anything it should not

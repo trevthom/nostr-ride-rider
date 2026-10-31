@@ -26,7 +26,7 @@ import { getPeople, getAudience, addAudience, answerersOf } from "../lib/audienc
 import { useBackup } from "./useBackup.js";
 import { applyAppearance } from "../lib/appearance.js";
 import { setUnits, getUnits } from "../lib/units.js";
-import { getProfile } from "../nostr/profiles.js";
+import { getMetadata, getProfile } from "../nostr/profiles.js";
 import { myVehicle } from "../lib/privacy.js";
 import { forgetKey } from "../nostr/keystore.js";
 import { loadSession, saveSession, clearSession, saveView, loadView } from "../lib/session.js";
@@ -432,9 +432,13 @@ export function AppProvider({ initialView, children }) {
     (async () => {
       await relay.fetchProfile(user.publicKey);
       const p = getProfile(user.publicKey);
-      if (alive && p && (p.picture || p.vehicle || p.lud16 || p.gender || p.rates || p.stats)) {
+      // `communication` is the profile's contact-method list. It is shared with the driver app, so take it whenever the
+      // newest profile has the field (an empty list is a real answer: every method was removed in the other app).
+      const hasComm = Array.isArray(getMetadata(user.publicKey)?.communication);
+      if (alive && p && (hasComm || p.picture || p.vehicle || p.lud16 || p.gender || p.rates || p.stats)) {
         setUser((u) => u && ({
           ...u,
+          comm: hasComm ? p.comm : (u.comm || []),
           picture: u.picture || p.picture || "",
           lud16: u.lud16 || p.lud16 || "",
           vehicle: u.vehicle || myVehicle(u.publicKey, u.sk),
@@ -447,15 +451,22 @@ export function AppProvider({ initialView, children }) {
     return () => { alive = false; };
   }, [user?.publicKey]);
 
-  // The profile (kind 0) is shared by the Rider and Driver apps. A cash out location saved in the other app arrives with the next look at
-  // our own profile: every 5 minutes and when this app comes back to the front.
+  // The profile (kind 0) is shared by the Rider and Driver apps. A cash out location or contact method saved in the other app
+  // arrives with the next look at our own profile: every 5 minutes and when this app comes back to the front.
   useEffect(() => {
     if (!user?.publicKey) return undefined;
     const me = user.publicKey;
     const look = async () => {
       await relay.fetchProfile(me);
-      const lud16 = getProfile(me)?.lud16 || "";
-      setUser((u) => (u && u.publicKey === me && (u.lud16 || "") !== lud16 ? { ...u, lud16 } : u));
+      const p = getProfile(me);
+      const hasComm = Array.isArray(getMetadata(me)?.communication);
+      const lud16 = p?.lud16 || "";
+      setUser((u) => {
+        if (!u || u.publicKey !== me) return u;
+        const commChanged = hasComm && JSON.stringify(p.comm) !== JSON.stringify(u.comm || []);
+        if ((u.lud16 || "") === lud16 && !commChanged) return u;
+        return { ...u, lud16, ...(hasComm ? { comm: p.comm } : {}) };
+      });
     };
     const onVisible = () => { if (!document.hidden) look(); };
     const id = setInterval(look, 5 * 60000);

@@ -6,8 +6,8 @@
 //    pin     the pickup OR the drop-off set by dragging the map under a pin (components/PinPicker; plan.pinField says which)
 //    quote   route on the map and the drivers nearby, each with the cost of THIS trip at their own rates (name · price). The fare is
 //            always the chosen driver's own rates (base, per mile, per minute), paid tick by tick. Now/Later, driver preference,
-//            "Notify nearest driver immediately", "Total additional passengers" (the driver is told), "Notes for driver" → Request ride.
-//            With more than one driver nearby (and the box not ticked) Request ride opens
+//            "Total additional passengers" (a stepper; the driver is told), "Notes for driver" → Request ride.
+//            With more than one driver nearby Request ride opens
 //    drivers the list of drivers (and "See map") to ask one of them (components/DriverBrowser.jsx)
 //  Going back: the back arrow on the search page returns to where it was opened from (plan.from: the
 //  home screen, or the quote). The close button (X) on the search, pin and quote pages cancels the
@@ -145,8 +145,8 @@ function Idle() {
 }
 
 function Quote() {
-  const { btcPrice, usdPrice, prices, currency, ecash, ecashOff, pushNotice } = useApp();
-  const { plan, setPlan, resetPlan, drivers, requestRide, nearestDriverEta, gps, myPosition, geoError, notifyNearest, setNotifyNearest, nearestOf, genderPref } = useRider();
+  const { btcPrice, usdPrice, prices, ecash, ecashOff, pushNotice } = useApp();
+  const { plan, setPlan, resetPlan, drivers, requestRide, nearestDriverEta, gps, myPosition, geoError } = useRider();
   const { pickup, dropoff } = plan;
   // The same $5 rule as the home screen: a wallet that fell below it while planning cannot send the request.
   const minSats = lowBalanceSats(usdPrice);
@@ -163,17 +163,10 @@ function Quote() {
   // works out to the same cents on both screens.
   const trip = route && { miles: Math.round(route.miles * 10) / 10, minutes: route.minutes };
   const quote = trip ? quoteFare(trip, usdPrice) : null; // the app's own rates (the fallback)
-  // Every driver nearby sets their own rates (in their own currency). Show each one's fare for this trip in the rider's
-  // currency. Sats are the common ground, so drivers in other currencies compare fairly.
-  const typicals = trip
-    ? drivers
-        .map((d) => ({ id: d.pubkey, name: d.name || "Driver", sats: driverFare(d, trip, prices) }))
-        .filter((t) => t.sats != null)
-        .sort((a, b) => a.sats - b.sats)
-    : [];
   const appSats = quote ? typicalSats(null, trip.miles, trip.minutes, { USD: usdPrice }) ?? quote.sats : 0; // the app's own rates (only when no driver is nearby)
   const eta = nearestDriverEta(pickup);
   const timed = plan.when !== "ASAP";
+  const passengers = plan.passengers || 0;
   const localNow = (offsetMs = 0) =>
     new Date(Date.now() + offsetMs - new Date().getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 
@@ -192,14 +185,12 @@ function Quote() {
       const sats = d ? driverFare(d, trip, prices) : null;
       requestRide({ ...common, fareSats: sats ?? 0, suggestedSats: sats ?? 0, to: [pk], ratesSeen: { [pk]: ratesOrApp(d?.rates) } });
     };
-    // "Notify nearest driver immediately": the request goes to the nearest driver alone, with no list to browse.
-    const nearest = notifyNearest ? nearestOf(pickup) : null;
-    if (nearest) return ask(nearest);
     // More than one driver nearby: the rider browses them (list or map) and asks one.
     if (drivers.length > 1) return setPlan({ step: "drivers", route: { miles: route.miles, minutes: route.minutes } });
     // No driver or one driver: the request goes out to the drivers who are online (a driver who arrives later gets it too).
-    const typical = typicals.length ? typicals[0].sats : appSats;
-    requestRide({ ...common, fareSats: typical, suggestedSats: typical });
+    // With one, the fare is that driver's own rates for this trip; with none, the app's rates are the fallback until one accepts.
+    const sats = drivers.length === 1 ? driverFare(drivers[0], trip, prices) : null;
+    requestRide({ ...common, fareSats: sats ?? appSats, suggestedSats: sats ?? appSats });
   };
 
   const arrive = new Date(Date.now() + ((eta || 5) + (route?.minutes || 0)) * 60000).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
@@ -254,34 +245,10 @@ function Quote() {
           </div>
         </div>
 
-        {quote && (
-          <div className="mt-3 rounded-2xl bg-neutral-100 px-4 py-3">
-            {typicals.length > 0 ? (
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500 mb-1.5">Drivers nearby</p>
-                <ul className="flex flex-wrap gap-1.5">
-                  {typicals.slice(0, 6).map((t) => (
-                    <li key={t.id} className="text-xs bg-white border border-neutral-200 rounded-full px-2.5 py-1">
-                      <span className="font-semibold">{t.name}</span> · {moneyText(t.sats, btcPrice)}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : (
-              <p className="text-xs text-neutral-500">No {genderPref === "female" ? "female " : genderPref === "male" ? "male " : ""}drivers are online nearby right now. You can still request a ride.</p>
-            )}
-          </div>
-        )}
         {pickup.fromGps && gps !== "good" && (
           <p className="text-xs text-amber-700 bg-amber-50 rounded-xl px-3 py-2 mt-2" role="alert">
             Your pickup comes from a weak location. {gpsMessage(gps, myPosition, geoError)} Tap Edit to check the address.
           </p>
-        )}
-        {quote && !btcPrice && (
-          <p className="text-xs text-amber-700 mt-1.5">The bitcoin price for {currency} is not available yet, so amounts show in sats.</p>
-        )}
-        {quote && btcPrice && !quote.live && currency === "USD" && (
-          <p className="text-xs text-amber-700 mt-1.5">Live bitcoin price unavailable, so this uses an estimated rate.</p>
         )}
 
         {/* When */}
@@ -318,28 +285,30 @@ function Quote() {
 
         <GenderPref className="mt-4" />
 
-        <label className="flex items-center gap-3 mt-4 text-[15px] font-medium">
-          <input type="checkbox" checked={notifyNearest} onChange={(e) => setNotifyNearest(e.target.checked)} className="w-5 h-5 accent-black shrink-0" />
-          Notify nearest driver immediately
-        </label>
-
         {/* How many people get in besides the rider. The driver sees it on the request card before accepting. */}
-        <p className="text-sm font-semibold mt-4 mb-1.5">Total additional passengers:</p>
-        <div className="flex gap-2" role="group" aria-label="Total additional passengers">
-          {[0, 1, 2, 3, 4].map((n) => {
-            const on = (plan.passengers || 0) === n;
-            return (
-              <button
-                key={n}
-                type="button"
-                aria-pressed={on}
-                onClick={() => setPlan({ passengers: n })}
-                className={`flex-1 py-2.5 rounded-full text-sm font-semibold ${on ? "bg-black text-white" : "bg-neutral-100 text-neutral-700"}`}
-              >
-                {n}
-              </button>
-            );
-          })}
+        <div className="flex items-center gap-4 mt-4">
+          <p className="text-sm font-semibold flex-1">Total additional passengers:</p>
+          <div className="flex items-center rounded-full bg-neutral-100" role="group" aria-label="Total additional passengers">
+            <button
+              type="button"
+              aria-label="Remove a passenger"
+              onClick={() => setPlan({ passengers: Math.max(0, passengers - 1) })}
+              disabled={passengers <= 0}
+              className="w-10 h-10 flex items-center justify-center rounded-full text-black disabled:text-neutral-300 active:bg-neutral-200 disabled:active:bg-transparent"
+            >
+              <Icon name="minus" size={18} />
+            </button>
+            <span className="w-7 text-center text-sm font-semibold tabular-nums" aria-live="polite">{passengers}</span>
+            <button
+              type="button"
+              aria-label="Add a passenger"
+              onClick={() => setPlan({ passengers: Math.min(4, passengers + 1) })}
+              disabled={passengers >= 4}
+              className="w-10 h-10 flex items-center justify-center rounded-full text-black disabled:text-neutral-300 active:bg-neutral-200 disabled:active:bg-transparent"
+            >
+              <Icon name="plus" size={18} />
+            </button>
+          </div>
         </div>
         <p className="text-neutral-500 text-xs mt-1">Leave it at 0 when you ride alone.</p>
 

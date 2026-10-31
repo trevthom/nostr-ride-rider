@@ -148,7 +148,7 @@ export function onlyPreferredOffers(offers, pref) {
 }
 
 // ── A request sent to chosen drivers only ──
-// The rider picked drivers from the list or the map (or ticked "Notify nearest driver immediately"). Such a request carries `directed: true`;
+// The rider picked drivers from the list or the map. Such a request carries `directed: true`;
 // it reaches only the drivers the rider named (lib/audienceStore.js), and AudienceSync does not spread it to others.
 export const isDirected = (request) => parse(request)?.directed === true;
 

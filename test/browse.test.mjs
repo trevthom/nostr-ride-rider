@@ -1,4 +1,4 @@
-// Browsing drivers: a request sent to chosen drivers only, the driver's decline, "Female only" / "Male only", the nearest driver,
+// Browsing drivers: a request sent to chosen drivers only, the driver's decline, "Female only" / "Male only",
 // and the warning when a driver's rates change before the rider accepts.
 // Run with: npm test
 import assert from "node:assert/strict";
@@ -6,7 +6,6 @@ const R = new URL("../src", import.meta.url).pathname;
 const { relay } = await import(`${R}/nostr/relay.js`);
 const T = await import(`${R}/lib/trips.js`);
 const G = await import(`${R}/lib/gender.js`);
-const A = await import(`${R}/lib/audience.js`);
 const RC = await import(`${R}/lib/ratechange.js`);
 const { SEALED_KINDS, recipientsOf } = await import(`${R}/nostr/sealing.js`);
 const { generateKeypair } = await import(`${R}/nostr/keys.js`);
@@ -56,12 +55,6 @@ assert.equal(G.matchesGender("female", ""), false, "a driver with no declared ge
 pub(K.METADATA, { name: "Stranger", gender: "male" }, [], stranger);
 assert.equal(G.genderOfDriver({ pubkey: stranger.publicKey }), "male");
 assert.deepEqual(G.onlyPreferred(people, "male").map((p) => p.pubkey).sort(), [d2.publicKey, stranger.publicKey].sort());
-
-// ── The nearest driver ──
-const near = A.nearestDriver([{ pubkey: "a", lat: 10, lng: 10 }, { pubkey: "b", lat: 1.001, lng: 1.001 }, { pubkey: "c", lat: 5, lng: 5 }], place);
-assert.equal(near.pubkey, "b");
-assert.equal(A.nearestDriver([], place), null);
-assert.equal(A.nearestDriver([{ pubkey: "a", lat: 1, lng: 1 }], null), null);
 
 // ── The rider is told when a driver's rates change before the rider accepts ──
 const before = { base: 1.5, perMile: 1.1, perMinute: 0.2 };
