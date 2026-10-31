@@ -6,7 +6,7 @@
 
 import { useState } from "react";
 import { getProfile } from "../nostr/profiles.js";
-import { contactHref } from "../lib/contact.js";
+import { contactHref, formatPhoneInput } from "../lib/contact.js";
 import { Modal } from "./Parts.jsx";
 import Icon from "./Icon.jsx";
 
@@ -28,6 +28,7 @@ export default function ContactSheet({ open, onClose, pubkey, name }) {
         <div className="divide-y divide-neutral-100">
           {comm.map((c, i) => {
             const href = contactHref(c.platform, c.handle);
+            const shown = c.platform === "Phone" ? formatPhoneInput(c.handle) : c.handle;
             return (
               <div key={i} className="flex items-center gap-3 py-3">
                 <span className="w-10 h-10 rounded-full bg-neutral-100 flex items-center justify-center shrink-0">
@@ -35,9 +36,9 @@ export default function ContactSheet({ open, onClose, pubkey, name }) {
                 </span>
                 <div className="flex-1 min-w-0">
                   <p className="text-[15px] font-medium">{c.platform}</p>
-                  <p className="text-sm text-neutral-500 truncate">{c.handle}</p>
+                  <p className="text-sm text-neutral-500 truncate">{shown}</p>
                 </div>
-                <button type="button" onClick={() => copy(c.handle, i)} className="text-sm font-medium text-neutral-600 px-2">
+                <button type="button" onClick={() => copy(shown, i)} className="text-sm font-medium text-neutral-600 px-2">
                   {copied === i ? "Copied" : "Copy"}
                 </button>
                 {href && (

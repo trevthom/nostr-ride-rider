@@ -27,15 +27,15 @@ import Icon from "../../ui/Icon.jsx";
 import Money, { moneyText } from "../../ui/Money.jsx";
 import { cleanMintUrl, mintLabel } from "../../lib/mints.js";
 import { requestInvoice, isLightningAddress } from "../../lib/lnurl.js";
+import { isLowBalance } from "../../lib/fare.js";
 import AddFunds from "../payments/AddFunds.jsx";
 import SendEcash from "./SendEcash.jsx";
-import AutoCashOutField from "./AutoCashOutField.jsx";
 import { getMyMint, setMyMint } from "./myMint.js";
 import WalletStart from "./WalletStart.jsx";
 import { useCashOutTo } from "./useCashOutTo.js";
 
 export default function EcashSection({ locked = false, children = null }) {
-  const { ecash, ecashOff, ecashWaiting, disconnectEcash, user, btcPrice, pushNotice } = useApp();
+  const { ecash, ecashOff, ecashWaiting, disconnectEcash, user, btcPrice, usdPrice, pushNotice } = useApp();
   const [mint, setMint] = useState(getMyMint());
   const [draft, setDraft] = useState(mint);
   const [adding, setAdding] = useState(false);
@@ -49,6 +49,7 @@ export default function EcashSection({ locked = false, children = null }) {
   const draftUrl = cleanMintUrl(draft);
   const balances = ecash ? ecash.balances() : {};
   const total = ecash ? ecash.total() : 0;
+  const low = ecash ? isLowBalance(total, usdPrice) : false;
 
   const saveMint = async () => {
     const url = cleanMintUrl(draft);
@@ -140,7 +141,8 @@ export default function EcashSection({ locked = false, children = null }) {
         <>
           <div className="rounded-2xl bg-neutral-100 p-5">
             <p className="text-neutral-500 text-xs">Balance</p>
-            <Money sats={total} stacked className="text-3xl font-bold" />
+            <Money sats={total} stacked className={`text-3xl font-bold ${low ? "text-red-600" : ""}`} subClassName={low ? "text-red-600 text-xs" : "text-neutral-500 text-xs"} />
+            <p className="text-xs text-neutral-500 mt-1">The amount in your currency is an estimate based on the bitcoin price. Your balance is held as bitcoin ecash, so its value can move slightly.</p>
             {Object.entries(balances).map(([url, sats]) => (
               <div key={url} className="flex items-center gap-2 mt-3 text-sm">
                 <span className="flex-1 min-w-0 truncate text-neutral-600">{mintLabel(url)}</span>
@@ -155,8 +157,6 @@ export default function EcashSection({ locked = false, children = null }) {
             {total > 0 && !pinned && !user.lud16 && <p className="text-xs text-amber-700 mt-2">Set a cash out location (a Lightning address) below to cash out.</p>}
             {locked && <p className="text-xs text-neutral-500 mt-2">Cash out and sending are paused while a ride is running.</p>}
           </div>
-
-          <AutoCashOutField />
 
           {children}
 

@@ -12,6 +12,7 @@ import { buildSignedEvent } from "../../nostr/events.js";
 import { getMetadata } from "../../nostr/profiles.js";
 import { shortNpub } from "../../nostr/keys.js";
 import { profileContent } from "../../lib/profilecontent.js";
+import { formatPhoneInput } from "../../lib/contact.js";
 import { parsePubkey } from "../../lib/vouches.js";
 import { tripCounts } from "../../lib/rides.js";
 import { useUnits, formatDistance } from "../../lib/units.js";
@@ -24,6 +25,7 @@ import Icon from "../../ui/Icon.jsx";
 import Button from "../../ui/Button.jsx";
 import RelayEditor from "../../ui/RelayEditor.jsx";
 import { SectionLabel, inputCls, ConfirmDialog } from "../../ui/Parts.jsx";
+import PrivateNote from "../../ui/PrivateNote.jsx";
 
 // Merge a patch into the user and republish the full profile (kind 0) so
 // other users see the latest name/photo/vehicle. Kind 0 is shared with every
@@ -160,7 +162,7 @@ export function ContactMethods() {
       </p>
       {comm.map((c, i) => (
         <div key={i} className="flex items-center justify-between py-2 border-b border-neutral-100">
-          <span className="text-[15px]">{c.platform}: <span className="text-neutral-600">{c.handle}</span></span>
+          <span className="text-[15px]">{c.platform}: <span className="text-neutral-600">{c.platform === "Phone" ? formatPhoneInput(c.handle) : c.handle}</span></span>
           <button type="button" onClick={() => save({ comm: comm.filter((_, j) => j !== i) })} className="text-sm text-red-600 font-medium">Remove</button>
         </div>
       ))}
@@ -176,9 +178,11 @@ export function ContactMethods() {
         <input
           aria-label="Contact handle or number"
           value={handle}
-          onChange={(e) => setHandle(e.target.value)}
+          onChange={(e) => setHandle(platform === "Phone" ? formatPhoneInput(e.target.value) : e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }}
-          placeholder="Handle or number"
+          placeholder={platform === "Phone" ? "(555) 014-2222" : "Handle or number"}
+          inputMode={platform === "Phone" ? "tel" : undefined}
+          autoComplete={platform === "Phone" ? "tel" : "off"}
           className={`${inputCls} min-w-0`}
         />
         <Button size="md" full={false} onClick={add} disabled={!handle.trim()} className="px-4">Add</Button>
@@ -237,43 +241,12 @@ export function BlockedSection() {
                   <span className="text-[15px] truncate">{name}</span>
                   <button type="button" onClick={() => unblockUser(b.pubkey)} className="text-sm font-medium underline shrink-0">Unblock</button>
                 </div>
-                <BlockNote name={name} note={b.note || ""} onSave={(note) => setBlockNote(b.pubkey, note)} />
+                <PrivateNote name={name} note={b.note || ""} onSave={(note) => setBlockNote(b.pubkey, note)} />
               </li>
             );
           })}
         </ul>
       )}
-    </div>
-  );
-}
-
-// A note the person keeps about someone they blocked. It stays with the block list (and the encrypted settings backup),
-// and is saved when the field loses focus or Enter is pressed.
-function BlockNote({ name, note, onSave }) {
-  const [draft, setDraft] = useState(note);
-  const [saved, setSaved] = useState(false);
-  useEffect(() => setDraft(note), [note]);
-  const save = () => {
-    const next = draft.trim();
-    if (next === note) return;
-    onSave(next);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 1500);
-  };
-  return (
-    <div className="mt-2">
-      <textarea
-        aria-label={`Note about ${name}`}
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={save}
-        onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); e.currentTarget.blur(); } }}
-        placeholder="Add a note (only you can see it)"
-        rows={1}
-        maxLength={300}
-        className="w-full bg-neutral-100 rounded-lg px-3 py-2 text-sm text-black placeholder-neutral-500 border border-transparent focus:outline-none focus:border-black focus:bg-white resize-y"
-      />
-      {saved && <p className="text-xs text-neutral-500 mt-1" role="status">Saved</p>}
     </div>
   );
 }

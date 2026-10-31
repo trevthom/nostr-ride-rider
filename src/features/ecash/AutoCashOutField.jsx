@@ -24,6 +24,7 @@ export default function AutoCashOutField() {
   const digits = digitsOf(code);
   const [text, setText] = useState(saved ? String(saved.amount) : "");
   const [note, setNote] = useState("");
+  if (!ecash) return null; // inside the cash out location box: nothing to run before this device has a wallet
   const price = priceFor(code);
   const amount = Number(text);
   const okAmount = text.trim() === "" || (amount > 0 && amount <= AUTO_MAX);
@@ -39,7 +40,7 @@ export default function AutoCashOutField() {
   };
 
   return (
-    <div className="mt-4">
+    <div className="mt-4 pt-4 border-t border-neutral-200">
       <label className="flex items-center gap-2 font-medium text-[15px]">
         <span className="shrink-0">Automatically cash out at: {CURRENCIES[code].symbol}</span>
         <input

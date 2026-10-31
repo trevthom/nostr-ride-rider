@@ -44,6 +44,7 @@ export default function SendEcash({ onClose }) {
   useEffect(() => () => { if (tokenRef.current) walletRef.current?.holdOff(tokenRef.current.id); }, []);
   const [result, setResult] = useState(""); // a finished message
   const have = balances[mint] || 0;
+  const amountText = (n) => btcPrice ? `${moneyText(n, btcPrice)} (${Number(n).toLocaleString()} sats)` : `${Number(n).toLocaleString()} sats`;
 
   const invoice = isInvoice(dest);
   const address = !invoice && isLightningAddress(dest);
@@ -72,7 +73,7 @@ export default function SendEcash({ onClose }) {
       throw new Error("Paste a Lightning invoice, or a Lightning address like name@wallet.com.");
     }
     const r = await ecash.payInvoice(mint, pr);
-    setResult(`Sent ${moneyText(r.paidSats, btcPrice)}. Mint fee: ${r.feeSats} sats.`);
+    setResult(`Sent ${amountText(r.paidSats)}. Mint fee: ${r.feeSats} sats.`);
   });
 
   const takeBack = () => run(async () => {
@@ -92,7 +93,7 @@ export default function SendEcash({ onClose }) {
     return (
       <Modal open title="Your ecash token" onClose={done}>
         <p className="text-sm text-neutral-600">
-          This token is worth {moneyText(token.sats, btcPrice)}. Send the text below to the person. They paste it into their ecash wallet.
+          This token is worth {amountText(token.sats)}. Send the text below to the person. They paste it into their ecash wallet.
         </p>
         <p className="text-xs text-red-700 font-semibold mt-2">Keep it secret until then. Anyone with this text can take the money.</p>
         <p className="mt-3 bg-neutral-100 rounded-xl p-3 text-[11px] font-mono break-all max-h-40 overflow-y-auto" data-testid="ecash-token">{token.token}</p>
@@ -153,7 +154,7 @@ export default function SendEcash({ onClose }) {
             <p className="mt-4 text-center text-lg font-bold">{invoiceSats ? moneyText(invoiceSats, btcPrice) : "No amount in this invoice"}</p>
           ) : null}
 
-          <p className="text-xs text-neutral-500 text-center mt-2">You have {moneyText(have, btcPrice)} here. The mint's fee comes on top.</p>
+          <p className="text-xs text-neutral-500 text-center mt-2">You have {amountText(have)} here. The mint's fee comes on top.</p>
           {error && <p className="text-sm text-red-600 mt-2" role="alert">{error}</p>}
           <Button className="mt-4" onClick={how === "token" ? makeToken : sendLightning} loading={!!busy}
             disabled={how === "token" ? !sats : !(invoice ? invoiceSats : address && sats)}>

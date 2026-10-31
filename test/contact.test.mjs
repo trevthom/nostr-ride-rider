@@ -1,7 +1,13 @@
 // Contact links come from untrusted profiles: only safe, fixed-prefix links.
 // Run with: npm test
 import assert from "node:assert/strict";
-const { contactHref } = await import("../src/lib/contact.js");
+const { contactHref, formatPhoneInput } = await import("../src/lib/contact.js");
+assert.equal(formatPhoneInput("5550142222"), "(555) 014-2222");
+assert.equal(formatPhoneInput("555"), "(555");
+assert.equal(formatPhoneInput("555014"), "(555) 014");
+assert.equal(formatPhoneInput("(555) 014-2222"), "(555) 014-2222");
+assert.equal(formatPhoneInput("+44 20 7946 0958"), "+44 20 7946 0958", "international numbers are left as typed");
+assert.equal(formatPhoneInput(""), "");
 assert.equal(contactHref("Phone", "+1 (555) 014-2222"), "tel:+15550142222");
 assert.equal(contactHref("WhatsApp", "+1 555 014 2222"), "https://wa.me/15550142222");
 assert.equal(contactHref("Telegram", "@jordan_rides"), "https://t.me/jordan_rides");

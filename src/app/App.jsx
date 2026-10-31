@@ -3,6 +3,7 @@
 //  Everything shared (key, profile, wallet, settings) is in AppProvider.
 // ════════════════════════════════════════════════════════════
 
+import { useState } from "react";
 import { AppProvider, useApp } from "../state/AppContext.jsx";
 import { RiderProvider, useRider } from "../rider/state/RiderContext.jsx";
 import { AppFrame, TabBar } from "../ui/Layout.jsx";
@@ -16,6 +17,7 @@ import ActivityScreen from "../rider/screens/ActivityScreen.jsx";
 import AccountScreen from "../rider/screens/AccountScreen.jsx";
 import { setAppRole } from "../config/app.js";
 import { viewFor } from "../lib/mode.js";
+import { saveAccountPage } from "../lib/session.js";
 
 setAppRole("rider");
 
@@ -31,14 +33,18 @@ function Shell() {
   const { activeRide, receipt, plan, resetPlan } = useRider();
   const shown = viewFor("ride", view);
   const Screen = SCREENS[shown];
+  const [accountHome, setAccountHome] = useState(0);
   const onTab = (id) => {
+    // The Account tab is always the Account home screen, even when a setting was open. Saving "home" and changing
+    // the key remounts the screen, which reads that saved page.
+    if (id === "account") { saveAccountPage("home"); setAccountHome((n) => n + 1); }
     if (id === "home" && shown === "home" && !activeRide && !receipt && plan.step !== "idle") resetPlan();
     else setView(id);
   };
   return (
     <AppFrame>
       <ErrorBoundary resetKey={shown}>
-        <Screen />
+        <Screen key={shown === "account" ? `account-${accountHome}` : shown} />
       </ErrorBoundary>
       <TabBar items={TABS} active={shown} onChange={onTab} />
       <UserModal />

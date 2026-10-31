@@ -15,6 +15,8 @@
 //    parsePubkey(text)       npub / nostr:npub / 64-hex → { pubkey } or { error }   (an nsec is refused, never kept)
 //    vouchEvent(list)        the event to publish for a list
 //    vouchList(pubkey)       the people `pubkey` vouches for (newest list in the cache)
+//    getVouchNotes(me)       private notes about the people I vouch for (kept on this device and in the backup)
+//    setVouchNote(me, target, note)  save or clear one private note
 //    trustFor(target, me)    { direct, via: [pubkey…] } or null     trustHeadline / trustDetail: the words
 // ════════════════════════════════════════════════════════════
 
@@ -22,6 +24,7 @@ import { nip19 } from "nostr-tools";
 import { relay } from "../nostr/relay.js";
 import { EVENT_KINDS } from "../nostr/eventKinds.js";
 import { latestVersions } from "../nostr/replaceable.js";
+import { getSetting, setSetting } from "../config/relays.js";
 
 export const MAX_VOUCHES = 100; // a list this long is plenty, and keeps what other people's apps must read small
 const HEX64 = /^[0-9a-f]{64}$/;
@@ -59,6 +62,26 @@ export function vouchList(pubkey) {
     if (out.length >= MAX_VOUCHES) break;
   }
   return out;
+}
+
+// Private notes about the people I vouch for, by pubkey. They are NOT in the public vouch event: the list on the relays
+// only holds keys. The notes live in one setting per account (`vouchNotes_<pk16>`) and travel in the encrypted backup.
+const notesKey = (pk) => "vouchNotes_" + String(pk || "").slice(0, 16);
+
+export function getVouchNotes(pk) {
+  const saved = getSetting(notesKey(pk), {});
+  return saved && typeof saved === "object" && !Array.isArray(saved) ? saved : {};
+}
+
+// Save a private note for a person I vouch for; an empty note removes it. Trimmed and capped like a block note.
+export function setVouchNote(pk, target, note) {
+  if (!HEX64.test(String(target || ""))) return getVouchNotes(pk);
+  const all = { ...getVouchNotes(pk) };
+  const clean = String(note || "").trim().slice(0, 300);
+  if (clean) all[target] = clean;
+  else delete all[target];
+  setSetting(notesKey(pk), all);
+  return all;
 }
 
 // What `me` can say about `target`: { direct: I vouch for them, via: [the people I vouch for who vouch for them] }.

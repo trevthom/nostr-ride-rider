@@ -6,6 +6,18 @@
 //  `javascript:` link or another site. Returns null when it can't be done.
 // ════════════════════════════════════════════════════════════
 
+// Format a phone number as it is typed: (XXX) XXX-XXXX. Numbers that start with + are left for the person to
+// enter in international form; the saved link strips the punctuation either way (contactHref).
+export function formatPhoneInput(value) {
+  const raw = String(value ?? "");
+  if (raw.trimStart().startsWith("+")) return raw;
+  const digits = raw.replace(/\D/g, "").slice(0, 10);
+  if (!digits) return "";
+  if (digits.length <= 3) return `(${digits}`;
+  if (digits.length <= 6) return `(${digits.slice(0, 3)}) ${digits.slice(3)}`;
+  return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+}
+
 export function contactHref(platform, handle) {
   const h = String(handle || "").trim();
   const digits = h.replace(/[^\d+]/g, "");

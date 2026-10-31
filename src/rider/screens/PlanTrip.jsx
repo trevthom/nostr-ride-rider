@@ -310,8 +310,6 @@ function Quote() {
             </button>
           </div>
         </div>
-        <p className="text-neutral-500 text-xs mt-1">Leave it at 0 when you ride alone.</p>
-
         <p className="text-sm font-semibold mt-4 mb-1.5">Notes for driver</p>
         <input
           aria-label="Note for the driver"

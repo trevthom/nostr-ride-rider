@@ -12,10 +12,11 @@ import { useApp } from "../../state/AppContext.jsx";
 import { relay } from "../../nostr/relay.js";
 import { getProfile } from "../../nostr/profiles.js";
 import { shortNpub } from "../../nostr/keys.js";
-import { parsePubkey, vouchEvent, vouchList, MAX_VOUCHES } from "../../lib/vouches.js";
+import { parsePubkey, vouchEvent, vouchList, getVouchNotes, setVouchNote, MAX_VOUCHES } from "../../lib/vouches.js";
 import { SectionLabel, inputCls } from "../../ui/Parts.jsx";
 import Avatar from "../../ui/Avatar.jsx";
 import Button from "../../ui/Button.jsx";
+import PrivateNote from "../../ui/PrivateNote.jsx";
 
 export default function VouchesSection() {
   const { user, publish, refreshVouches, liveTick } = useApp();
@@ -25,6 +26,7 @@ export default function VouchesSection() {
   const [, redraw] = useState(0);
   void liveTick; // the names arrive from the relays after the list is shown
   const list = vouchList(user.publicKey);
+  const notes = getVouchNotes(user.publicKey);
 
   // `change` gets the NEWEST list (from the cache, never from an old render) and returns the next one. The new list is in the cache at
   // once (publish stores it before it sends it), so the screen is right whether or not a relay answers.
@@ -49,7 +51,7 @@ export default function VouchesSection() {
     relay.fetchProfile(r.pubkey);
     change((l) => (l.includes(r.pubkey) ? l : [...l, r.pubkey]));
   };
-  const remove = (pk) => change((l) => l.filter((x) => x !== pk));
+  const remove = (pk) => { setVouchNote(user.publicKey, pk, ""); change((l) => l.filter((x) => x !== pk)); };
 
   return (
     <section>
@@ -57,7 +59,7 @@ export default function VouchesSection() {
       <p className="text-sm text-neutral-500">
         Add the npub of people you know and trust, whether they ride or drive. See the documentation to understand how they work.
       </p>
-      <p className="text-xs text-neutral-500 mt-1 mb-3">Your list is public: anyone can see who you vouch for.</p>
+      <p className="text-xs text-neutral-500 mt-1 mb-3">Your list is public: anyone can see who you vouch for. Notes under each person are private.</p>
       <div className="flex gap-2">
         <input aria-label="npub of a person you know and trust" value={text} onChange={(e) => { setText(e.target.value); setError(""); }}
           onKeyDown={(e) => { if (e.key === "Enter" && text.trim()) { e.preventDefault(); add(); } }}
@@ -74,13 +76,16 @@ export default function VouchesSection() {
             const p = getProfile(pk);
             const name = p?.name || shortNpub(pk);
             return (
-              <li key={pk} className="flex items-center gap-3 py-2 border-b border-neutral-100">
-                <Avatar src={p?.picture} name={name} size={36} />
-                <div className="flex-1 min-w-0">
-                  <p className="text-[15px] font-medium truncate">{name}</p>
-                  {p?.name && <p className="text-[11px] text-neutral-500 font-mono truncate">{shortNpub(pk)}</p>}
+              <li key={pk} className="py-2 border-b border-neutral-100">
+                <div className="flex items-center gap-3">
+                  <Avatar src={p?.picture} name={name} size={36} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[15px] font-medium truncate">{name}</p>
+                    {p?.name && <p className="text-[11px] text-neutral-500 font-mono truncate">{shortNpub(pk)}</p>}
+                  </div>
+                  <button type="button" aria-label={`Remove ${name}`} onClick={() => remove(pk)} className="text-sm font-medium underline">Remove</button>
                 </div>
-                <button type="button" aria-label={`Remove ${name}`} onClick={() => remove(pk)} className="text-sm font-medium underline">Remove</button>
+                <PrivateNote name={name} note={notes[pk] || ""} onSave={(text) => { setVouchNote(user.publicKey, pk, text); redraw((n) => n + 1); }} />
               </li>
             );
           })}

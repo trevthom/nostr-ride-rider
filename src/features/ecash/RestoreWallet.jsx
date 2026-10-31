@@ -66,6 +66,10 @@ export default function RestoreWallet({ onClose }) {
         Type the 12 words you wrote down, in order. The app looks for your ecash at each mint below and brings it to this phone.
         These words become this phone's wallet words. If another phone still holds this wallet, it loses its coins: this phone takes over.
       </p>
+      <div className="rounded-xl bg-amber-50 text-amber-900 px-3 py-2 mb-3" role="note">
+        <p className="text-sm font-semibold">Use a separate wallet in each app.</p>
+        <p className="text-xs mt-0.5">Restoring here moves the balance from the other app on this phone to this app only. The other app will show $0.00. To keep money in both, create a wallet in each app and send ecash between them instead.</p>
+      </div>
       <textarea aria-label="Your 12 recovery words" value={text} rows={3} autoComplete="off" autoCapitalize="none" autoCorrect="off" spellCheck={false}
         onChange={(e) => { setText(e.target.value); setError(""); setRows(null); }} placeholder="word1 word2 word3 …" className={`${inputCls} !text-sm font-mono`} />
       {check?.error && <p className="text-xs text-amber-800 mt-1" role="status">{check.error}</p>}

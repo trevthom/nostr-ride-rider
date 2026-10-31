@@ -9,7 +9,7 @@ import { useState, useEffect } from "react";
 import { resolveAddress } from "../../lib/lnurl.js";
 import { FoldTitle } from "../../ui/Fold.jsx";
 
-export default function LightningAddressSection({ value, onSave }) {
+export default function LightningAddressSection({ value, onSave, children = null }) {
   const [draft, setDraft] = useState(value);
   const [status, setStatus] = useState(""); // "", "checking", "saved", or an error
   useEffect(() => setDraft(value), [value]); // pick up a restored profile
@@ -41,7 +41,7 @@ export default function LightningAddressSection({ value, onSave }) {
           placeholder="you@wallet.com"
           spellCheck={false}
           autoCapitalize="none"
-          className="flex-1 min-w-0 bg-neutral-100 border border-neutral-200 rounded-lg px-3 py-2 text-black text-sm placeholder-neutral-500 focus:outline-none focus:border-black"
+          className="flex-1 min-w-0 bg-white border border-neutral-200 rounded-lg px-3 py-2 text-black text-sm placeholder-neutral-500 focus:outline-none focus:border-black"
         />
         <button
           onClick={save}
@@ -52,6 +52,7 @@ export default function LightningAddressSection({ value, onSave }) {
         </button>
       </div>
       {error && <p className="text-red-600 text-xs">{error}</p>}
+      {children}
     </div>
   );
 }

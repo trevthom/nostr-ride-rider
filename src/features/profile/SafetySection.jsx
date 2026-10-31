@@ -6,6 +6,7 @@
 
 import { useState } from "react";
 import { getContacts, saveContacts, addContact } from "../../lib/safety.js";
+import { formatPhoneInput } from "../../lib/contact.js";
 import { SectionLabel, inputCls } from "../../ui/Parts.jsx";
 import Button from "../../ui/Button.jsx";
 
@@ -26,13 +27,13 @@ export default function SafetySection() {
       <p className="text-neutral-500 text-sm mb-3">People you can text a live link to during a trip. Saved on this device and in your encrypted backup, so they follow you to the driver app.</p>
       {list.map((c) => (
         <div key={c.phone} className="flex items-center justify-between py-2 border-b border-neutral-100">
-          <span className="text-[15px]">{c.name} <span className="text-neutral-500">{c.phone}</span></span>
+          <span className="text-[15px]">{c.name} <span className="text-neutral-500">{formatPhoneInput(c.phone)}</span></span>
           <button type="button" onClick={() => update(list.filter((x) => x.phone !== c.phone))} className="text-sm text-red-600 font-medium">Remove</button>
         </div>
       ))}
       <div className="flex gap-2 mt-3">
         <input aria-label="Contact name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Name" className={`${inputCls} min-w-0`} />
-        <input aria-label="Contact phone" value={phone} onChange={(e) => setPhone(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }} placeholder="Phone" inputMode="tel" className={`${inputCls} min-w-0`} />
+        <input aria-label="Contact phone" value={phone} onChange={(e) => setPhone(formatPhoneInput(e.target.value))} onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); add(); } }} placeholder="(555) 014-2222" inputMode="tel" autoComplete="tel" className={`${inputCls} min-w-0`} />
         <Button size="md" full={false} onClick={add} className="px-4" disabled={!name.trim() || !phone.trim()}>Add</Button>
       </div>
       {error && <p className="text-red-600 text-xs mt-1">{error}</p>}

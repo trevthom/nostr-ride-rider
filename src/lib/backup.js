@@ -23,7 +23,7 @@ import { EVENT_KINDS } from "../nostr/eventKinds.js";
 import { vouchList } from "./vouches.js";
 
 export const BACKUP_KEYS = ["blocked", "trustedContacts", "currency", "units", "dark", "darkMap", "requestRadius", "requestAlerts", "genderPref", "amountUnit", "ecashMint"];
-export const BACKUP_PREFIXES = ["autoCashOut_", "onchain_"]; // onchain_<pk16>: deposit addresses (ids and numbers, no key, no coin)
+export const BACKUP_PREFIXES = ["autoCashOut_", "onchain_", "vouchNotes_"]; // onchain_<pk16>: deposit addresses (ids and numbers, no key, no coin); vouchNotes_<pk16>: private notes about vouches
 const HEX64 = /^[0-9a-f]{64}$/;
 export const MAX_BACKUP_BYTES = 60000; // one nip44 message holds 64 KB
 

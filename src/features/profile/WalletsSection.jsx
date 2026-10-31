@@ -15,6 +15,7 @@ import CurrencySection from "./CurrencySection.jsx";
 import LightningAddressSection from "./LightningAddressSection.jsx";
 import { useSaveProfile } from "./ProfileParts.jsx";
 import EcashSection from "../ecash/EcashSection.jsx";
+import AutoCashOutField from "../ecash/AutoCashOutField.jsx";
 import CashOutConfirm from "../ecash/CashOutConfirm.jsx";
 import { RecoveryPanel } from "../ecash/RecoverySection.jsx";
 import { setCashOutTo } from "../../lib/cashoutto.js";
@@ -34,7 +35,9 @@ export default function WalletsSection({ locked = false }) {
           <EcashSection locked={locked}>
             <div className="mt-6">
               <SubTitle>Cash out location</SubTitle>
-              <LightningAddressSection value={user.lud16 || ""} onSave={(lud16) => { setCashOutTo(user.publicKey, lud16); save({ lud16 }); }} />
+              <LightningAddressSection value={user.lud16 || ""} onSave={(lud16) => { setCashOutTo(user.publicKey, lud16); save({ lud16 }); }}>
+                <AutoCashOutField />
+              </LightningAddressSection>
               <CashOutConfirm />
             </div>
           </EcashSection>

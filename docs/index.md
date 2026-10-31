@@ -68,7 +68,7 @@ After signing in, the rider has three tabs:
 
 The tab bar stays visible on every main screen, including planning and *Finding your driver*. A trip takes over the Ride tab, and finishing it returns to the receipt.
 
-**One person and one wallet per device.** The ecash wallet, its 12 recovery words, the key, the profile and the settings belong to the account signed in on this device. The same nsec on a second phone has no wallet until the person taps *Create New Wallet* or *Restore my wallet* with the 12 words from the first phone.
+**One person and one wallet per device.** The ecash wallet, its 12 recovery words, the key, the profile and the settings belong to the account signed in on this device. The same nsec on a second phone has no wallet until the person taps *Create New Wallet* or *Restore my wallet* with the 12 words from the first phone. **The rider and driver apps on one phone should each have their own ecash wallet.** Restoring the same 12 words in the other app is a takeover, not a sync: the app that restores swaps the coins and holds the balance, and the other app shows $0.00. To keep money in both, create a wallet in each app and send ecash between them.
 **No rides with yourself.** The rider app ignores an offer signed by the request's own author, so the same key cannot book itself from the separate driver app.
 
 **Phone screens.** The rider app is laid out for a phone first: the page fills the screen (without the browser bars), keeps clear of the notch and the home bar, and the keyboard shrinks the page instead of covering a field. The main button of a sheet
@@ -85,7 +85,7 @@ the route and the price tags keep their colors. `public/theme-init.js` (a small 
 before the first paint, so a reload does not flash white. `test/appearance.test.mjs` covers the saved choices and the first-paint script.
 
 **Your settings are saved for you.** There is no Backup section. Every saved setting (the block list, trusted contacts, currency, units, both dark switches, the driver gender preference, the chosen mint, the relay list,
-"Automatically cash out at", on-chain deposit addresses) and the vouch list go to the person's relays as **one note that only their secret key can open** (NIP-44 to their own key, kind 30111; `src/lib/backup.js`, `src/state/useBackup.js`).
+"Automatically cash out at", on-chain deposit addresses) and the vouch list, with the private notes under each person, go to the person's relays as **one note that only their secret key can open** (NIP-44 to their own key, kind 30111; `src/lib/backup.js`, `src/state/useBackup.js`).
 It is sent a few seconds after a change and checked every minute; a note no relay accepts waits in the outbox. A new phone that logs in with the same nsec gets the settings back; the app always looks for the note first and sends nothing until it has looked,
 so a fresh phone cannot overwrite the note with its empty state. Relays see that a note exists, its size and when it changed, nothing inside. The ecash is not in it.
 
@@ -99,8 +99,8 @@ The password starts hidden each time the page is drawn.
 The profile (kind 0) is shared by every device the person signs in on (and by other Nostr apps), so an address saved on one phone is the same on another: the app reads it at login, every 5 minutes and when it comes back to the front. A profile save writes only the fields it changes
 (`src/lib/profilecontent.js`), so a save here cannot overwrite the vehicle, rates or gender that the driver app saved for the same person. (It was called *Lightning address*.)
 
-**Wallets.** *Account → Wallets* holds everything about money, top to bottom: **Currency** (first), the **ecash wallet** ("Add ecash here before you ride.", the balance, **Add funds** and **Send** side by side, *Automatically cash out at*, the mint),
-and the **Cash out location**. (These were separate sections: Ecash wallet, Currency, Cash out location, Lightning wallet; the Lightning wallet (NWC) is gone.) **A device with no wallet** shows two buttons in place of the balance: **Create New Wallet** (a warning that the 12 words are the only way to get the money back, then the words at once) and **Restore my wallet** (type the 12 words from another phone). The section keeps the id `ecash`, so an open or closed state saved earlier still applies.
+**Wallets.** *Account → Wallets* holds everything about money, top to bottom: **Currency** (first), the **ecash wallet** ("Add ecash here before you ride.", the balance, **Add funds** and **Send** side by side, the mint), the **Cash out location** (inside the wallet, with *Automatically cash out at* in the same box directly under the Lightning address), and the **Recovery phrase**. The balance turns red below $5.00, and its value in the local currency is an estimate based on the bitcoin price because the money is held as bitcoin ecash. (These were separate sections: Ecash wallet, Currency, Cash out location, Lightning wallet; the Lightning wallet (NWC) is gone.)
+**A device with no wallet** shows two buttons in place of the balance: **Create New Wallet** (a warning that the 12 words are the only way to get the money back, then the words at once) and **Restore my wallet** (type the 12 words from another phone). **Restoring the same words in the other app on this phone is a takeover, not a sync:** the app that restores swaps the coins and holds the balance, and the other app shows $0.00. It is more practical to keep two separate ecash wallets, one for riding and one for driving, and send ecash between them. The section keeps the id `ecash`, so an open or closed state saved earlier still applies.
 The rider needs ecash in the wallet before a ride starts; the driver app requires the driver's face photo, vehicle and vehicle photo, and plate.
 
 The rider screens (`src/rider`) share one code base with the rest of this app for Nostr, maps, payments, profiles and UI (`src/nostr`, `src/lib`,
@@ -253,7 +253,7 @@ only what the ride has earned so far, and most of it is already paid.
   is on screen the wallet never takes it back by itself (`pay(..., { hold: true })`, `recoverPending` skips it), or the same text could be handed over and spent here; and a token this wallet no
   longer holds is never reported as *taken* (`reclaim` -> "unknown"), because that would be a lie about money.
   **Lightning**: paste an invoice (it must name an amount) or a Lightning address with an amount; the mint pays it and charges a small fee on top (`EcashWallet.payInvoice`; too little money is refused before anything is spent; a failed payment keeps the ecash).
-  **Automatically cash out at: $** (needs a cash out location): the person types an amount; when the ecash held at a mint is worth that much, the app sends ALL of it by itself to the pinned cash out address (`features/ecash/useAutoCashOut.js`; a rider adds funds again before the next ride,
+  **Automatically cash out at: $** (in the Cash out location box, directly under the Lightning address; needs a cash out location): the person types an amount; when the ecash held at a mint is worth that much, the app sends ALL of it by itself to the pinned cash out address (`features/ecash/useAutoCashOut.js`; a rider adds funds again before the next ride,
   rules in `lib/autocashout.js`). The choice is saved when the field is left or Enter is pressed (never on each key, so typing "15" cannot cash out at "1"); empty turns it off. It never runs during a ride, never without a price, waits 10 minutes after a failure
   and tells the person once. It is kept per account on the device, in the currency that was current when it was set.
 - **Safety of the wallet.** The proofs are saved on the device, encrypted (NIP-44) to the user's own key, in pieces. A token being sent waits in a *pending* list until the
@@ -286,7 +286,7 @@ still calls unspent (NUT-09), and the money is back. No server, no account, no r
 - **Restore my wallet** (*Account → Wallets*, offered **only while this device has no wallet**): the person types the 12 words and names the mints to look in (the ones the app knows are listed already). The typed words **become this phone's wallet words**:
   nothing is swept into another phrase and there is nothing new to write down (the person has the words in hand, so they count as written down). For each mint the app scans every keyset, keeps the coins the mint calls unspent, and
   **swaps them for fresh coins under the same phrase** (a copy of the old coins on a lost phone is spent). **If no mint knows a coin for the words** (a typo that still passes the check, the wrong mint, a mint that did not answer) **everything is undone**
-  and the phone stays without a wallet, so a wrong guess leaves nothing behind. **The last phone to restore holds the money:** another phone that still uses the same words loses its coins (it drops them the next time it asks the mint).
+  and the phone stays without a wallet, so a wrong guess leaves nothing behind. **The last phone to restore holds the money:** another phone that still uses the same words loses its coins (it drops them the next time it asks the mint). **Restoring in the other app on the same phone does the same:** the balance moves to that app only. It is more practical to keep a separate ecash wallet for riding and one for driving.
   A phone that already has a wallet does not offer Restore; to restore other words there, first *Disconnect ecash from this device*.
 - **A device whose coins were moved elsewhere shows the truth, and says so.** The wallet asks the mint which of its coins are spent (when it opens and every 5 minutes). A coin the mint calls spent is
   **set aside, not deleted**: it leaves the balance but stays known (`state.suspect`), the person is told, and the mint is asked again. A second *spent* at least ten minutes later forgets it; an *unspent*
@@ -523,6 +523,7 @@ Either side can block. The block list is **local to the app on this device**, an
 ## Vouches ("I know and trust this person")
 The app has **no star ratings and no reviews**, because both are easy to fake. The only kind of reputation is a **vouch**: "I know and trust this person."
 - In *Account → People & Privacy → Your vouches* ("Add the npub of people you know and trust, whether they ride or drive. See the documentation to understand how they work.") a person pastes the **npub** of each person they know and trust (a `nostr:` link or 64 hex digits also work; an **nsec is refused**). Remove a person with *Remove*. A list holds up to 100 people.
+- Each person can have a **private note**, saved like the note under a blocked user (on this device and in the encrypted settings backup). It is never put in the public vouch event.
 - A vouch is for **the person**. It counts the same when that person rides and when that person drives.
 - **What you see.** Say you are B. When you look at a driver or a rider A (an offer, a request card, a profile), the badge counts the people **in your list who have A in their list**:
   - one: "1 of your vouches knows and trusts this person"; two or more: "2 of your vouches know and trust this person". Tap the badge to see their names.
@@ -530,7 +531,7 @@ The app has **no star ratings and no reviews**, because both are easy to fake. T
   - Nobody you vouch for vouches for A: **nothing shows**. There is no "0" and no warning. A stranger is not marked bad; they are just not vouched for.
 - **One hop only.** A vouch from someone you did not choose never shows, so a crowd of fake accounts that vouch for each other changes nothing on your screen. A vouch of a vouch of a vouch is not counted either.
 - **How it travels.** A list is one public, replaceable event (kind 30102, `d` = `vouches`). The app reads only your list, then the lists of the people in it, and their names (three small relay questions at login, then every 5 minutes and after each change to your list).
-- **Public.** Anyone who reads the relays can see who you vouch for. The Account screen says so.
+- **Public.** Anyone who reads the relays can see who you vouch for. The Account screen says so. The notes under the names are private.
 - The trip counts on a profile ("12 trips") stay. They are plain facts from signed events, not opinions. Old rating events (kind 30082) on the relays are ignored.
 
 ## Disputes and evidence
@@ -631,7 +632,7 @@ To switch, copy `env.example` to `.env`, set `VITE_TILE_URL` (and `VITE_PHOTON_U
 - Funds are held per mint. A rider with ecash at another mint must add funds at the driver's mint (no swap between mints yet).
 - No in-app chat; the Contact sheet shows the other person's Signal, Telegram or phone.
 - No push notification when the app is closed (needs a push server).
-- Vouches are not checked by anyone: a person can vouch for anyone. They only count for you when someone **you** chose vouches. The list is public, and there is no way to vouch in private yet.
+- Vouches are not checked by anyone: a person can vouch for anyone. They only count for you when someone **you** chose vouches. The list is public; the note under each person is private.
 - Blocks are not synced across devices or apps. A Nostr mute list (NIP-51) could do it.
 - No arbiter or ruling flow yet; only the evidence trail.
 - The silence rule is checked when an app starts for a ride, not while a stale tab sleeps.
@@ -645,6 +646,7 @@ To switch, copy `env.example` to `.env`, set `VITE_TILE_URL` (and `VITE_PHOTON_U
 
 > Older entries describe earlier releases, including the period when Ride and Drive shared one app. They are kept as history and may name screens, paths or commands that no longer exist. The current sections above describe this repository.
 
+- **Private vouch notes and clearer money screens** — (1) Restoring a wallet now warns that restoring the same 12 words from the other app on the same phone moves the balance to that app only, and recommends two separate ecash wallets. (2) The **Account** tab always returns to Account home, even when a setting screen is open. (3) The send-ecash dialog shows the sats balance beside the USD balance, and the wallet says its local-currency value is an estimate based on the bitcoin price. (4) **Automatically cash out at** is inside the **Cash out location** box, under the Lightning address; that address field has a white background. (5) A wallet balance below $5.00 is red. (6) Vouches have private notes, like blocked users. (7) Phone contact methods are formatted `(XXX) XXX-XXXX` as they are typed. (8) The passenger stepper no longer says "Leave it at 0 when you ride alone". Tests: `contact`, `vouchnotes`.
 - **Rider-only documentation audit** — removed the remaining combined-app assumptions from the current guide: the Ride / Drive switch, the driver source tree, the old combined entry point and build directory, the native shell and the absent browser harnesses. Build, test, deploy and iPhone instructions now use this repository's real paths (`dist/`, `npm run dev`, `main.jsx`), and the driver app is consistently described as separate.
 - **Standalone repositories** — the rider and driver apps are maintained as two standalone repositories, with no shared export step. The rider Account version line now reads *version <time> · rider*.
 - **A $5 wallet gate, automatic cancellation, and the two standalone apps again** — (1) The rider needs at least **$5.00** in the ecash wallet before *Where to?* opens; with less, the home screen says how much is missing and **Add funds** opens Wallets (`hasRideFunds`, `RideFundsPrompt`). (2) A waiting request, or a chosen driver before the ride starts, is closed by itself when the balance falls below $5 (`shouldCancelForLowWallet`); once `riding`, the base rate has been charged and the ride continues. (3) The standalone `nostr-ride-rider` and `nostr-ride-driver` apps each mount one face with no switch. New: `RideFundsPrompt`, `hasRideFunds`, `shouldCancelForLowWallet`; test `tripcard`.
