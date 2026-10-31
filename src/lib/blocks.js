@@ -27,6 +27,14 @@ export function addBlock(list, pubkey, name = "", at = Date.now()) {
 
 export const removeBlock = (list, pubkey) => list.filter((b) => b.pubkey !== pubkey);
 
+// A private note about a blocked person (it stays with the list on this device, and in the encrypted settings backup).
+// Trimmed and capped like a name; an unknown key changes nothing.
+export const setBlockNote = (list, pubkey, note) => {
+  if (!list.some((b) => b.pubkey === pubkey)) return list;
+  const clean = String(note || "").trim().slice(0, 300);
+  return list.map((b) => (b.pubkey === pubkey ? { ...b, note: clean } : b));
+};
+
 // The secret two people share, kept per reader key (working it out costs a little; screens ask on every render).
 const shared = new WeakMap(); // sk → Map(pubkey → conversation key | null)
 function sharedKey(sk, pubkey) {

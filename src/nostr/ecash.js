@@ -54,6 +54,10 @@ import { getSetting, setSetting } from "../config/relays.js";
 const CHUNK = 30000; // characters per sealed piece
 const sum = (proofs) => proofs.reduce((s, p) => s + Number(p.amount), 0);
 export const proofsTotal = sum;
+// A coin the mint calls SPENT is set aside (`suspect`) and asked about again: the money is forgotten only when the mint
+// says so a second time, at least this long after the first answer.
+export const SUSPECT_SETTLE_MS = 10 * 60000;
+const KEEP_ONCHAIN = 20; // recently expired deposit addresses kept (an address that can still be paid is never dropped)
 
 // code: "funds" | "amount" | "mint" | "token" | "used". `definitive` = the answer will not change if tried
 // again (a mint that says "already spent"); false = worth another try (the mint did not answer).
@@ -89,7 +93,7 @@ export function makeStore(user) {
   };
 }
 
-const emptyState = () => ({ v: 1, mints: {}, pending: [], quotes: [], redeemed: [], counters: {}, legacy: [], onchain: [], onchainIndex: 0 });
+const emptyState = () => ({ v: 1, mints: {}, pending: [], quotes: [], redeemed: [], counters: {}, legacy: [], onchain: [], onchainIndex: 0, suspect: [] });
 
 export class EcashWallet {
   // store: { load, save }   mintFor: (url) => adapter   tokenInfo: (token) => { mint, sats } | null
@@ -101,7 +105,11 @@ export class EcashWallet {
     this.listeners = new Set();
     this.busy = Promise.resolve(); // one money move at a time, so two taps cannot spend the same proofs
     this.saveOk = true; // false while the browser will not keep the wallet (a full or blocked storage)
+    this.saveCritical = false; // a mint answer is only in memory: the save must succeed soon
     this._melting = new Set(); // pending ids of Lightning payments that are being sent right now
+    this._held = new Set(); // tokens on screen right now (Send ecash): recoverPending must not take them back
+    this._saveTimer = null; // the fast retry of a save that matters (_saveMoney)
+    this._syncing = false; // one syncSpent() at a time
   }
 
   onChange(fn) { this.listeners.add(fn); return () => this.listeners.delete(fn); }
@@ -111,15 +119,35 @@ export class EcashWallet {
     this.saveOk = ok;
     return ok;
   }
+  _notify() { this.listeners.forEach((fn) => { try { fn(); } catch { /* ignore */ } }); }
   _save() {
     this._persist();
-    this.listeners.forEach((fn) => { try { fn(); } catch { /* ignore */ } });
+    this._notify();
+  }
+  // After a mint answered: the new coins (or a payment that left) exist only here, so the save matters more than usual. If the
+  // browser will not keep it, it is tried again every 2 s while the page is open, and the app says so (`saveCritical`).
+  _saveMoney() {
+    const ok = this._persist();
+    this.saveCritical = !ok;
+    if (!ok) this._saveAgainSoon();
+    this._notify();
+    return ok;
+  }
+  _saveAgainSoon() {
+    if (this._saveTimer) return;
+    this._saveTimer = setTimeout(() => {
+      this._saveTimer = null;
+      if (this._persist()) { this.saveCritical = false; this._notify(); }
+      else this._saveAgainSoon();
+    }, 2000);
+    this._saveTimer?.unref?.();
   }
   // Try again to save a wallet the browser would not keep (screens call it on a timer). Returns true when it is saved.
   retrySave() {
     if (this.saveOk) return true;
     const ok = this._persist();
-    this.listeners.forEach((fn) => { try { fn(); } catch { /* ignore */ } });
+    if (ok) this.saveCritical = false;
+    this._notify();
     return ok;
   }
   // Before a move that changes what the wallet holds: the new state must be savable, or the money could be lost on the next reload.
@@ -173,7 +201,7 @@ export class EcashWallet {
       const proofs = await mint.mint(q.sats, id);
       this._setProofs(q.mint, [...this._proofs(q.mint), ...proofs]);
       this.state.quotes = this.state.quotes.filter((x) => x.id !== id);
-      this._save();
+      this._saveMoney();
       return { state: "ISSUED", sats: sum(proofs) };
     });
   }
@@ -185,8 +213,10 @@ export class EcashWallet {
       try { added += (await this.claim(q.id)).sats; } catch { /* the mint is down: try again later */ }
     }
     const now = Date.now() / 1000;
+    const stale = 7 * 86400; // an address that expired this recently may still hold a payment made before it did
     for (const q of this.onchainList()) {
-      if ((q.expiry != null && q.expiry < now) || !this._ownsOnchain(q)) continue;
+      if (q.expiry != null && q.expiry < now - stale) continue;
+      if (!this._ownsOnchain(q)) continue;
       try { added += (await this.claimOnchain(q.id)).sats; } catch { /* the mint is down: try again later */ }
     }
     return added;
@@ -207,8 +237,14 @@ export class EcashWallet {
     return typeof mint.onchainPubkey !== "function" || !q.pubkey || mint.onchainPubkey(q.index) === q.pubkey;
   }
   _saveOnchain() {
-    this.state.onchain = this.onchainList().slice(-10);
-    this._save();
+    const now = Date.now() / 1000;
+    const all = this.onchainList();
+    // An address that has not expired can still be paid, so it is NEVER dropped, however many there are. Only old expired
+    // ones are forgotten (the newest few are kept: a payment made before the expiry may confirm just after it).
+    const live = all.filter((q) => q.expiry == null || q.expiry > now);
+    const expired = all.filter((q) => q.expiry != null && q.expiry <= now).slice(-KEEP_ONCHAIN);
+    this.state.onchain = [...expired, ...live];
+    this._saveMoney();
     try { this.store.saveOnchain?.(this.state.onchain); } catch { /* only the backup copy is missed */ }
   }
   // Returns { id, mint, index, address, expiry }. The newest address at this mint that has not expired is used again: it can be paid many times.
@@ -246,7 +282,7 @@ export class EcashWallet {
       if (due <= 0) return { state: st.paid > 0 ? "ISSUED" : "UNPAID", sats: 0, paid: st.paid };
       const proofs = await mint.mintOnchain(id, q.index, due);
       this._setProofs(q.mint, [...this._proofs(q.mint), ...proofs]);
-      this._save();
+      this._saveMoney();
       return { state: "ISSUED", sats: sum(proofs), paid: st.paid };
     });
   }
@@ -254,7 +290,9 @@ export class EcashWallet {
   // ── Paying: take exactly `sats` out as a token ──
   // Returns { id, token, sats }. Call settle(id) once the event carrying the token is published
   // (or queued), or unreserve(id) if it never will be. Throws EcashError "funds" when short.
-  pay(url, sats) {
+  // `hold: true` = the token text is ON SCREEN (Send ecash, to be copied by hand): recoverPending() leaves it alone while
+  // the dialog is open, or the coins would come back to the wallet while the token can still be handed over (spent twice).
+  pay(url, sats, { hold = false } = {}) {
     return this._guarded(async () => {
       const amount = Math.round(sats);
       if (!(amount >= 1)) throw new EcashError("amount", "Nothing to pay.");
@@ -271,17 +309,18 @@ export class EcashWallet {
       const id = Math.random().toString(36).slice(2) + Date.now().toString(36);
       this._setProofs(url, split.keep);
       this.state.pending.push({ id, mint: url, sats: amount, proofs: split.send, at: Date.now() });
-      this._save();
+      if (hold) this._held.add(id);
+      this._saveMoney();
       return { id, token: mint.encode(split.send), sats: amount };
     });
   }
   // Like pay(), but when the mint's fee makes the whole balance a few sats too short, sends the most the balance allows.
   // Spending proofs costs the sender a fee, so a wallet cannot send back every sat it holds. Returns the same as pay();
   // read `sats` for what was really sent. Only a "funds" shortage is retried; the checks are local, so a miss costs no mint call.
-  async payUpTo(url, sats) {
+  async payUpTo(url, sats, opts = {}) {
     let amount = Math.min(Math.round(sats), this.balance(url));
     for (let cut = 1; ; cut *= 2) {
-      try { return await this.pay(url, amount); }
+      try { return await this.pay(url, amount, opts); }
       catch (e) {
         if (e.code !== "funds" || cut > 256 || amount - cut < 1) throw e;
         amount -= cut;
@@ -289,8 +328,9 @@ export class EcashWallet {
     }
   }
   settle(id) {
+    this._held.delete(id);
     this.state.pending = this.state.pending.filter((p) => p.id !== id);
-    this._save();
+    this._saveMoney();
   }
   unreserve(id) {
     const p = this.state.pending.find((x) => x.id === id);
@@ -298,12 +338,15 @@ export class EcashWallet {
     this._setProofs(p.mint, [...this._proofs(p.mint), ...p.proofs]);
     this.settle(id);
   }
+  // The token on screen is gone (the dialog closed): pending may be recovered again once the usual wait has passed.
+  holdOff(id) { this._held.delete(id); }
   // After a crash: a pending token older than `afterMs` whose proofs the mint still calls unspent was never
   // delivered, so it goes back into the wallet. Spent ones were delivered and are dropped.
   // A Lightning payment that was left open (see _meltWith) is looked at sooner: after 20 seconds.
   async recoverPending(afterMs = 5 * 60000) {
     for (const p of this.pendingList()) {
       if (this._melting.has(p.id)) continue; // being sent right now
+      if (this._held.has(p.id)) continue; // its token is on screen (Send ecash): taking it back would let it be spent twice
       if (Date.now() - p.at < (p.melt || String(p.id).startsWith("melt-") ? Math.min(afterMs, 20000) : afterMs)) continue;
       try {
         const states = await this.mintFor(p.mint).states(p.proofs);
@@ -338,7 +381,7 @@ export class EcashWallet {
       }
       this._setProofs(meta.mint, [...this._proofs(meta.mint), ...proofs]);
       this.state.redeemed = [...this.state.redeemed, { h: tag, ref: ref ?? null, sats: sum(proofs) }].slice(-500);
-      this._save();
+      this._saveMoney();
       return { sats: sum(proofs), mint: meta.mint };
     });
   }
@@ -390,13 +433,14 @@ export class EcashWallet {
     this._setProofs(url, split.keep);
     this.state.pending.push({ id, mint: url, sats: need, proofs: split.send, at: Date.now(), melt: true });
     this._melting.add(id);
-    this._save();
+    this._saveMoney(); // the coins that are about to be sent must be on disk before the mint is asked
     try {
       let res = null, err = null;
       try { res = await mint.melt(q, split.send); } catch (e) { err = e; }
       if (res && res.paid) {
         this._setProofs(url, [...this._proofs(url), ...res.change]);
         this.settle(id);
+        this._saveMoney(); // the change is only here
         return { paidSats: q.sats, feeSats: need - sum(res.change) - q.sats, preimage: res.preimage || null };
       }
       const fate = await this._meltFate(id);
@@ -447,11 +491,13 @@ export class EcashWallet {
 
   // A token that was taken out to hand over by hand (`pay`, then shown on screen): has the other person taken it yet?
   // The mint says. Still unspent → the coins come back into the wallet; spent → it was delivered and is forgotten.
-  // Returns "back" | "taken". Throws EcashError "mint" when the mint cannot say (the token stays pending).
+  // Returns "back" | "taken" | "unknown" (this wallet no longer holds that token: it was settled, or recovered).
+  // Never say "taken" for a token the wallet does not know: that would tell the person a token they still hold was spent.
+  // Throws EcashError "mint" when the mint cannot say (the token stays pending).
   reclaim(id) {
     return this._exclusive(async () => {
       const p = this.state.pending.find((x) => x.id === id);
-      if (!p) return "taken";
+      if (!p) return "unknown";
       let states;
       try { states = await this.mintFor(p.mint).states(p.proofs); }
       catch (e) { throw new EcashError("mint", e?.message || "The mint did not answer. Try again in a moment."); }
@@ -461,28 +507,59 @@ export class EcashWallet {
     });
   }
 
-  // Drop the coins the mint calls SPENT. Money that was moved elsewhere (a restore on another device swaps every coin, so the copies
-  // on this device are spent) must not stay in this device's balance. The mint is asked WITHOUT holding the money lock (a slow mint must
-  // never hold up a payment); only coins that are still held and reported spent are removed. Returns the sats dropped.
+  // A coin the mint calls SPENT is NOT thrown away on one answer (a mint can be wrong, or lie): it is set aside in `suspect`,
+  // still known and out of the balance, and asked about again. A coin that is UNSPENT then goes back into the wallet; one the
+  // mint calls spent a second time, later, is forgotten. Money that really moved elsewhere (a restore on another device swaps
+  // every coin, so these copies are spent) still disappears from this device, but the app can say so. The mint is asked WITHOUT
+  // holding the money lock (a slow mint must never hold up a payment).
+  // Returns { quarantined, dropped, restored } in sats, so the app can say what changed (never silently).
   async syncSpent() {
-    let dropped = 0;
-    for (const url of Object.keys(this.state.mints)) {
-      const snapshot = this._proofs(url).slice();
-      if (!snapshot.length) continue;
-      let states;
-      try { states = await this.mintFor(url).states(snapshot); } catch { continue; } // the mint is down: try again later
-      if (!Array.isArray(states) || states.length !== snapshot.length) continue;
-      const gone = new Set(snapshot.filter((_, i) => states[i] === "SPENT").map((p) => p.secret));
-      if (!gone.size) continue;
-      await this._exclusive(async () => {
-        const have = this._proofs(url);
-        const keep = have.filter((p) => !gone.has(p.secret));
-        dropped += sum(have) - sum(keep);
-        this._setProofs(url, keep);
-      });
+    const out = { quarantined: 0, dropped: 0, restored: 0 };
+    if (this._syncing) return out;
+    this._syncing = true;
+    try {
+      // 1. A second look at what an earlier answer set aside.
+      const keep = [];
+      for (const s of this.state.suspect || []) {
+        let states;
+        try { states = await this.mintFor(s.mint).states(s.proofs); } catch { keep.push(s); continue; }
+        if (!Array.isArray(states) || states.length !== s.proofs.length) { keep.push(s); continue; }
+        const unspent = s.proofs.filter((_, i) => states[i] === "UNSPENT");
+        const spent = s.proofs.filter((_, i) => states[i] === "SPENT");
+        const other = s.proofs.filter((_, i) => states[i] !== "UNSPENT" && states[i] !== "SPENT");
+        if (unspent.length) {
+          await this._exclusive(async () => { this._setProofs(s.mint, [...this._proofs(s.mint), ...unspent]); });
+          out.restored += sum(unspent);
+        }
+        if (spent.length) {
+          const checks = (s.checks || 1) + 1;
+          if (checks >= 2 && Date.now() - (s.at || 0) >= SUSPECT_SETTLE_MS) out.dropped += sum(spent);
+          else keep.push({ ...s, proofs: spent, sats: sum(spent), checks });
+        }
+        if (other.length) keep.push({ ...s, proofs: other, sats: sum(other) });
+      }
+      this.state.suspect = keep;
+      // 2. The coins this wallet holds.
+      for (const url of Object.keys(this.state.mints)) {
+        const snapshot = this._proofs(url).slice();
+        if (!snapshot.length) continue;
+        let states;
+        try { states = await this.mintFor(url).states(snapshot); } catch { continue; } // the mint is down: try again later
+        if (!Array.isArray(states) || states.length !== snapshot.length) continue;
+        const gone = snapshot.filter((_, i) => states[i] === "SPENT");
+        if (!gone.length) continue;
+        const secrets = new Set(gone.map((p) => p.secret));
+        await this._exclusive(async () => {
+          this._setProofs(url, this._proofs(url).filter((p) => !secrets.has(p.secret)));
+        });
+        this.state.suspect.push({ mint: url, proofs: gone, sats: sum(gone), at: Date.now(), checks: 1 });
+        out.quarantined += sum(gone);
+      }
+      if (out.quarantined || out.dropped || out.restored) this._saveMoney();
+      return out;
+    } finally {
+      this._syncing = false;
     }
-    if (dropped) this._save();
-    return dropped;
   }
 
   // Forget everything this device holds: the coins, the counters, the pending and unclaimed lists, and the saved copy. Used by
@@ -490,6 +567,9 @@ export class EcashWallet {
   wipe() {
     this.state = emptyState();
     this._counters = null;
+    this._held.clear();
+    this.saveCritical = false;
+    if (this._saveTimer) { clearTimeout(this._saveTimer); this._saveTimer = null; }
     try { this.store.erase?.(); } catch { /* nothing to erase */ }
     this.listeners.forEach((fn) => { try { fn(); } catch { /* ignore */ } });
   }
@@ -545,7 +625,7 @@ export class EcashWallet {
       throw new EcashError("mint", e?.message || "The mint did not answer.", e?.definitive === true);
     }
     this._setProofs(url, fresh);
-    this._save();
+    this._saveMoney();
     return { sats: sum(fresh) };
   }
 
@@ -567,7 +647,7 @@ export class EcashWallet {
           const take = proofs.filter((p) => !inFlight.has(p.secret) && !mine.has(p.secret));
           for (const [id, n] of Object.entries(next || {})) await this.counterSource().advanceToAtLeast(id, n);
           this._setProofs(url, [...this._proofs(url), ...take]);
-          this._save();
+          this._saveMoney();
           row.added = sum(take);
           try { await this._rotate(url); row.rotated = true; } catch { /* the coins are kept; rotating can be tried again */ }
         } catch (e) {

@@ -1,9 +1,10 @@
 // ════════════════════════════════════════════════════════════
-//  TRACK — The page a friend opens from a "Share my trip" link. No login:
-//  the link's #fragment holds the key that decrypts the trip updates
-//  (nostr/share.js). Shows the RIDER's own position on a map (their phone, sent every
-//  6 s), the car while it is still on its way, who is driving, the plate, where it is
-//  going, and a red banner if the rider pressed SOS.
+//  TRACK — The page a friend opens from a "Share my trip" link, from either
+//  face. No login: the link's #fragment holds the key that decrypts the trip
+//  updates (nostr/share.js). A rider's share shows the RIDER's own position on
+//  a map (their phone, sent every 6 s) and the car while it is still on its way;
+//  a driver's share shows the DRIVER's own phone (the car). Also who is driving,
+//  the plate, where it is going, and a red banner if the rider pressed SOS.
 // ════════════════════════════════════════════════════════════
 
 import { useEffect, useMemo, useState } from "react";
@@ -15,6 +16,7 @@ import MapView from "../ui/MapView.jsx";
 import Icon from "../ui/Icon.jsx";
 
 const STAGE = { enroute: "Driver is on the way to pick them up", arrived: "Driver is at the pickup", riding: "On the trip" };
+const DRIVER_STAGE = { enroute: "On the way to the pickup", arrived: "At the pickup", riding: "On the trip" };
 
 export default function Track() {
   const link = useMemo(() => parseShareHash(window.location.hash), []);
@@ -31,7 +33,7 @@ export default function Track() {
     return (
       <AppFrame>
         <div className="flex-1 flex items-center justify-center p-8 text-center">
-          <div><h1 className="text-xl font-bold mb-1">This link doesn't work</h1><p className="text-neutral-600 text-[15px]">Ask the rider to send the trip link again.</p></div>
+          <div><h1 className="text-xl font-bold mb-1">This link doesn't work</h1><p className="text-neutral-600 text-[15px]">Ask them to send the trip link again.</p></div>
         </div>
       </AppFrame>
     );
@@ -40,13 +42,17 @@ export default function Track() {
   const p = update?.p;
   const ended = p?.ended;
   const age = update ? Math.max(0, Math.round(Date.now() / 1000 - update.at)) : null;
-  const pos = sharedPositions(p); // { rider, car }: the rider's own phone, and the car while it is still coming
-  const car = pos.car ? [{ pubkey: "car", lat: pos.car.lat, lng: pos.car.lng }] : [];
+  // { rider, car }: the rider's own phone and, until the ride starts, the car. A driver's share puts their own
+  // phone (the car) in `car`; that is the dot to draw, not a second marker.
+  const pos = sharedPositions(p);
+  const sharedByDriver = p?.who === "driver";
+  const me = sharedByDriver ? pos.car : pos.rider;
+  const car = !sharedByDriver && pos.car ? [{ pubkey: "car", lat: pos.car.lat, lng: pos.car.lng }] : [];
 
   return (
     <AppFrame>
       <MapPage
-        map={<MapView pickup={p?.from} dropoff={p?.to} cars={car} me={pos.rider} fitKey={`${p?.stage}|${car.length}|${pos.rider ? "rider" : "norider"}`} />}
+        map={<MapView pickup={p?.from} dropoff={p?.to} cars={car} me={me} fitKey={`${p?.stage}|${car.length}|${me ? "me" : "nome"}`} />}
       >
         <Sheet label="Shared trip">
           {p?.sos && !ended && (
@@ -66,13 +72,14 @@ export default function Track() {
             </>
           ) : (
             <>
-              <h1 className="text-2xl font-bold leading-tight">{p.name || "A rider"} is on a trip</h1>
-              <p className="text-neutral-600 text-[15px] mt-0.5">{STAGE[p.stage] || "On the way"}{p.eta != null ? ` · about ${p.eta} min` : ""}</p>
+              <h1 className="text-2xl font-bold leading-tight">{sharedByDriver ? `${p.name || "A driver"} is driving` : `${p.name || "A rider"} is on a trip`}</h1>
+              <p className="text-neutral-600 text-[15px] mt-0.5">{(sharedByDriver ? DRIVER_STAGE : STAGE)[p.stage] || "On the way"}{p.eta != null ? ` · about ${p.eta} min` : ""}</p>
               <p className={`text-xs mt-1 ${age > 60 ? "text-amber-700" : "text-neutral-500"}`} role="status">
                 {age > 60 ? `Last update ${Math.round(age / 60)} min ago. They may be out of signal.` : "Live"}
-                {p.who === "rider" && !pos.rider && age <= 60 ? " Their phone has not sent a position yet." : ""}
+                {(p.who === "rider" || sharedByDriver) && !me && age <= 60 ? " Their phone has not sent a position yet." : ""}
               </p>
               {pos.rider && <p className="text-neutral-500 text-xs mt-0.5">The blue dot is {p.name || "the rider"}'s own phone.</p>}
+              {sharedByDriver && pos.car && <p className="text-neutral-500 text-xs mt-0.5">The blue dot is {p.name || "the driver"}'s car.</p>}
               <dl className="mt-4 rounded-2xl bg-neutral-100 px-4 py-3 space-y-2 text-[15px]">
                 {p.driver && <div className="flex justify-between gap-3"><dt className="text-neutral-600">Driver</dt><dd className="font-medium text-right">{p.driver}</dd></div>}
                 {p.car && <div className="flex justify-between gap-3"><dt className="text-neutral-600">Car</dt><dd className="font-medium text-right">{p.car}</dd></div>}

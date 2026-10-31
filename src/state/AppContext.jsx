@@ -29,9 +29,10 @@ import { setUnits, getUnits } from "../lib/units.js";
 import { getProfile } from "../nostr/profiles.js";
 import { myVehicle } from "../lib/privacy.js";
 import { forgetKey } from "../nostr/keystore.js";
+import { loadSession, saveSession, clearSession, saveView, loadView } from "../lib/session.js";
 import { APP_NAME } from "../config/app.js";
 import { getSetting, setSetting, reconnectAll } from "../config/relays.js";
-import { addBlock, removeBlock, isBlocked } from "../lib/blocks.js";
+import { addBlock, removeBlock, isBlocked, setBlockNote as saveBlockNote } from "../lib/blocks.js";
 import { showSystemNotification } from "../lib/notify.js";
 import { PRICE_CODES, PRICE_MAX_AGE_MS, acceptPrices, getCurrency, setCurrency as saveCurrency, onCurrencyChange } from "../lib/currency.js";
 import { FALLBACK_BTC_USD } from "../config/settings.js";
@@ -69,13 +70,18 @@ export function useApp() {
 }
 
 export function AppProvider({ initialView, children }) {
-  const [user, setUser] = useState(null); // logged-in keypair + profile
-  const [view, setView] = useState(initialView); // which tab is visible
+  const [user, setUser] = useState(() => loadSession()); // logged-in keypair + profile (this tab's session survives a reload)
+  const [view, setView] = useState(() => loadView(initialView)); // which tab is visible
   const [rideRequests, setRideRequests] = useState([]); // latest version of each
   const [profileModalPubkey, setProfileModalPubkey] = useState(null); // user-info modal
   const [notices, setNotices] = useState([]); // transient swipe-away banners
   const [liveTick, setLiveTick] = useState(0); // bumped on incoming relay events to re-render
   const [settingsEpoch, setSettingsEpoch] = useState(0); // bumped when a backup is put back: the screens are drawn again with the restored settings
+
+  // This tab's session survives a reload (lib/session.js), so refreshing does not log the person out: they stay on the
+  // same tab (and Account screen). It is gone when the tab closes; logging out clears it.
+  useEffect(() => { if (user) saveSession(user); }, [user]);
+  useEffect(() => { saveView(view); }, [view]);
 
   // Show a transient banner. Also fires a system notification when the app
   // isn't the focused tab, so users hear about it off-screen.
@@ -97,6 +103,7 @@ export function AppProvider({ initialView, children }) {
   const [blocked, setBlocked] = useState(() => getSetting("blocked", []));
   const blockUser = useCallback((pubkey, name) => setBlocked((l) => { const n = addBlock(l, pubkey, name); setSetting("blocked", n); return n; }), []);
   const unblockUser = useCallback((pubkey) => setBlocked((l) => { const n = removeBlock(l, pubkey); setSetting("blocked", n); return n; }), []);
+  const setBlockNote = useCallback((pubkey, note) => setBlocked((l) => { const n = saveBlockNote(l, pubkey, note); setSetting("blocked", n); return n; }), []);
   const isBlockedPk = useCallback((pubkey) => isBlocked(blocked, pubkey), [blocked]);
 
   // The encrypted backup of vouches, blocks and settings (lib/backup.js): checked at login, kept up to date, restored on a new phone.
@@ -195,17 +202,30 @@ export function AppProvider({ initialView, children }) {
       off = w.onChange(() => {
         setEcashTick((t) => t + 1);
         // The browser would not keep the wallet (a full or blocked storage): say so, once, while it lasts.
-        if (!w.saveOk && !warned) { warned = true; pushNotice("This browser will not save your wallet right now (the storage is full or blocked). Free some space. Until then no money moves."); }
+        if (!w.saveOk && !warned) {
+          warned = true;
+          pushNotice(w.saveCritical
+            ? "Money moved at the mint but this browser will not save your wallet. Keep this page open: saving is tried again every couple of seconds."
+            : "This browser will not save your wallet right now (the storage is full or blocked). Free some space. Until then no money moves.");
+        }
         if (w.saveOk) warned = false;
       });
       setEcash(w);
       w.claimAll().catch(() => {});
       w.recoverPending().catch(() => {});
-      // Coins that were moved elsewhere (a restore on another device swaps them) are spent: drop them, so this device shows the truth.
-      w.syncSpent().catch(() => {});
-      timer = setInterval(() => w.syncSpent().catch(() => {}), 5 * 60000);
-      // A Lightning payment the mint was still working on is settled when the mint is done; an unsaved wallet is saved again when it can be.
-      saveTimer = setInterval(() => { w.retrySave(); w.recoverPending().catch(() => {}); }, 30000);
+      // Coins the mint calls spent (moved elsewhere by a restore on another device) are set aside, then checked again before they are
+      // forgotten: the person is told what happened, never silently short of money (EcashWallet.syncSpent).
+      const saySpent = (r) => {
+        if (!r) return;
+        if (r.quarantined) pushNotice(`${r.quarantined} sats were reported spent by the mint. They are set aside while this device checks again.`);
+        if (r.dropped) pushNotice(`${r.dropped} sats were spent on another device and were removed from this wallet.`);
+        if (r.restored) pushNotice(`${r.restored} sats the mint had reported spent are back in your wallet.`);
+      };
+      w.syncSpent().then(saySpent).catch(() => {});
+      timer = setInterval(() => w.syncSpent().then(saySpent).catch(() => {}), 5 * 60000);
+      // A Lightning payment the mint was still working on is settled when the mint is done; a wallet the browser would not save is
+      // saved again soon (a mint answer that is only in memory would be lost on a reload).
+      saveTimer = setInterval(() => { w.retrySave(); w.recoverPending().catch(() => {}); }, 5000);
     }).catch(() => {});
     return () => { alive = false; hold.release(); if (off) off(); if (timer) clearInterval(timer); if (saveTimer) clearInterval(saveTimer); };
   }, [user?.publicKey, ecashOff]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -389,6 +409,7 @@ export function AppProvider({ initialView, children }) {
         new Promise((r) => setTimeout(r, 3000)),
       ]);
     } catch { /* log out anyway */ }
+    clearSession();
     forgetKey();
     setUser(null);
     setProfileModalPubkey(null);
@@ -479,6 +500,7 @@ export function AppProvider({ initialView, children }) {
     blocked,
     blockUser,
     unblockUser,
+    setBlockNote,
     isBlockedPk,
     liveTick,
   };

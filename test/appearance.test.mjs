@@ -43,8 +43,8 @@ assert.ok(!/\.dark\s+\.leaflet/.test(css), "no map rule hangs on the application
 assert.ok(/\.dark-map\s+\.leaflet-tile-pane\s*\{\s*filter/.test(css), "the tile filter hangs on the map's class");
 
 // The script that runs before the first paint (public/theme-init.js) must read the same key and give the same result.
-// In the main repo each app has its own copy (apps/rider/public, apps/driver/public); an exported app repo has one (public/).
-const scripts = ["../apps/rider/public/theme-init.js", "../apps/driver/public/theme-init.js", "../public/theme-init.js"]
+// The one app keeps it in apps/nostrride/public.
+const scripts = ["../apps/nostrride/public/theme-init.js", "../public/theme-init.js"]
   .map((p) => new URL(p, import.meta.url)).filter((u) => fs.existsSync(u));
 assert.ok(scripts.length >= 1, "the first-paint script exists");
 const runInit = (u) => vm.runInNewContext(fs.readFileSync(u, "utf8"), { document: globalThis.document, localStorage: globalThis.localStorage });

@@ -20,6 +20,20 @@ assert.equal(F.isLowBalance(4000, null), true, "no live price: the app's fallbac
 assert.equal(F.isLowBalance(NaN, 100000), false, "an unknown balance is never called low");
 assert.equal(F.isLowBalance(null, 100000), false);
 
+// ── A ride needs at least $5.00: exactly $5 is enough, and below it a request (or a ride not yet riding) is cancelled ──
+assert.equal(F.hasRideFunds(5000, 100000), true, "exactly $5.00 is enough to request a ride");
+assert.equal(F.hasRideFunds(4999, 100000), false, "one sat below $5.00 is not");
+assert.equal(F.hasRideFunds(0, 100000), false);
+assert.equal(F.hasRideFunds(null, 100000), false, "an unknown balance is not enough");
+assert.equal(F.hasRideFunds(10000, 50000), true, "$5 at $50,000 per bitcoin is 10,000 sats");
+assert.equal(F.hasRideFunds(9999, 50000), false, "one sat below $5 at $50,000 per bitcoin");
+assert.equal(F.shouldCancelForLowWallet({ status: "requested", stage: "enroute", sats: 4999, usdPrice: 100000 }), true, "a waiting request with too little money is cancelled");
+assert.equal(F.shouldCancelForLowWallet({ status: "in_progress", stage: "arrived", sats: 4000, usdPrice: 100000 }), true, "a chosen driver before the start is cancelled too");
+assert.equal(F.shouldCancelForLowWallet({ status: "in_progress", stage: "riding", sats: 0, usdPrice: 100000 }), false, "once riding, the base rate has been charged");
+assert.equal(F.shouldCancelForLowWallet({ status: "requested", stage: "enroute", sats: 5000, usdPrice: 100000 }), false);
+assert.equal(F.shouldCancelForLowWallet({ status: "completed", stage: "riding", sats: 0, usdPrice: 100000 }), false);
+assert.equal(F.shouldCancelForLowWallet({ status: "requested", stage: "enroute", sats: null, usdPrice: 100000 }), false, "the wallet is still loading: wait");
+
 // ── The estimated change in the fare: per mile × Δmiles + per minute × Δminutes (the base rate does not change) ──
 const rates = { base: 2, perMile: 1.1, perMinute: 0.25, currency: "USD" };
 const PRICE = 100000; // $1 = 1,000 sats

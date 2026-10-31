@@ -84,9 +84,11 @@ try {
   await assert.rejects(() => A.wallet.pay(mint.url, 10), "the old phone cannot pay with them");
   // The old phone still SHOWS them until it asks the mint: it then drops the spent coins, so it stops showing money that moved.
   assert.equal(A.wallet.balance(mint.url), 5000 - 1234, "stale until it looks");
-  assert.equal(await A.wallet.syncSpent(), 5000 - 1234, "syncSpent drops exactly the spent coins");
+  const staleNow = await A.wallet.syncSpent();
+  assert.equal(staleNow.quarantined, 5000 - 1234, "syncSpent sets exactly the spent coins aside");
+  assert.equal(staleNow.dropped, 0, "one answer is not enough to forget money");
   assert.equal(A.wallet.balance(mint.url), 0);
-  assert.equal(await B.wallet.syncSpent(), 0, "and never drops a coin that is still good");
+  assert.equal((await B.wallet.syncSpent()).quarantined, 0, "and never touches a coin that is still good");
   // A stale device can disconnect at once: its spent coins are dropped first, so there is nothing to swap and nothing to lose.
   const staleDevice = device({ phrase });
   staleDevice.wallet.state.mints[mint.url] = { proofs: stale.map((p) => ({ ...p })) };

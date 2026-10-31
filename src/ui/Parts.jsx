@@ -49,7 +49,7 @@ export function Row({ icon, title, subtitle, right, onClick, danger = false }) {
   );
 }
 
-export function Toggle({ checked, onChange, label, disabled = false }) {
+export function Toggle({ checked, onChange, label, disabled = false, small = false }) {
   return (
     <button
       type="button"
@@ -58,9 +58,9 @@ export function Toggle({ checked, onChange, label, disabled = false }) {
       aria-label={label}
       disabled={disabled}
       onClick={() => onChange(!checked)}
-      className={`relative w-12 h-7 rounded-full transition-colors shrink-0 ${checked ? "bg-black" : "bg-neutral-300"} disabled:opacity-40`}
+      className={`relative rounded-full transition-colors shrink-0 ${small ? "w-10 h-6" : "w-12 h-7"} ${checked ? "bg-black" : "bg-neutral-300"} disabled:opacity-40`}
     >
-      <span className={`absolute top-0.5 left-0.5 w-6 h-6 rounded-full bg-white shadow transition-transform ${checked ? "translate-x-5" : ""}`} />
+      <span className={`absolute top-0.5 left-0.5 rounded-full bg-white shadow transition-transform ${small ? "w-5 h-5" : "w-6 h-6"} ${checked ? (small ? "translate-x-4" : "translate-x-5") : ""}`} />
     </button>
   );
 }

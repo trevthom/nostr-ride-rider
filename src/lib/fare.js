@@ -118,6 +118,15 @@ export function usdFromSats(sats, usdPrice) {
 export const lowBalanceSats = (usdPrice) => satsFromUsd(LOW_BALANCE_USD, usdPrice);
 export const isLowBalance = (sats, usdPrice) => Number.isFinite(sats) && sats <= lowBalanceSats(usdPrice);
 
+// A rider may plan and request a ride only with at least LOW_BALANCE_USD in the wallet (exactly $5 is enough).
+// `sats` must be a known balance: null (the wallet is still loading) is not enough.
+export const hasRideFunds = (sats, usdPrice) => Number.isFinite(sats) && sats >= lowBalanceSats(usdPrice);
+
+// A request or a ride that has not started is cancelled by itself when the wallet falls BELOW the amount needed
+// to request one. Once the ride is `riding` the base rate has been charged, and the ride continues.
+export const shouldCancelForLowWallet = ({ status, stage, sats, usdPrice }) =>
+  (status === "requested" || status === "in_progress") && stage !== "riding" && Number.isFinite(sats) && !hasRideFunds(sats, usdPrice);
+
 // How much the fare changes when the REST of the trip goes from `before` to `after` ({ miles, minutes } each), at one driver's rates:
 // per mile × the change in miles + per minute × the change in minutes. The base rate does not change. Signed, in sats at `price`
 // (the BTC price in the currency of the rates); null when the rates or the price are not known. This is an ESTIMATE: the road and the traffic decide.

@@ -6,7 +6,7 @@
 // ════════════════════════════════════════════════════════════
 
 import { useState } from "react";
-import { shortNpub } from "../../nostr/keys.js";
+import { fullNpub } from "../../nostr/keys.js";
 import Button from "../../ui/Button.jsx";
 import PasswordField from "../../ui/PasswordField.jsx";
 
@@ -16,7 +16,7 @@ export function UnlockView({ saved, busy, error, onUnlock, onSwitch }) {
     <div className="space-y-4">
       <p className="text-center">
         <span className="block text-xl font-bold">Welcome back{saved.name ? `, ${saved.name}` : ""}</span>
-        <span className="block text-neutral-500 text-xs font-mono mt-1">{shortNpub(saved.pubkey)}</span>
+        <span className="block text-neutral-500 text-[11px] font-mono mt-1 break-all">{fullNpub(saved.pubkey)}</span>
       </p>
       <PasswordField
         value={password}

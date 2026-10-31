@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════
-//  AUTH SCREEN — First screen of both apps. Ways to sign in:
+//  AUTH SCREEN — First screen of the app. Ways to sign in:
 //    1. Generate a brand-new Nostr keypair (then a key-backup step).
 //    2. Paste an existing "nsec1..." secret key.
 //    3. Unlock a key saved on this device (password, NIP-49).
@@ -7,7 +7,7 @@
 //  doesn't log the user out (nostr/keystore.js).
 //  A new key publishes a fresh profile. An existing key keeps its
 //  Nostr profile (we never overwrite it with a blank one).
-//  The headline changes with the app (rider / driver).
+//  The headline is the same for riders and drivers: a person picks Ride or Drive after signing in.
 // ════════════════════════════════════════════════════════════
 
 import { useState } from "react";
@@ -19,7 +19,7 @@ import { getMetadata, getProfile } from "../../nostr/profiles.js";
 import { getSavedKey, saveKey, unlockKey, MIN_PASSWORD } from "../../nostr/keystore.js";
 import { myVehicle } from "../../lib/privacy.js";
 import { useRelays, setRelays } from "../../config/relays.js";
-import { IS_DRIVER_APP, APP_NAME } from "../../config/app.js";
+import { APP_NAME } from "../../config/app.js";
 import Button from "../../ui/Button.jsx";
 import Icon from "../../ui/Icon.jsx";
 import RelayEditor from "../../ui/RelayEditor.jsx";
@@ -28,10 +28,8 @@ import { Field, inputCls } from "../../ui/Parts.jsx";
 import PasswordField from "../../ui/PasswordField.jsx";
 import { UnlockView, BackupStep } from "./AuthSteps.jsx";
 
-const DEFAULT_NAME = IS_DRIVER_APP ? "Anonymous Driver" : "Anonymous Rider";
-const COPY = IS_DRIVER_APP
-  ? { tagline: "Drive. Get paid in sats.", sub: "Set your own hours. Riders pay you directly over Lightning." }
-  : { tagline: "Get there. No middleman.", sub: "Rides arranged peer to peer on Nostr, paid over Lightning." };
+const DEFAULT_NAME = "Anonymous";
+const COPY = { tagline: "Ride or drive. No middleman.", sub: "Rides arranged peer to peer on Nostr, paid in ecash." };
 
 // Let React paint a "busy" label before slow, blocking work (scrypt).
 const nextFrame = () => new Promise((r) => setTimeout(r, 30));

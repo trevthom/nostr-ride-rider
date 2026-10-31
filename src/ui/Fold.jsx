@@ -1,14 +1,14 @@
 // ════════════════════════════════════════════════════════════
-//  FOLD — A section that opens and closes (the Account screens use it for every setting). The header is a button with the
-//  section's title, an optional status chip and an arrow. The part inside stays mounted while closed (hidden), so a half-typed
-//  field is not lost. Whether a section is open is remembered on this device, per section.
+//  FOLD — A section that opens and closes. Account no longer uses folds (every setting has its own screen now), but the
+//  piece that matters there is kept here: a section shown on its own screen must not draw its own title again, because the
+//  screen's header already names it. `ScreenBody` says so, and `Fold` does the same for a fold's header.
 //
-//    <Fold id="ecash" title="Wallets" status={{ text: "Needed", tone: "warn" }} defaultOpen={false}>…</Fold>
-//    openFold("ecash")                    open one from anywhere (a notice's button, for example)
-//    <FoldTitle right={<Chip/>}>Title</FoldTitle>    a heading that a section draws only when it is NOT inside a Fold
-//    <SubTitle>Title</SubTitle>           a heading for a part INSIDE a Fold that holds several parts (Wallets); always drawn
+//    <Fold id="x" title="…">…</Fold>     a section that opens and closes on this device
+//    <ScreenBody>…</ScreenBody>          a section on a screen of its own (its label is left out)
+//    <FoldTitle right={<Chip/>}>Title</FoldTitle>    a heading that a section draws only when it is NOT inside one of those
+//    <SubTitle>Title</SubTitle>           a heading for a part that holds several parts (Wallets); always drawn
 //
-//  Inside a Fold the section's own title (SectionLabel, FoldTitle) is left out, because the header already shows it.
+//  Inside a Fold or a ScreenBody the section's own title (SectionLabel, FoldTitle) is left out, because the header shows it.
 // ════════════════════════════════════════════════════════════
 
 import { createContext, useContext, useEffect, useId, useState } from "react";
@@ -17,6 +17,11 @@ import Icon from "./Icon.jsx";
 
 const InFold = createContext(false);
 export const useInFold = () => useContext(InFold);
+
+// A section on a screen of its own (Account → Wallets, → Keys, …): the screen's title replaces the section's label.
+export function ScreenBody({ children }) {
+  return <InFold.Provider value={true}>{children}</InFold.Provider>;
+}
 
 const EVENT = "nostrride-fold";
 export function openFold(id) {

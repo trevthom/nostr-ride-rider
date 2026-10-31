@@ -68,7 +68,7 @@ export function upcomingRidesFor(requests, me) {
 // Without this, a stranger could put any driver on a made-up ride, and the driver's app would start
 // sending its live position to the stranger.
 export function consentedDrive(request, me) {
-  return !!offerFrom(request, me) && !!acceptFor(request, me);
+  return request.pubkey !== me && !!offerFrom(request, me) && !!acceptFor(request, me); // never a ride with myself (one person has both faces)
 }
 
 // The ride this driver is driving right now (accepted and paid, not ended).

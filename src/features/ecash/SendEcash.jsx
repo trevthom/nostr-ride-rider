@@ -9,7 +9,7 @@
 //    <SendEcash onClose={…} />
 // ════════════════════════════════════════════════════════════
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useApp } from "../../state/AppContext.jsx";
 import { Modal, inputCls } from "../../ui/Parts.jsx";
 import AmountInput from "../../ui/AmountInput.jsx";
@@ -34,6 +34,14 @@ export default function SendEcash({ onClose }) {
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [token, setToken] = useState(null); // { id, token, sats }: made, not yet handed over
+  const tokenRef = useRef(null);
+  tokenRef.current = token;
+  const walletRef = useRef(ecash);
+  walletRef.current = ecash;
+  // The token text is on screen and can be copied: while this dialog is open the wallet must not take the coins back
+  // (recoverPending), or the same token could be handed over AND spent from the wallet. Closing without "Done" releases it
+  // (the ref keeps the wallet even when the dialog is unmounted by a logout).
+  useEffect(() => () => { if (tokenRef.current) walletRef.current?.holdOff(tokenRef.current.id); }, []);
   const [result, setResult] = useState(""); // a finished message
   const have = balances[mint] || 0;
 
@@ -50,7 +58,7 @@ export default function SendEcash({ onClose }) {
 
   const makeToken = () => run(async () => {
     if (!sats) throw new Error("Enter an amount.");
-    setToken(await ecash.pay(mint, sats));
+    setToken(await ecash.pay(mint, sats, { hold: true }));
   });
 
   const sendLightning = () => run(async () => {
@@ -70,7 +78,12 @@ export default function SendEcash({ onClose }) {
   const takeBack = () => run(async () => {
     const r = await ecash.reclaim(token.id);
     setToken(null);
-    setResult(r === "back" ? "Nobody had taken it. The money is back in your wallet." : "The other person has already taken it.");
+    setResult(r === "back"
+      ? "Nobody had taken it. The money is back in your wallet."
+      : r === "taken"
+        ? "The other person has already taken it."
+        // Not a guess: this wallet does not hold that token any more. Saying "taken" would be a lie about money.
+        : "This wallet no longer holds that token. If nobody took it, its money is back in your balance; treat the text as used either way.");
   });
 
   const done = () => { if (token) ecash.settle(token.id); onClose(); };

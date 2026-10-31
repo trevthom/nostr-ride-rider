@@ -35,6 +35,8 @@ const source = (rel) => { const u = new URL("../src/" + rel, import.meta.url); r
 const driverSrc = source("driver/state/DriverContext.jsx"), riderSrc = source("rider/screens/OnTrip.jsx");
 if (driverSrc) assert.ok(/const LOCATION_EVERY_MS = LOCATION_PING_MS/.test(driverSrc), "the driver's pings use the same constant");
 if (riderSrc) assert.ok(/setInterval\(\(\) => send\(false\), LOCATION_PING_MS\)/.test(riderSrc), "and so does the shared trip");
+const driveTripSrc = source("driver/screens/DriveTrip.jsx");
+if (driveTripSrc) assert.ok(/setInterval\(\(\) => send\(false\), LOCATION_PING_MS\)/.test(driveTripSrc), "and so does the driver's shared trip");
 const rider = { lat: 38.0406, lng: -84.5037, accuracy: 7.4 }, carAt = { lat: 38.05, lng: -84.51 };
 const base = { name: "Rae", driver: "Dina", car: "2020 Toyota Prius", plate: "KY ABC123", from: { name: "A", lat: 1, lng: 2 }, to: { name: "B", lat: 3, lng: 4 }, eta: 4 };
 const coming = Safety.sharePayload({ ...base, stage: "enroute", riderPos: rider, gps: "good", carLoc: carAt, now: 1000 });
@@ -57,6 +59,19 @@ assert.deepEqual(Safety.sharedPositions(stale), { rider: null, car: null }, "no 
 assert.deepEqual(Safety.sharedPositions({ lat: 38.1, lng: -84.6, stage: "riding" }), { rider: null, car: { lat: 38.1, lng: -84.6 } }, "an update from an older app is the car, as before");
 assert.deepEqual(Safety.sharedPositions({ ended: true, who: "rider", lat: 1, lng: 2 }), { rider: null, car: null });
 assert.deepEqual(Safety.sharedPositions(null), { rider: null, car: null });
+
+// ── A driver shares the same way: the DRIVER's own phone (the car), and it is the dot to draw ──
+const drive = Safety.driverSharePayload({ name: "Dina", car: "2020 Toyota Prius", plate: "KY ABC123", stage: "riding", pos: carAt, gps: "good", eta: 3, from: base.from, to: base.to, now: 4000 });
+assert.equal(drive.who, "driver");
+assert.equal(drive.lat, carAt.lat); assert.equal(drive.lng, carAt.lng); assert.equal(drive.locTs, 4000);
+assert.equal(drive.name, "Dina"); assert.equal(drive.driver, undefined, "the sharer is the driver: no second driver field");
+assert.deepEqual(Safety.sharedPositions(drive), { rider: null, car: carAt }, "the driver's own phone is the dot to draw");
+assert.equal(Safety.driverSharePayload({ ...drive, pos: carAt, gps: "stale", now: 5000 }).lat, undefined, "a stale fix is not sent as if it were now");
+assert.equal(Safety.driverSharePayload({ name: "Dina", pos: null, gps: "searching" }).lat, undefined);
+assert.equal(Safety.driverSharePayload({ name: "Dina", pos: { lat: NaN, lng: 1 }, gps: "good" }).lat, undefined, "a broken position is not sent");
+// Through the real encryption, to the viewer.
+const driveSent = S.openShare(token, JSON.parse(S.buildShareEvent(token, drive).content).sealed);
+assert.deepEqual(Safety.sharedPositions(driveSent), { rider: null, car: carAt });
 
 // Contacts and messages.
 let c = [];

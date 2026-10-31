@@ -17,6 +17,7 @@ import AddFunds from "../../features/payments/AddFunds.jsx";
 import { exactTrip } from "../../lib/privacy.js";
 import { offerFrom, offersForRide } from "../../lib/trips.js";
 import { Screen } from "../../ui/Layout.jsx";
+import { ModeSwitch } from "../../ui/ModeSwitch.jsx";
 import { Modal, SectionLabel } from "../../ui/Parts.jsx";
 import Money, { moneyText } from "../../ui/Money.jsx";
 import Button from "../../ui/Button.jsx";
@@ -49,7 +50,7 @@ export default function ActivityScreen() {
   const tripOf = (r) => exactTrip(r, user) || parse(r);
 
   return (
-    <Screen title="Activity">
+    <Screen title="Activity" right={<ModeSwitch />}>
       {activeRide && (
         <section className="mb-6">
           <SectionLabel>In progress</SectionLabel>

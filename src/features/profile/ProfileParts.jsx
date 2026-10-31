@@ -12,6 +12,7 @@ import { buildSignedEvent } from "../../nostr/events.js";
 import { getMetadata } from "../../nostr/profiles.js";
 import { shortNpub } from "../../nostr/keys.js";
 import { profileContent } from "../../lib/profilecontent.js";
+import { parsePubkey } from "../../lib/vouches.js";
 import { tripCounts } from "../../lib/rides.js";
 import { useUnits, formatDistance } from "../../lib/units.js";
 import { resizeImage } from "../../lib/image.js";
@@ -75,13 +76,12 @@ export function AccountHeader({ photoRequired = false }) {
     }
   };
   const commit = () => {
-    save({ name: draft.trim() || (IS_DRIVER_APP ? "Anonymous Driver" : "Anonymous Rider") });
+    save({ name: draft.trim() || "Anonymous" });
     setEditing(false);
   };
 
-  const trips = IS_DRIVER_APP ? rep.drives : rep.rides;
   const [units] = useUnits();
-  const miles = IS_DRIVER_APP ? user.stats?.miles : 0;
+  const miles = user.stats?.miles || 0;
 
   return (
     <div className="flex items-center gap-4 py-2">
@@ -118,7 +118,10 @@ export function AccountHeader({ photoRequired = false }) {
             </button>
           </div>
         )}
-        <p className="text-sm text-neutral-500">{trips} trip{trips === 1 ? "" : "s"}{miles > 0 && ` · ${formatDistance(miles, { unit: units })} driven`}</p>
+        <p className="text-sm text-neutral-500">
+          {rep.rides} ride{rep.rides === 1 ? "" : "s"} · {rep.drives} drive{rep.drives === 1 ? "" : "s"}
+          {miles > 0 && ` · ${formatDistance(miles, { unit: units })} driven`}
+        </p>
         {photoRequired && !user.picture && <p className="text-amber-700 text-xs mt-1">A face photo is required to drive.</p>}
         {err && <p className="text-red-600 text-xs mt-1">{err}</p>}
         {user.picture && (
@@ -153,7 +156,7 @@ export function ContactMethods() {
     <div>
       <SectionLabel>Contact methods</SectionLabel>
       <p className="text-neutral-500 text-sm mb-3">
-        Your {IS_DRIVER_APP ? "rider" : "driver"} can use these to reach you during a trip.
+        The other person can use these to reach you during a trip.
       </p>
       {comm.map((c, i) => (
         <div key={i} className="flex items-center justify-between py-2 border-b border-neutral-100">
@@ -184,22 +187,93 @@ export function ContactMethods() {
   );
 }
 
-// People this user blocked, with Unblock.
+// People this user blocked: add one by npub (or from their profile), keep a private note, unblock.
 export function BlockedSection() {
-  const { blocked, unblockUser } = useApp();
+  const { user, blocked, blockUser, unblockUser, setBlockNote } = useApp();
+  const [text, setText] = useState("");
+  const [error, setError] = useState("");
+
+  const add = () => {
+    setError("");
+    const r = parsePubkey(text);
+    if (r.error) return setError(r.error);
+    if (r.pubkey === user.publicKey) return setError("That is your own key. You cannot block yourself.");
+    if (blocked.some((b) => b.pubkey === r.pubkey)) return setError("This person is already blocked.");
+    setText("");
+    relay.fetchProfile(r.pubkey); // their name, when a relay has it
+    blockUser(r.pubkey, "");
+  };
+
   return (
     <div>
-      <SectionLabel>Blocked people</SectionLabel>
+      <SectionLabel>Blocked users</SectionLabel>
+      <p className="text-neutral-500 text-sm mb-3">
+        Add someone by npub, or from their profile. Blocking is saved on this device and the other person is not told.
+      </p>
+      <div className="flex gap-2">
+        <input
+          aria-label="npub of a person to block"
+          value={text}
+          onChange={(e) => { setText(e.target.value); setError(""); }}
+          onKeyDown={(e) => { if (e.key === "Enter" && text.trim()) { e.preventDefault(); add(); } }}
+          placeholder="npub1…"
+          spellCheck={false}
+          autoComplete="off"
+          autoCapitalize="none"
+          className={`${inputCls} min-w-0 !text-sm font-mono`}
+        />
+        <Button size="md" full={false} className="px-4" onClick={add} disabled={!text.trim()}>Add</Button>
+      </div>
+      {error && <p className="text-red-600 text-xs mt-2" role="alert">{error}</p>}
       {blocked.length === 0 ? (
-        <p className="text-neutral-500 text-sm">No one blocked. You can block someone from their profile or after a trip.</p>
+        <p className="text-neutral-500 text-sm mt-3">No one blocked.</p>
       ) : (
-        blocked.map((b) => (
-          <div key={b.pubkey} className="flex items-center justify-between py-2 border-b border-neutral-100">
-            <span className="text-[15px] truncate">{b.name || shortNpub(b.pubkey)}</span>
-            <button type="button" onClick={() => unblockUser(b.pubkey)} className="text-sm font-medium underline">Unblock</button>
-          </div>
-        ))
+        <ul className="mt-2" aria-label="Blocked people">
+          {blocked.map((b) => {
+            const name = b.name || shortNpub(b.pubkey);
+            return (
+              <li key={b.pubkey} className="py-3 border-b border-neutral-100">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="text-[15px] truncate">{name}</span>
+                  <button type="button" onClick={() => unblockUser(b.pubkey)} className="text-sm font-medium underline shrink-0">Unblock</button>
+                </div>
+                <BlockNote name={name} note={b.note || ""} onSave={(note) => setBlockNote(b.pubkey, note)} />
+              </li>
+            );
+          })}
+        </ul>
       )}
+    </div>
+  );
+}
+
+// A note the person keeps about someone they blocked. It stays with the block list (and the encrypted settings backup),
+// and is saved when the field loses focus or Enter is pressed.
+function BlockNote({ name, note, onSave }) {
+  const [draft, setDraft] = useState(note);
+  const [saved, setSaved] = useState(false);
+  useEffect(() => setDraft(note), [note]);
+  const save = () => {
+    const next = draft.trim();
+    if (next === note) return;
+    onSave(next);
+    setSaved(true);
+    setTimeout(() => setSaved(false), 1500);
+  };
+  return (
+    <div className="mt-2">
+      <textarea
+        aria-label={`Note about ${name}`}
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={save}
+        onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); e.currentTarget.blur(); } }}
+        placeholder="Add a note (only you can see it)"
+        rows={1}
+        maxLength={300}
+        className="w-full bg-neutral-100 rounded-lg px-3 py-2 text-sm text-black placeholder-neutral-500 border border-transparent focus:outline-none focus:border-black focus:bg-white resize-y"
+      />
+      {saved && <p className="text-xs text-neutral-500 mt-1" role="status">Saved</p>}
     </div>
   );
 }

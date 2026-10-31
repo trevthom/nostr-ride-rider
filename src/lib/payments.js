@@ -100,6 +100,15 @@ export function tickReplies(request) {
   return out;
 }
 
+// How many of this ride's payments the driver's app REFUSED (the mint would not give the driver the money: a token already
+// spent, from the wrong mint, or unreadable). A rider's app that takes its own token back from the mint before the driver redeems
+// it causes this. The driver sees it at once and may finish the ride, without waiting for two missed payments.
+export function refusedTicks(request) {
+  let n = 0;
+  for (const r of tickReplies(request).values()) if (!r.ok) n++;
+  return n;
+}
+
 // A confirmed tick counts for what the driver says they received, never more than the tick claims
 // (2 sats of slack for a mint's fee).
 export function paidSats(request) {

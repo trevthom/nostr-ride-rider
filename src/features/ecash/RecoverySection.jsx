@@ -1,10 +1,11 @@
 // ════════════════════════════════════════════════════════════
-//  RECOVERY — The Account part for the 12-word recovery phrase of the ecash wallet (nostr/ecashRecovery.js, lib/recovery.js).
-//  The ecash is kept on this device. If the phone is lost, the 12 words bring the money back on a new one (Restore my wallet, in
-//  Wallets: features/ecash/WalletStart.jsx + RestoreWallet.jsx). The words ARE the money: they are shown only on request, are never
-//  sent anywhere, and the app never asks for them except on the restore dialog.
+//  RECOVERY — The 12-word recovery phrase of the ecash wallet (nostr/ecashRecovery.js, lib/recovery.js), shown in
+//  Account → Wallets under "Recovery phrase". The ecash is kept on this device. If the phone is lost, the 12 words bring the
+//  money back on a new one (Restore my wallet, in Wallets: features/ecash/WalletStart.jsx + RestoreWallet.jsx). The words ARE
+//  the money: they are shown only on request, are never sent anywhere, and the app never asks for them except on the
+//  restore dialog.
 //
-//    <RecoveryFold />     the Account section (a Fold): write the words down, show them again
+//    <RecoveryPanel />    the Account → Wallets block: write the words down, show them again
 //    <RecoveryNotice />   a short warning at the top of Account while there is ecash and the words are not written down yet
 //
 //  Writing down: the 12 words are shown once in a numbered list; the person then types three of them back (asked by number) before
@@ -13,7 +14,6 @@
 
 import { useEffect, useState } from "react";
 import { useApp } from "../../state/AppContext.jsx";
-import Fold, { openFold } from "../../ui/Fold.jsx";
 import { Modal, inputCls } from "../../ui/Parts.jsx";
 import Button from "../../ui/Button.jsx";
 import Icon from "../../ui/Icon.jsx";
@@ -22,12 +22,16 @@ import { pickCheckPositions, checkAnswers } from "../../lib/recovery.js";
 const EVENT = "nostrride-recovery";
 const SHOW_MS = 30000; // the words hide themselves after this long
 
+// Account → Wallets holds the phrase. A notice elsewhere in Account can send the person there and ask for the setup at
+// once; if the wallet block is not on screen yet, the request waits for it (takeWantedSetup).
+let wantedSetup = false;
 export function startRecoverySetup() {
-  openFold("recovery");
+  wantedSetup = true;
   window.dispatchEvent(new CustomEvent(EVENT, { detail: "setup" }));
 }
+const takeWantedSetup = () => { const want = wantedSetup; wantedSetup = false; return want; };
 
-export function RecoveryNotice() {
+export function RecoveryNotice({ onOpen }) {
   const { ecash } = useApp();
   const rec = ecash?.recovery;
   if (!rec || rec.backedUp() || ecash.total() <= 0) return null;
@@ -35,7 +39,7 @@ export function RecoveryNotice() {
     <div className="rounded-2xl bg-amber-50 text-amber-900 px-4 py-3 flex items-center gap-3" role="status">
       <Icon name="alert" size={20} />
       <p className="flex-1 text-sm font-semibold">Your ecash is not protected yet. If you lose this phone, it is gone.</p>
-      <button type="button" onClick={startRecoverySetup} className="text-sm font-semibold underline shrink-0">Write down 12 words</button>
+      <button type="button" onClick={onOpen} className="text-sm font-semibold underline shrink-0">Write down 12 words</button>
     </div>
   );
 }
@@ -105,13 +109,13 @@ function SetupModal({ recovery, onClose }) {
   );
 }
 
-function Panel() {
+export function RecoveryPanel() {
   const { ecash, ecashOff, pushNotice } = useApp();
   const recovery = ecash?.recovery;
-  const [setup, setSetup] = useState(false);
+  const [setup, setSetup] = useState(takeWantedSetup);
   const [shown, setShown] = useState(false);
   useEffect(() => {
-    const on = (e) => { if (e.detail === "setup") setSetup(true); };
+    const on = (e) => { if (e.detail === "setup") { wantedSetup = false; setSetup(true); } };
     window.addEventListener(EVENT, on);
     return () => window.removeEventListener(EVENT, on);
   }, []);
@@ -158,11 +162,4 @@ function Panel() {
       {setup && <SetupModal recovery={recovery} onClose={(done) => { setSetup(false); if (done) pushNotice("Your ecash is protected. Keep the paper safe."); }} />}
     </>
   );
-}
-
-export function RecoveryFold() {
-  const { ecash } = useApp();
-  const rec = ecash?.recovery;
-  const status = !rec ? null : rec.backedUp() ? { text: "Written down", tone: "ok" } : ecash.total() > 0 ? { text: "Not written down", tone: "warn" } : null;
-  return <Fold id="recovery" title="Recovery phrase" status={status}><Panel /></Fold>;
 }

@@ -91,6 +91,7 @@ assert.equal(Pay.sentSats(live), 2000, "once the rider's app took the token back
 sign(driver, Pay.tickReplyEvent(live, t1, { ok: false, reason: "late nonsense" }), NOW + 90);
 assert.equal(Pay.paidSats(live), 2000, "once received, a later refusal changes nothing");
 assert.equal(Pay.tickReplies(live).get(t1.id).ok, true);
+assert.equal(Pay.refusedTicks(live), 1, "the driver counts the payments its own app refused (t2); a received tick (t1) is never counted");
 
 // ── Waivers: only the driver; unpaid money forgiven, and ecash sent back sealed to the rider ──
 const w = sign(driver, Pay.waiverEvent(live, driver, { forgivenSats: 400, refundSats: 250, token: "cashuBrefund", reason: "Sorry about the detour" }));

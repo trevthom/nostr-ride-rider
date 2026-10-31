@@ -5,23 +5,22 @@ import tailwindcss from "tailwindcss";
 import autoprefixer from "autoprefixer";
 import { cspPlugin } from "./csp.mjs";
 
-// "2026-10-12 21:30 UTC · from nostr-ride 9dbe842": the build time and the nostr-ride commit this app was exported from (shown in Account,
-// so a person can tell which version is running: the rider and the driver app must come from the same commit).
-const buildId = () => new Date().toISOString().slice(0, 16).replace("T", " ") + " UTC · from nostr-ride 2eac1e5";
+// "2026-10-12 21:30 UTC · from nostr-ride ff8df6c": the build time and the source commit (shown in Account).
+const buildId = () => new Date().toISOString().slice(0, 16).replace("T", " ") + " UTC · from nostr-ride ff8df6c";
 
 // The rider app of NostrRide, as its own project (generated; see scripts/export-apps.mjs in nostr-ride).
-// `__APP_ROLE__` is read in src/config/app.js. `base: "./"` lets the built
-// files work from any folder or sub-path (GitHub Pages, Netlify, a plain server).
+// One face only: src/app/App.jsx mounts the rider shell. base "./" lets the built files work from any sub-path.
 export default defineConfig({
   base: "./",
+  envDir: ".",
   plugins: [react(), cspPlugin()],
-  // Tailwind CSS v3 is built into the app's own CSS (src/tailwind.css); no script from a CDN runs in the page.
   css: { postcss: { plugins: [tailwindcss(fileURLToPath(new URL("./tailwind.config.js", import.meta.url))), autoprefixer()] } },
-  define: { __APP_ROLE__: JSON.stringify("rider"), __BUILD_ID__: JSON.stringify(buildId()) },
+  define: { __BUILD_ID__: JSON.stringify(buildId()) },
   server: { port: 5173 },
   preview: { port: 4173 },
   build: {
-    // The map library (Leaflet) is large; give it its own file.
+    outDir: "dist",
+    emptyOutDir: true,
     chunkSizeWarningLimit: 1500,
     rollupOptions: {
       input: {

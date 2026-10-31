@@ -40,12 +40,25 @@ export function sharePayload({ name, driver, car, plate, stage, riderPos, gps, c
     from, to,
   };
 }
-// What a viewer draws from a shared update: { rider, car } (each { lat, lng } or null).
+// What the driver's phone sends to the people following a shared drive. The position is the DRIVER's own phone (the car);
+// `who: "driver"` tells a viewer whose position it is. A stale fix is left out, as on the rider's side.
+// Needs { name, car, plate, stage, pos, gps, eta, from, to } — see driver/screens/DriveTrip.jsx.
+export function driverSharePayload({ name, car, plate, stage, pos, gps, eta, from, to, now = Date.now() }) {
+  const here = pos && gps !== "stale" && Number.isFinite(pos.lat) && Number.isFinite(pos.lng) ? pos : null;
+  return {
+    name, car, plate, stage, eta,
+    who: "driver",
+    ...(here && { lat: here.lat, lng: here.lng, acc: Number.isFinite(here.accuracy) ? Math.round(here.accuracy) : undefined, locTs: now }),
+    from, to,
+  };
+}
+// What a viewer draws from a shared update: { rider, car } (each { lat, lng } or null). A driver's share puts their own
+// phone (the car) in `car`; it is the dot to draw. An older app's update put the car's position in lat/lng too.
 export function sharedPositions(p) {
   const pt = (x) => (x && Number.isFinite(x.lat) && Number.isFinite(x.lng) ? { lat: x.lat, lng: x.lng } : null);
   if (!p || p.ended) return { rider: null, car: null };
   if (p.who === "rider") return { rider: pt(p), car: pt(p.carPos) };
-  return { rider: null, car: pt(p) }; // an older app: lat/lng was the car
+  return { rider: null, car: pt(p) }; // the driver's own phone, or an older app's car
 }
 
 export function tripMessage({ name, destination, link, sos = false }) {

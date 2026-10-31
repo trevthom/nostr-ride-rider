@@ -213,7 +213,7 @@ const friend = build(net);
 await friend.redeem(gift.token);
 assert.equal(await sender.reclaim(gift.id), "taken", "the friend took it: it is forgotten, never returned");
 assert.equal(sender.pendingList().length, 0);
-assert.equal(await sender.reclaim("no-such-token"), "taken");
+assert.equal(await sender.reclaim("no-such-token"), "unknown", "a token the wallet no longer holds is never called taken");
 
 // ── Saved encrypted, in pieces, per user ──
 const alice = generateKeypair(), mallory = generateKeypair();

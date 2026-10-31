@@ -1,6 +1,6 @@
 // ════════════════════════════════════════════════════════════
-//  SAFETY SECTION (rider Account) — Trusted contacts for "Share my trip" and
-//  SOS. Stored on this device only; the app never uploads them.
+//  SAFETY SECTION (both Account screens) — Trusted contacts for "Share my trip"
+//  and SOS. Stored on this device only; the app never uploads them.
 // ════════════════════════════════════════════════════════════
 
 import { useState } from "react";

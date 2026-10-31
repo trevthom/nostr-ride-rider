@@ -1,22 +1,23 @@
 // ════════════════════════════════════════════════════════════
-//  RIDER APP — The root. Wraps everything in the shared state, shows the
-//  login screen until someone is signed in, then three tabs:
-//    Ride (home) · Activity · Account
-//  The tab bar is always visible. Tapping "Ride" while a ride is being planned
-//  cancels the planning and shows the home screen.
+//  RIDER APP — generated from nostr-ride. One face only: the three rider tabs.
+//  Everything shared (key, profile, wallet, settings) is in AppProvider.
 // ════════════════════════════════════════════════════════════
 
 import { AppProvider, useApp } from "../state/AppContext.jsx";
-import { RiderProvider, useRider } from "./state/RiderContext.jsx";
+import { RiderProvider, useRider } from "../rider/state/RiderContext.jsx";
 import { AppFrame, TabBar } from "../ui/Layout.jsx";
 import ErrorBoundary from "../ui/ErrorBoundary.jsx";
 import UserModal from "../ui/UserModal.jsx";
 import NoticeBanner from "../ui/NoticeBanner.jsx";
 import ConnectionBanner from "../ui/ConnectionBanner.jsx";
 import AuthScreen from "../features/auth/AuthScreen.jsx";
-import HomeScreen from "./screens/HomeScreen.jsx";
-import ActivityScreen from "./screens/ActivityScreen.jsx";
-import AccountScreen from "./screens/AccountScreen.jsx";
+import HomeScreen from "../rider/screens/HomeScreen.jsx";
+import ActivityScreen from "../rider/screens/ActivityScreen.jsx";
+import AccountScreen from "../rider/screens/AccountScreen.jsx";
+import { setAppRole } from "../config/app.js";
+import { viewFor } from "../lib/mode.js";
+
+setAppRole("rider");
 
 const SCREENS = { home: HomeScreen, activity: ActivityScreen, account: AccountScreen };
 const TABS = [
@@ -28,17 +29,18 @@ const TABS = [
 function Shell() {
   const { view, setView } = useApp();
   const { activeRide, receipt, plan, resetPlan } = useRider();
-  const Screen = SCREENS[view] || HomeScreen;
+  const shown = viewFor("ride", view);
+  const Screen = SCREENS[shown];
   const onTab = (id) => {
-    if (id === "home" && view === "home" && !activeRide && !receipt && plan.step !== "idle") resetPlan();
+    if (id === "home" && shown === "home" && !activeRide && !receipt && plan.step !== "idle") resetPlan();
     else setView(id);
   };
   return (
     <AppFrame>
-      <ErrorBoundary resetKey={view}>
+      <ErrorBoundary resetKey={shown}>
         <Screen />
       </ErrorBoundary>
-      <TabBar items={TABS} active={view} onChange={onTab} />
+      <TabBar items={TABS} active={shown} onChange={onTab} />
       <UserModal />
       <ConnectionBanner />
       <NoticeBanner />

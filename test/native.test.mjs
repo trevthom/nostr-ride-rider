@@ -23,6 +23,42 @@ assert.deepEqual(removed, ["w1"], "stopping removes the watcher");
 removed = [];
 const stop2 = N.startNativeWatch(() => {}, () => {}); stop2(); await new Promise((r) => setTimeout(r, 5));
 assert.deepEqual(removed, ["w1"]);
+// A foreground watcher: no background message (the plugin reads its presence to decide whether
+// the app may keep running in the background), and the distance filter is passed straight through.
+// distanceFilter 0 is what a `heartbeat` watcher asks for: every fix, so a hidden page still runs.
+added = undefined;
+const stopFg = N.startNativeWatch(() => {}, () => {}, { background: false, distanceFilter: 0 });
+stopFg();
+await new Promise((r) => setTimeout(r, 5));
+assert.equal(added.backgroundMessage, undefined, "no message = no background mode");
+assert.equal(added.backgroundTitle, undefined);
+assert.equal(added.distanceFilter, 0, "0 = every fix");
+// A background watcher keeps the message and the title it was given (the rider's own wording).
+let bgOpts;
+globalThis.window = { Capacitor: { isNativePlatform: () => true, registerPlugin: () => ({
+  addWatcher: async (opts, fn) => { bgOpts = opts; cb = fn; return "w2"; },
+  removeWatcher: async () => {},
+}) } };
+N.startNativeWatch(() => {}, () => {}, { background: true, title: "NostrRide", message: "Measuring this ride." });
+await new Promise((r) => setTimeout(r, 5));
+assert.equal(bgOpts.backgroundTitle, "NostrRide");
+assert.equal(bgOpts.backgroundMessage, "Measuring this ride.");
+assert.equal(bgOpts.distanceFilter, 10, "the default filter");
+// Every fix reaches the heartbeat listeners BEFORE the map's move filter, even one that is ignored.
+const heard = [];
+const off = N.subscribeNativeFixes((f) => heard.push(f));
+cb({ latitude: 1, longitude: 2, accuracy: 3, time: 5 });
+assert.equal(heard.length, 1); assert.equal(heard[0].coords.latitude, 1);
+off();
+cb({ latitude: 1, longitude: 2, accuracy: 3, time: 6 });
+assert.equal(heard.length, 1, "unsubscribed listeners stop hearing fixes");
+// One listener that throws must not stop the others (the payment loop must keep being woken).
+const offBad = N.subscribeNativeFixes(() => { throw new Error("boom"); });
+const heard2 = [];
+const offGood = N.subscribeNativeFixes(() => heard2.push(1));
+cb({ latitude: 1, longitude: 2, accuracy: 3, time: 7 });
+assert.equal(heard2.length, 1);
+offBad(); offGood();
 // No plugin: a clear error, not a crash.
 globalThis.window = { Capacitor: { isNativePlatform: () => true } };
 const errs = []; N.startNativeWatch(() => {}, (e) => errs.push(e)); assert.equal(errs[0].code, 2);

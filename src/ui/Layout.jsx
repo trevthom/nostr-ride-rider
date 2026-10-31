@@ -4,7 +4,7 @@
 //   AppFrame   Phone-width column, full height. On a desktop it sits in
 //              the middle of the page; on a phone it fills the screen.
 //   MapPage    Map fills the area; a Sheet slides up from the bottom and
-//              `top` floats over the map (back button, status pill).
+//              `top` floats over the map (back button, status pill). `switcher` adds the Ride / Drive switch under it.
 //   Sheet      The white bottom card (Uber/Lyft style). With a `peek` it can
 //              also be nearly collapsed: only a drag handle and one line show,
 //              and the user drags it up (or taps it) to open the details.
@@ -15,6 +15,7 @@
 
 import { createContext, useContext, useEffect, useRef, useState, isValidElement, cloneElement } from "react";
 import Icon from "./Icon.jsx";
+import { ModeSwitch } from "./ModeSwitch.jsx";
 
 // The Sheet tells its MapPage how tall it is, so the map can keep the route
 // and pins in the visible part above it.
@@ -29,7 +30,7 @@ export function AppFrame({ children }) {
 }
 
 // `map` is a <MapView/>; `top` floats over it; children are the Sheet.
-export function MapPage({ map, top, children }) {
+export function MapPage({ map, top, switcher = false, children }) {
   const [sheetH, setSheetH] = useState(0);
   const shown = sheetH && isValidElement(map) ? cloneElement(map, { padBottom: sheetH + 28 }) : map;
   return (
@@ -40,6 +41,11 @@ export function MapPage({ map, top, children }) {
         {top && (
           <div className="absolute top-0 inset-x-0 z-[500] px-4 pt-[max(1rem,env(safe-area-inset-top))] pointer-events-none">
             <div className="flex items-center gap-3 [&>*]:pointer-events-auto">{top}</div>
+          </div>
+        )}
+        {switcher && (
+          <div className="absolute inset-x-0 z-[500] flex justify-center pointer-events-none" style={{ top: "calc(max(1rem, env(safe-area-inset-top)) + 3.25rem)" }}>
+            <ModeSwitch className="pointer-events-auto !bg-white shadow-[0_2px_10px_rgba(0,0,0,0.22)]" />
           </div>
         )}
         {children}

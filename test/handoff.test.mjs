@@ -87,6 +87,26 @@ const savedWraps = () => (JSON.parse(mem.nostrride_outbox || "[]")).length;
   relay.outbox.clear(); relay._saveOutbox();
 }
 
+// ── An event that carries money is never aged out of the outbox ──
+// The wallet has already let go of the token once its event is saved here, so dropping the event after a day would throw away a
+// payment that may still be delivered later (a phone that was offline for a day would come back and send it).
+{
+  relay.outbox.clear();
+  relay._saveOutbox();
+  relay._send = async () => false;
+  await relay.publish(tick(), { durable: true });
+  assert.equal(relay.outbox.size, 2, "the two wraps of a paid tick are waiting");
+  const plain = buildSignedEvent(K.VOUCH_LIST, { v: 1, count: 0 }, [["d", "vouches"], ["t", "nostrride"]], rider.sk);
+  await relay.publish(plain);
+  assert.equal(relay.outbox.size, 3, "one ordinary event joins the two wraps");
+  for (const o of relay.outbox.values()) { o.at = Date.now() - 2 * 86400000; o.sending = false; }
+  await relay.flushOutbox();
+  assert.equal(relay.outbox.size, 2, "the tick is kept until a relay takes it, however old it is");
+  assert.ok(![...relay.outbox.keys()].includes(plain.id), "an ordinary stale update is still dropped");
+  clearTimeout(relay._retryTimer); relay._retryTimer = null;
+  relay.outbox.clear(); relay._saveOutbox();
+}
+
 // ── The wallet lock: one window at a time ──
 {
   const held = new Set(), line = [];

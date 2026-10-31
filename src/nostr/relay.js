@@ -271,10 +271,12 @@ class NostrRelay {
   }
 
   // A job event goes out ONLY inside gift wraps, one for each person who must read it (nostr/sealing.js). True when any wrap was accepted.
+  // `durable` means the event CARRIES MONEY (a tick, a refund): those wraps are written before the first send and are never aged
+  // out of the outbox, because the wallet has already let go of the ecash they hold (features/payments/handoff.js).
   _publishSealed(inner, recipients, durable = false) {
     const wraps = recipients.map((pk) => wrap(inner, pk));
     let stored = durable && wraps.length > 0;
-    if (durable) for (const w of wraps) if (!this._enqueue(w, inner, { sending: true })) stored = false;
+    if (durable) for (const w of wraps) if (!this._enqueue(w, inner, { sending: true, money: true })) stored = false;
     const sent = Promise.all(wraps.map((w) => this._sendWrap(inner, w, durable))).then((r) => r.some(Boolean));
     sent.stored = stored;
     return sent;
@@ -316,9 +318,9 @@ class NostrRelay {
   onOutbox(fn) { this.outboxListeners.add(fn); return () => this.outboxListeners.delete(fn); }
 
   // Returns true when the event is saved in the outbox on this device (false: an ephemeral event, or the browser would not save it).
-  _enqueue(event, inner = null, { sending = false } = {}) {
+  _enqueue(event, inner = null, { sending = false, money = false } = {}) {
     if (event.kind >= 20000 && event.kind < 30000) return false; // ephemeral: stale by the time it could be re-sent
-    if (!this.outbox.has(event.id)) this.outbox.set(event.id, { event, inner, tries: 0, at: Date.now(), sending });
+    if (!this.outbox.has(event.id)) this.outbox.set(event.id, { event, inner, tries: 0, at: Date.now(), sending, money });
     const saved = this._saveOutbox();
     if (!sending) this._schedule();
     return saved;
@@ -335,7 +337,9 @@ class NostrRelay {
   // Try every waiting event now (also called when the network returns).
   async flushOutbox() {
     const day = 86400000;
-    for (const [id, o] of this.outbox) if (Date.now() - o.at > day) this.outbox.delete(id);
+    // An old update is stale by now. One that carries MONEY is not: dropping it would throw away a payment the wallet has already
+    // counted (a token is gone from the wallet once its event is here), so it waits until a relay takes it.
+    for (const [id, o] of this.outbox) if (!o.money && Date.now() - o.at > day) this.outbox.delete(id);
     await Promise.all(
       [...this.outbox.values()].filter((o) => !o.sending).map(async (o) => {
         o.tries++;
@@ -349,7 +353,7 @@ class NostrRelay {
   // Writes the outbox to the browser's storage. Returns false when the browser would not save it (a full or blocked storage).
   _saveOutbox() {
     let saved = true;
-    try { localStorage.setItem("nostrride_outbox", JSON.stringify([...this.outbox.values()].map((o) => ({ event: o.event, inner: o.inner, at: o.at })))); } catch { saved = false; }
+    try { localStorage.setItem("nostrride_outbox", JSON.stringify([...this.outbox.values()].map((o) => ({ event: o.event, inner: o.inner, at: o.at, money: !!o.money })))); } catch { saved = false; }
     this.outboxListeners.forEach((fn) => { try { fn(this.outboxSize()); } catch { /* ignore */ } });
     return saved;
   }
@@ -360,7 +364,7 @@ class NostrRelay {
       saved.forEach((s) => {
         if (!s?.event?.id) return;
         this._store(s.inner || s.event); // a wrap carries its inner event: that is what the screens read
-        this.outbox.set(s.event.id, { event: s.event, inner: s.inner || null, tries: 0, at: s.at || Date.now() });
+        this.outbox.set(s.event.id, { event: s.event, inner: s.inner || null, tries: 0, at: s.at || Date.now(), money: !!s.money });
       });
       if (this.outbox.size) setTimeout(() => this.flushOutbox(), 1500);
     } catch { /* no storage or bad data */ }

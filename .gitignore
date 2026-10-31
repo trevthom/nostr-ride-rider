@@ -6,3 +6,6 @@ dist/
 *.log
 !env.example
 native/node_modules/
+
+# Downloaded builds (an APK is a build output, not source)
+artifacts/

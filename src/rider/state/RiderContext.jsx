@@ -14,21 +14,23 @@
 //  Banners: offers arriving, driver arrived, trip done, driver finished the ride, waived fares.
 // ════════════════════════════════════════════════════════════
 
-import { createContext, useContext, useState, useEffect, useCallback, useRef } from "react";
+import { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useApp } from "../../state/AppContext.jsx";
 import { relay } from "../../nostr/relay.js";
 import { EVENT_KINDS } from "../../nostr/eventKinds.js";
 import { subscribePresence } from "../../nostr/live.js";
 import { useGeolocation } from "../../lib/useGeolocation.js";
+import { subscribeNativeFixes } from "../../lib/nativeGeo.js";
+import { startHeartbeat } from "../../lib/heartbeat.js";
 import { useWakeLock } from "../../lib/useWakeLock.js";
 import { reverseGeocode } from "../../lib/geocode.js";
 import { haversineDistance } from "../../lib/geo.js";
-import { pickupEta } from "../../lib/fare.js";
+import { pickupEta, lowBalanceSats, hasRideFunds, shouldCancelForLowWallet } from "../../lib/fare.js";
 import { publicPlace, seal, exactTrip } from "../../lib/privacy.js";
 import { PICKUP_CHANGE_NOTE } from "../../lib/pickup.js";
 import { stopRequestEvent } from "../../lib/stops.js";
 import { activeRideFor, isOpenRide, upcomingRidesFor } from "../../lib/trips.js";
-import { rideDriver, rideEnding, rideKey, rideStatus, rideVersions, rideTimes, rideExpiryMs, isRideExpired } from "../../lib/rides.js";
+import { rideDriver, rideEnding, rideKey, rideStage, rideStatus, rideVersions, rideTimes, rideExpiryMs, isRideExpired } from "../../lib/rides.js";
 import { hideList } from "../../lib/blocks.js";
 import { onlyPreferred } from "../../lib/gender.js";
 import { nearestDriver } from "../../lib/audience.js";
@@ -37,26 +39,34 @@ import { getProfile } from "../../nostr/profiles.js";
 import { rememberRates } from "../../lib/ratechange.js";
 import { declineEvent } from "../../lib/trips.js";
 import { rideTerms, rideMint } from "../../lib/terms.js";
-import { ledgerSummary } from "../../lib/ridemoney.js";
+import { ridesOwing } from "../../lib/ridemoney.js";
 import { rideSpendCap, allowMoreSpend } from "../../lib/spendcap.js";
 import { payDue } from "../../features/payments/rideTicks.js";
 import { useAutoCashOut } from "../../features/ecash/useAutoCashOut.js";
 import { redeemWaiversFor } from "../../features/payments/redeemWaivers.js";
 import { moneyText } from "../../ui/Money.jsx";
 import { getSetting, setSetting } from "../../config/relays.js";
-import { newShareToken, publishShare, shareLink } from "../../nostr/share.js";
+import { useTripShare } from "../../lib/useTripShare.js";
 
 const RiderContext = createContext(null);
 export const useRider = () => useContext(RiderContext);
 
 const HOUR = 3600000;
-const EMPTY_PLAN = { step: "idle", from: "idle", pinField: "pickup", pickup: null, dropoff: null, when: "ASAP", notes: "" };
+const EMPTY_PLAN = { step: "idle", from: "idle", pinField: "pickup", pickup: null, dropoff: null, when: "ASAP", notes: "", passengers: 0 };
 const parse = (e) => { try { return JSON.parse(e.content); } catch { return null; } };
 
 export function RiderProvider({ children }) {
-  const { user, rideRequests, publish, refreshData, pullRecent, pushNotice, liveTick, setView, isBlockedPk, blocked, onLogout, ecash, priceFor, btcPrice, usdPrice } = useApp();
+  const { user, rideRequests, publish, refreshData, pullRecent, pushNotice, liveTick, setView, isBlockedPk, blocked, onLogout, ecash, ecashOff, priceFor, btcPrice, usdPrice } = useApp();
   const me = user.publicKey;
-  const { pos: myPosition, error: geoError, status: gps } = useGeolocation(true);
+  const geo = useGeolocation(true, {
+    // Foreground only until a ride starts: then the watcher goes into the background, which on iOS is what
+    // keeps this page alive with the screen locked so the ticks keep being paid (see below).
+    background: false,
+    heartbeat: true,
+    title: "NostrRide",
+    message: "Measuring this ride and keeping your fare up to date.",
+  });
+  const { pos: myPosition, error: geoError, status: gps } = geo;
 
   // ── Where am I, by name? (one lookup per ~300 m of movement) ──
   const [here, setHere] = useState(null);
@@ -114,6 +124,13 @@ export function RiderProvider({ children }) {
   const [focusId, setFocusId] = useState(null);
   const focused = focusId ? rideRequests.find((r) => r.id === focusId && isOpenRide(r)) : null;
   const activeRide = focused || activeRideFor(rideRequests, me);
+  // The whole wallet, in sats, across its mints. null while it is loading; 0 when this phone has no wallet.
+  const walletSats = ecash ? ecash.total() : ecashOff ? 0 : null;
+  // While a ride runs, the location watcher goes into the BACKGROUND. Inside the native shell that is what keeps
+  // this page running with the phone in a pocket (iOS does not suspend an app with a running location session),
+  // so the rider keeps paying ticks; it also measures the trip on the rider's own phone (useRiderMeter).
+  const ridingNow = !!activeRide && rideStatus(activeRide) === "in_progress";
+  useEffect(() => { geo.setBackground(ridingNow); }, [ridingNow]); // eslint-disable-line react-hooks/exhaustive-deps
   const upcoming = upcomingRidesFor(rideRequests, me);
 
   // ── The receipt to show after a trip ends ──
@@ -138,36 +155,8 @@ export function RiderProvider({ children }) {
     });
   }, []);
 
-  // Cashes out by itself at the amount set in Account → Wallets, but never while a ride runs or its last payments may still be due.
-  useAutoCashOut({ locked: !!activeRide || !!receipt });
-
   // ── "Share my trip": a friend follows a link (see nostr/share.js) ──
-  const [shareState, setShareState] = useState(() => getSetting("tripShare", null)); // { key, token, sos }
-  const lastShareAt = useRef(0);
-  const share = shareState && activeRide && shareState.key === rideKey(activeRide) ? shareState : null;
-  const startShare = useCallback((request, { sos = false } = {}) => {
-    const key = rideKey(request);
-    const next = { key, token: shareState?.key === key ? shareState.token : newShareToken(), sos: sos || (shareState?.key === key && !!shareState.sos) };
-    setShareState(next);
-    setSetting("tripShare", next);
-    return next;
-  }, [shareState]);
-  const stopShare = useCallback(() => {
-    if (shareState) publishShare(shareState.token, { ended: true, ts: Date.now() });
-    setShareState(null);
-    setSetting("tripShare", null);
-  }, [shareState]);
-  // Send the trip's state to viewers (at most one update per 4 s unless forced).
-  const shareUpdate = useCallback((payload, { force = false } = {}) => {
-    if (!share) return;
-    const now = Date.now();
-    if (!force && now - lastShareAt.current < 4000) return;
-    lastShareAt.current = now;
-    publishShare(share.token, { ...payload, sos: share.sos, ts: now });
-  }, [share]);
-  const shareUrl = useCallback((s) => shareLink(new URL("track.html", window.location.href).href, s.token), []);
-  // The ride is over: tell viewers, and forget the key.
-  useEffect(() => { if (shareState && !activeRide) stopShare(); }, [!!activeRide]); // eslint-disable-line react-hooks/exhaustive-deps
+  const { share, startShare, stopShare, shareUpdate, shareUrl } = useTripShare(activeRide);
 
   // While a ride is open, poll so the driver's moves show up even if the
   // live subscription missed them.
@@ -199,16 +188,35 @@ export function RiderProvider({ children }) {
   }, [me, pushNotice, isBlockedPk]);
 
   // ── The ride's money: pay the driver tick by tick, and collect refunds ──
+  // What the SCREENS show is the ride under way, else the receipt. What the payment loop pays is more than that (see below).
   const payRide = activeRide && rideStatus(activeRide) === "in_progress" ? activeRide : receipt;
   // A sleeping phone stops the timer below, so no tick is paid and the driver sees "missed payments" with a full wallet.
   // Keep the screen on for as long as the ride runs; `screenMayDim` is true when the browser would not give us the lock.
+  // (Inside the native shell the lock is not needed: the background watcher above keeps the page running instead.)
   const screenMayDim = useWakeLock(!!activeRide && rideStatus(activeRide) === "in_progress");
   const milesRef = useRef(null); // the trip distance both screens show, reported by the trip screen
   const reportMiles = useCallback((m) => { milesRef.current = m; }, []);
   const [money, setMoney] = useState(null);
+  const payTickRef = useRef(null); // the payment pass of the loop below, for the native heartbeat to call
   const payTerms = payRide ? rideTerms(payRide) : null;
   const payMint = payRide ? rideMint(payRide) : null;
   const payKey = payRide ? rideKey(payRide) : null;
+  const reqsRef = useRef(rideRequests);
+  reqsRef.current = rideRequests;
+  const priceRef = useRef(priceFor);
+  priceRef.current = priceFor;
+  // Every ride of mine that still owes money (lib/ridemoney.js ridesOwing): the ride under way AND finished rides, whatever the
+  // receipt says. A dismissed receipt, a second ride that ended within the hour, or a phone that was closed while the wallet was
+  // short must not abandon the rest of a fare (the driver has no way to ask for it again).
+  const owingKey = useMemo(() => {
+    const keys = rideRequests
+      .filter((r) => r.pubkey === me && rideDriver(r) && (rideStatus(r) === "in_progress" || rideStatus(r) === "completed"))
+      .map(rideKey);
+    return [...new Set(keys)].sort().join("|");
+  }, [rideRequests, me]);
+  const [owedRides, setOwedRides] = useState(false); // a ride still owes money: automatic cash out must wait
+  // Cashes out by itself at the amount set in Account → Wallets, but never while a ride runs or its last payments may still be due.
+  useAutoCashOut({ locked: !!activeRide || !!receipt || owedRides });
   const run = useCallback(async (request) => {
     const terms = rideTerms(request);
     if (!terms || !rideTimes(request).startedAt) return null;
@@ -220,24 +228,56 @@ export function RiderProvider({ children }) {
   }, [user, ecash, publish, priceFor, usdPrice]);
   useEffect(() => { setMoney(null); }, [payKey]);
   useEffect(() => {
-    if (!payRide || !payTerms) return;
+    if (!ecash || !owingKey) { setOwedRides(false); return undefined; }
     let alive = true, running = false;
     const tick = async () => {
       if (running) return;
       running = true;
       try {
-        const res = await run(payRide);
-        if (alive && res) setMoney((m) => (m && m.status === res.status && m.owed === res.owed && m.paid === res.paid && m.due === res.due && m.sent === res.sent && m.outstanding === res.outstanding ? m : { ...res, at: Date.now() }));
+        const owing = ridesOwing(reqsRef.current, me, { priceFor: priceRef.current });
+        if (!alive) return;
+        // Only money that still has to leave the wallet blocks an automatic cash out; a tick already sent (waiting for the
+        // driver's answer) is re-offered, not paid again.
+        setOwedRides(owing.some((o) => o.unpaid > 0));
+        for (const item of owing) {
+          let res = await run(item.request);
+          if (!alive) return;
+          // The ride is over and its fare is fixed, but the cap was set from the QUOTE (3× it): a much longer ride can end above
+          // the cap. The ride on screen has its "Allow more" button; an old one has no screen at all, so its ended fare is allowed
+          // through here (never more than one extra cap at a time, up to three).
+          for (let i = 0; res?.status === "capped" && item.key !== payKey && i < 3; i++) {
+            allowMoreSpend(item.request);
+            res = await run(item.request);
+            if (!alive) return;
+          }
+          // Only the ride on screen reports to the fare card; the others are paid quietly.
+          if (res && payKey && item.key === payKey) {
+            setMoney((m) => (m && m.status === res.status && m.owed === res.owed && m.paid === res.paid && m.due === res.due && m.sent === res.sent && m.outstanding === res.outstanding ? m : { ...res, at: Date.now() }));
+          }
+        }
       } finally { running = false; }
     };
     tick();
+    payTickRef.current = tick;
     const id = setInterval(tick, 3000);
     // The page just woke up (screen unlocked, app switched back, network back): pay what fell due at once, not at the next timer.
     const wake = () => { if (document.visibilityState === "visible") tick(); };
     document.addEventListener("visibilitychange", wake);
     window.addEventListener("online", wake);
-    return () => { alive = false; clearInterval(id); document.removeEventListener("visibilitychange", wake); window.removeEventListener("online", wake); };
-  }, [payKey, !!ecash, !!payTerms, run]); // eslint-disable-line react-hooks/exhaustive-deps
+    return () => { alive = false; clearInterval(id); document.removeEventListener("visibilitychange", wake); window.removeEventListener("online", wake); if (payTickRef.current === tick) payTickRef.current = null; };
+  }, [owingKey, !!ecash, payKey, run, me]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Inside the native shell, two things wake the payment pass while the page is hidden:
+  //   • a location fix (a `heartbeat` watcher, ~1/s): a fix is a moment the page is KNOWN to be running;
+  //   • the shell's own metronome (lib/heartbeat.js): a native timer that evaluates one line of JS, which is
+  //     what a rider standing still, in traffic or in a tunnel gets — no fix, but the ride still earns.
+  // The metronome holds no key and no coin: the page still pays, native only says when. It runs only while a
+  // ride does, because that is when the app has a reason to keep running in the background at all.
+  // In a browser neither exists and the 3 s timer above is the whole loop.
+  const wakePay = useCallback(() => { const tick = payTickRef.current; if (tick) tick(); }, []);
+  useEffect(() => subscribeNativeFixes(wakePay), [wakePay]);
+  useEffect(() => (ridingNow ? startHeartbeat(wakePay) : undefined), [ridingNow, wakePay]);
+
   // Pay now, outside the timer (after adding funds): resolves to the result.
   const payNow = useCallback(async (request) => run(request || payRide), [run, payRide]);
   // The rider says: yes, pay more than the cap (one more cap's worth), then pay what was held back.
@@ -253,10 +293,16 @@ export function RiderProvider({ children }) {
 
   // ── Actions ──
 
-  // Publish a ride request. Only an approximate area is public; the exact
-  // trip is sealed to the rider (and to the driver after they are chosen).
+  // Publish a ride request. The whole event (note and fare included) goes only inside gift wraps (nostr/sealing.js), to the drivers near the
+  // pickup and the rider; they see an approximate area, and the exact trip is sealed to the rider (and to the chosen driver).
   const requestRide = useCallback(
-    ({ pickup, dropoff, when, notes, miles, minutes, fareSats, suggestedSats, to = null, ratesSeen = null }) => {
+    ({ pickup, dropoff, when, notes, passengers = 0, miles, minutes, fareSats, suggestedSats, to = null, ratesSeen = null }) => {
+      // The home and quote screens check this too; this guard covers a wallet that fell while the person was planning.
+      const funds = ecash ? ecash.total() : ecashOff ? 0 : null;
+      if (funds != null && !hasRideFunds(funds, usdPrice)) {
+        pushNotice(`You need at least ${moneyText(lowBalanceSats(usdPrice), btcPrice)} in your ecash wallet to request a ride. Add funds in Account → Wallets.`);
+        return null;
+      }
       // `to` (a list of drivers): the rider chose them (browse list, map, "Notify nearest driver immediately"). The request goes to them only.
       const directed = Array.isArray(to) && to.length > 0;
       const d = "ride-" + Date.now();
@@ -270,6 +316,7 @@ export function RiderProvider({ children }) {
           dropoff: publicPlace(dropoff),
           time: when,
           notes,
+          passengers: passengers > 0 ? Math.min(passengers, 4) : 0, // how many people ride along with the rider (the driver is told)
           status: "requested",
           hide: hideList(user.sk, blocked), // drivers I blocked never see this request (lib/blocks.js)
           fareMode: "standard", // every driver's own rates (older apps also knew a "flat" price; it is gone)
@@ -291,7 +338,7 @@ export function RiderProvider({ children }) {
       }
       return d;
     },
-    [publish, refreshData, resetPlan, user.sk, me, pushNotice, setView, blocked]
+    [publish, refreshData, resetPlan, user.sk, me, pushNotice, setView, blocked, ecash, ecashOff, usdPrice, btcPrice]
   );
 
   // Keep a signed record of a payment (the proof is sealed to the driver, so only
@@ -418,6 +465,19 @@ export function RiderProvider({ children }) {
     [publish, refreshData]
   );
 
+  // A request or a ride that has not started is cancelled by itself when the wallet falls below $5. Once riding, the base
+  // rate has been charged and the ride continues (the normal short-wallet notices take over). One cancel per ride.
+  const walletCancelled = useRef(new Set());
+  useEffect(() => {
+    if (walletSats == null || !activeRide) return;
+    if (!shouldCancelForLowWallet({ status: rideStatus(activeRide), stage: rideStage(activeRide), sats: walletSats, usdPrice })) return;
+    const key = rideKey(activeRide);
+    if (walletCancelled.current.has(key)) return;
+    walletCancelled.current.add(key);
+    pushNotice(`Your ecash balance fell below ${moneyText(lowBalanceSats(usdPrice), btcPrice)}. Your ride request was cancelled. Add funds in Account → Wallets to request again.`);
+    finishRide(activeRide);
+  }, [walletSats, activeRide, usdPrice, btcPrice, finishRide, pushNotice]);
+
   // "Not this driver": turn down ONE driver's offer. The request stays open, so other drivers can still accept it,
   // and that driver's app is told (it stops waiting and does not show this request again).
   const declineOffer = useCallback(
@@ -441,8 +501,6 @@ export function RiderProvider({ children }) {
 
   // Logging out closes the requests still waiting for a driver (reservations too): the app will not be here to
   // choose a driver or pay, so nobody should be left waiting for it. A ride that is already under way is not touched.
-  const reqsRef = useRef(rideRequests);
-  reqsRef.current = rideRequests;
   useEffect(
     () =>
       onLogout(() => {

@@ -9,13 +9,16 @@
 //          ride started or while the price is unknown for the final tick.
 //    ledgerSummary(request, ledger)
 //        → { owed, paid, forgiven, outstanding, sent } in sats
+//    ridesOwing(requests, me, { priceFor })
+//        → every ride of mine that still owes money (the ride under way and finished ones), so the rider's app pays them all
 //
 //  The ledger is saved under the ride's key (the last 8 rides are kept).
 // ════════════════════════════════════════════════════════════
 
 import { getSetting, setSetting } from "../config/relays.js";
 import { advanceLedger, milesAt, newLedger, owedSats, settle } from "./ticks.js";
-import { rideEnding, rideKey, rideTimes } from "./rides.js";
+import { rideDriver, rideEnding, rideKey, rideStatus, rideTimes } from "./rides.js";
+import { rideTerms } from "./terms.js";
 import { forgivenSats, paidSats, sentSats, signalTimes } from "./payments.js";
 import { bothQuiet } from "./finish.js";
 import { boundedMiles } from "./meter.js";
@@ -79,6 +82,46 @@ export function currentLedger(request, { terms, price, nowMs, miles, role }) {
   }
   if (led !== before || !saved) saveLedger(key, led);
   return led;
+}
+
+// The rides of `me` that still owe money, however long ago they ended: the ride under way and every finished ride whose fare is
+// not covered (outstanding > 0). The rider's app pays THESE, not only the ride on screen: a receipt that was dismissed, a second
+// ride that ended within the hour, or an app that was closed while the wallet was short must not lose the last of a fare (the
+// driver has no way to ask for it again). Each item is { request, key, ledger, unpaid, outstanding, owed, paid, forgiven, sent }:
+// `unpaid` is what no tick covers yet, `outstanding` also counts ticks that were sent but not confirmed (they are offered again).
+export function ridesOwing(requests, me, { priceFor, nowMs = Date.now() } = {}) {
+  const out = [];
+  const seen = new Set();
+  for (const r of requests || []) {
+    if (!r || r.pubkey !== me) continue;
+    const key = rideKey(r);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const status = rideStatus(r);
+    if (status !== "in_progress" && status !== "completed") continue;
+    if (!rideDriver(r)) continue;
+    // A finished ride with a settled ledger that is fully covered stays covered for good (owed is fixed, paid only grows):
+    // skip it without asking for terms and a price, so a phone with many past rides does not work through all of them every 3 s.
+    if (status === "completed") {
+      const done = loadLedger(key);
+      if (done?.final && owedSats(done) <= paidSats(r) + forgivenSats(r)) continue;
+    }
+    const terms = rideTerms(r);
+    if (!terms) continue;
+    const price = typeof priceFor === "function" ? priceFor(terms.currency) : null;
+    if (!price) continue; // without a price the ticks cannot be counted: wait, never guess
+    const led = currentLedger(r, { terms, price, nowMs, role: "rider" });
+    if (!led) continue;
+    const sum = ledgerSummary(r, led);
+    if (sum.outstanding <= 0) continue;
+    // `unpaid` = what no tick covers yet (a tick that was sent but not confirmed is not in it: it may still arrive, and the
+    // ride stays in the queue so that tick is offered again). Only `unpaid` means more money will leave the wallet.
+    const unpaid = Math.max(0, sum.owed - sum.sent - sum.forgiven);
+    out.push({ request: r, key, ledger: led, unpaid, ...sum });
+  }
+  // The ride under way first (its payments are due as they fall), then the oldest debt: money that has waited longest is cleared first.
+  const rank = (x) => (rideStatus(x.request) === "in_progress" ? -Infinity : rideEnding(x.request)?.at ?? 0);
+  return out.sort((a, b) => rank(a) - rank(b));
 }
 
 // Everything in sats: what the ride earned, what the driver confirmed, what they forgave, what is still open.
