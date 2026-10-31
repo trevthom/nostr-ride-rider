@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════
-//  RIDER APP — generated from nostr-ride. One face only: the three rider tabs.
+//  RIDER APP — one face only: the three rider tabs.
 //  Everything shared (key, profile, wallet, settings) is in AppProvider.
 // ════════════════════════════════════════════════════════════
 

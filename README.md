@@ -6,8 +6,6 @@ as the ride runs. There is no central server and no database. Uber/Lyft-style: "
 The other half is in its own repository: **nostr-ride-driver**. The two apps only talk through Nostr relays,
 so they can be deployed separately.
 
-> **Generated repository.** This is a copy of the rider app made from **trevthom/nostr-ride** at `ff8df6c` by `scripts/export-apps.mjs`. Make changes in nostr-ride and export again: a hand edit here is overwritten by the next export.
-
 ## Run it
 ```bash
 npm install
