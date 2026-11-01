@@ -1,6 +1,6 @@
 // ════════════════════════════════════════════════════════════
 //  USE AUTO CASH OUT — Runs in the driver app (DriverContext). When the ecash held at a mint is worth at least the amount the
-//  driver chose (Account → Wallets → "Automatically cash out at"), it is sent to the driver's cash out location by itself.
+//  driver chose (Account → Money → "Automatically cash out at"), it is sent to the driver's cash out location by itself.
 //  The money goes to the address PINNED on this device (lib/cashoutto.js), never to a profile address that was changed elsewhere: a changed or
 //  unconfirmed address pauses it and the person is told once. Runs in the Ride and the Drive face.
 //  Rules (lib/autocashout.js): needs a pinned cash out address; waits while a ride is running; after a failure waits 10 minutes
@@ -36,8 +36,8 @@ export function useAutoCashOut({ locked = false } = {}) {
       const to = adoptProfileAddress(u.publicKey, u.lud16); // the pinned address; a device with none takes the profile's
       const st = cashOutState({ profile: u.lud16, pinned: to });
       if (st === "changed" || !to) {
-        // The address was changed elsewhere (or there is none): no money moves until the person decides (Account → Wallets).
-        if (!paused.current) { paused.current = true; if (st === "changed") notify("Your cash out location was changed outside this device. Automatic cash out is paused. Open Account → Wallets to decide."); }
+        // The address was changed elsewhere (or there is none): no money moves until the person decides (Account → Money).
+        if (!paused.current) { paused.current = true; if (st === "changed") notify("Your cash out location was changed outside this device. Automatic cash out is paused. Open Account → Money to decide."); }
         return;
       }
       paused.current = false;

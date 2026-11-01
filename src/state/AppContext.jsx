@@ -180,7 +180,7 @@ export function AppProvider({ initialView, children }) {
   const [ecash, setEcash] = useState(null);
   const [, setEcashTick] = useState(0);
   // "No wallet on this device" (`ecashOff`): nothing makes a wallet by itself. The person chooses Create New Wallet (new 12 words) or
-  // Restore (their own 12 words) in Account → Wallets, and until then no wallet is loaded. A device that already holds a wallet (its saved
+  // Restore (their own 12 words) in Account → Money, and until then no wallet is loaded. A device that already holds a wallet (its saved
   // words or coins) is "on" without a choice. The flag `ecashOff_<pk16>` is true after Disconnect and false after Create / Restore.
   const [offTick, setOffTick] = useState(0);
   const offKey = user?.publicKey ? "ecashOff_" + user.publicKey.slice(0, 16) : null;

@@ -212,7 +212,7 @@ export function RiderProvider({ children }) {
     return [...new Set(keys)].sort().join("|");
   }, [rideRequests, me]);
   const [owedRides, setOwedRides] = useState(false); // a ride still owes money: automatic cash out must wait
-  // Cashes out by itself at the amount set in Account → Wallets, but never while a ride runs or its last payments may still be due.
+  // Cashes out by itself at the amount set in Account → Money, but never while a ride runs or its last payments may still be due.
   useAutoCashOut({ locked: !!activeRide || !!receipt || owedRides });
   const run = useCallback(async (request) => {
     const terms = rideTerms(request);
@@ -297,7 +297,7 @@ export function RiderProvider({ children }) {
       // The home and quote screens check this too; this guard covers a wallet that fell while the person was planning.
       const funds = ecash ? ecash.total() : ecashOff ? 0 : null;
       if (funds != null && !hasRideFunds(funds, usdPrice)) {
-        pushNotice(`You need at least ${moneyText(lowBalanceSats(usdPrice), btcPrice)} in your ecash wallet to request a ride. Add funds in Account → Wallets.`);
+        pushNotice(`You need at least ${moneyText(lowBalanceSats(usdPrice), btcPrice)} in your ecash wallet to request a ride. Add funds in Account → Money.`);
         return null;
       }
       // `to` (a list of drivers): the rider chose them from the browse list or the map. The request goes to them only.
@@ -471,7 +471,7 @@ export function RiderProvider({ children }) {
     const key = rideKey(activeRide);
     if (walletCancelled.current.has(key)) return;
     walletCancelled.current.add(key);
-    pushNotice(`Your ecash balance fell below ${moneyText(lowBalanceSats(usdPrice), btcPrice)}. Your ride request was cancelled. Add funds in Account → Wallets to request again.`);
+    pushNotice(`Your ecash balance fell below ${moneyText(lowBalanceSats(usdPrice), btcPrice)}. Your ride request was cancelled. Add funds in Account → Money to request again.`);
     finishRide(activeRide);
   }, [walletSats, activeRide, usdPrice, btcPrice, finishRide, pushNotice]);
 

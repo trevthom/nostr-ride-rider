@@ -121,7 +121,9 @@ export function AccountHeader({ photoRequired = false }) {
           </div>
         )}
         <p className="text-sm text-neutral-500">
-          {rep.rides} ride{rep.rides === 1 ? "" : "s"} · {rep.drives} drive{rep.drives === 1 ? "" : "s"}
+          {IS_DRIVER_APP
+            ? `${rep.drives} drive${rep.drives === 1 ? "" : "s"}`
+            : `${rep.rides} ride${rep.rides === 1 ? "" : "s"}`}
           {miles > 0 && ` · ${formatDistance(miles, { unit: units })} driven`}
         </p>
         {photoRequired && !user.picture && <p className="text-amber-700 text-xs mt-1">A face photo is required to drive.</p>}

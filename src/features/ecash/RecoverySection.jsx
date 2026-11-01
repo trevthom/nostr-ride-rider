@@ -1,11 +1,11 @@
 // ════════════════════════════════════════════════════════════
 //  RECOVERY — The 12-word recovery phrase of the ecash wallet (nostr/ecashRecovery.js, lib/recovery.js), shown in
-//  Account → Wallets under "Recovery phrase". The ecash is kept on this device. If the phone is lost, the 12 words bring the
-//  money back on a new one (Restore my wallet, in Wallets: features/ecash/WalletStart.jsx + RestoreWallet.jsx). The words ARE
+//  Account → Money under "Recovery phrase". The ecash is kept on this device. If the phone is lost, the 12 words bring the
+//  money back on a new one (Restore my wallet, in Money: features/ecash/WalletStart.jsx + RestoreWallet.jsx). The words ARE
 //  the money: they are shown only on request, are never sent anywhere, and the app never asks for them except on the
 //  restore dialog.
 //
-//    <RecoveryPanel />    the Account → Wallets block: write the words down, show them again
+//    <RecoveryPanel />    the Account → Money block: write the words down, show them again
 //    <RecoveryNotice />   a short warning at the top of Account while there is ecash and the words are not written down yet
 //
 //  Writing down: the 12 words are shown once in a numbered list; the person then types three of them back (asked by number) before
@@ -22,7 +22,7 @@ import { pickCheckPositions, checkAnswers } from "../../lib/recovery.js";
 const EVENT = "nostrride-recovery";
 const SHOW_MS = 30000; // the words hide themselves after this long
 
-// Account → Wallets holds the phrase. A notice elsewhere in Account can send the person there and ask for the setup at
+// Account → Money holds the phrase. A notice elsewhere in Account can send the person there and ask for the setup at
 // once; if the wallet block is not on screen yet, the request waits for it (takeWantedSetup).
 let wantedSetup = false;
 export function startRecoverySetup() {
@@ -124,7 +124,7 @@ export function RecoveryPanel() {
     const id = setTimeout(() => setShown(false), SHOW_MS);
     return () => clearTimeout(id);
   }, [shown]);
-  if (ecashOff) return <p className="text-sm text-neutral-500" role="status">This phone has no ecash wallet. Create or restore one in Wallets; then its 12 words are shown here.</p>;
+  if (ecashOff) return <p className="text-sm text-neutral-500" role="status">This phone has no ecash wallet. Create or restore one in Money; then its 12 words are shown here.</p>;
   if (!recovery) return <p className="text-sm text-neutral-500" role="status">Loading your wallet…</p>;
 
   const safe = recovery.backedUp();

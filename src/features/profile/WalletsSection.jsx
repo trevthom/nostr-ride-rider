@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════
-//  WALLETS — Account → Wallets, in both apps: everything about money in ONE section, top to bottom:
+//  MONEY — Account → Money, in both apps: everything about money in ONE section, top to bottom:
 //    1. Currency       the local currency every price is shown in
 //    2. Ecash wallet   Create New Wallet or Restore (until there is a wallet on this device), then the balance with Add funds
 //                      (Lightning or on-chain) and Send (an ecash token or a Lightning payment), the mint, ...

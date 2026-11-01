@@ -1,6 +1,6 @@
 // ════════════════════════════════════════════════════════════
-//  CASH OUT CONFIRM — Under the cash out location (Account → Wallets): where this device sends money when you cash out (lib/cashoutto.js).
-//    • confirmed on this device → one quiet line with the address
+//  CASH OUT CONFIRM — Under the cash out location (Account → Money): where this device sends money when you cash out (lib/cashoutto.js).
+//    • confirmed on this device → nothing extra is drawn
 //    • no pin yet → useCashOutTo adopts the profile's address at once (nobody is asked)
 //    • the profile was changed elsewhere → the old address stays in use; choose the new one, or put the old one back
 //  Nothing else can change the pinned address: not the relays, not the settings backup.
@@ -15,8 +15,7 @@ export default function CashOutConfirm() {
   const { user } = useApp();
   const save = useSaveProfile();
   const { pinned, profile, state } = useCashOutTo();
-  if (state === "none" || state === "unconfirmed") return null;
-  if (state === "ok") return <p className="text-xs text-neutral-500 mt-2">Cash outs from this device go to {pinned}.</p>;
+  if (state === "none" || state === "unconfirmed" || state === "ok") return null;
   const useNew = () => setCashOutTo(user.publicKey, profile);
   const putBack = () => save({ lud16: pinned });
   return (

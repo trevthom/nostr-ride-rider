@@ -1,12 +1,12 @@
 // ════════════════════════════════════════════════════════════
-//  WALLET START — What Account → Wallets shows while this device has NO ecash wallet. Nothing makes a wallet by itself. The person picks:
+//  WALLET START — What Account → Money shows while this device has NO ecash wallet. Nothing makes a wallet by itself. The person picks:
 //    • Create New Wallet    a new, empty wallet with new 12 words. A warning comes first (the words are the only way to get the money back);
 //                           the write-down screen (RecoverySection) opens as soon as the wallet exists.
 //    • Restore my wallet    the 12 words of a wallet they already have (RestoreWallet.jsx). The typed words become this phone's words.
 //  A ride needs a wallet: until there is one a rider cannot choose a driver and a driver cannot go online.
 //
 //    <WalletStart />      the two choices and their dialogs
-//    <WalletPrompt />     a short notice with a button that opens Account → Wallets (for the ride and drive screens)
+//    <WalletPrompt />     a short notice with a button that opens Account → Money (for the ride and drive screens)
 // ════════════════════════════════════════════════════════════
 
 import { useState } from "react";

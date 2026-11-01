@@ -92,7 +92,7 @@ function Idle() {
 
   const openSearch = (dropoff) => {
     if (walletSats == null) return pushNotice("Your ecash wallet is still loading. Try again in a moment.");
-    if (!fundsOk) return pushNotice(`You need at least ${moneyText(minSats, btcPrice)} in your ecash wallet to request a ride. Add funds in Account → Wallets.`);
+    if (!fundsOk) return pushNotice(`You need at least ${moneyText(minSats, btcPrice)} in your ecash wallet to request a ride. Add funds in Account → Money.`);
     // The pickup is never filled in for the rider: a recent place only sets the destination, and the search page asks for the pickup.
     const pickup = plan.pickup;
     setPlan({ step: dropoff && pickup ? "quote" : "search", from: "idle", ...(dropoff ? { dropoff } : {}) });
@@ -172,7 +172,7 @@ function Quote() {
 
   const request = () => {
     if (!quote) return;
-    if (walletSats != null && !fundsOk) return pushNotice(`You need at least ${moneyText(minSats, btcPrice)} in your ecash wallet to request a ride. Add funds in Account → Wallets.`);
+    if (walletSats != null && !fundsOk) return pushNotice(`You need at least ${moneyText(minSats, btcPrice)} in your ecash wallet to request a ride. Add funds in Account → Money.`);
     if (timed) {
       const t = Date.parse(plan.when);
       if (isNaN(t)) return setError("Pick a valid date and time.");

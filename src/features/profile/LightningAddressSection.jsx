@@ -32,7 +32,7 @@ export default function LightningAddressSection({ value, onSave, children = null
   return (
     <div className="bg-neutral-100 rounded-xl border border-neutral-200 p-4 space-y-2">
       <FoldTitle>Cash out location</FoldTitle>
-      <p className="text-neutral-500 text-xs">Lightning address</p>
+      <p className="text-black text-xs font-bold">Lightning address</p>
       <div className="flex gap-2">
         <input aria-label="Cash out location (Lightning address)"
           value={draft}

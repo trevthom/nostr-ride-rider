@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════
-//  AUTO CASH OUT FIELD — "Automatically cash out at: $ [ ]" (Account → Wallets, in the Ride and the Drive face).
+//  AUTO CASH OUT FIELD — "Automatically cash out at: $ [ ]" (Account → Money, in the Ride and the Drive face).
 //  The person types an amount. When the ecash reaches it, the app sends it all to the cash out address PINNED on this device
 //  (lib/cashoutto.js) by itself (useAutoCashOut.js). Empty = off. The choice is saved when the field is left or Enter is pressed (NOT on every key:
 //  typing "15" must never cash out at "1"). Needs a confirmed cash out location.
@@ -56,7 +56,7 @@ export default function AutoCashOutField() {
           }}
           onBlur={commit}
           onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); e.currentTarget.blur(); } }}
-          className={`${inputCls} min-w-0 !text-sm`}
+          className={`${inputCls} min-w-0 !text-sm !bg-white`}
         />
       </label>
       <p className="text-xs text-neutral-500 mt-1">

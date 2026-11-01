@@ -4,7 +4,7 @@
 //  setting is never hidden behind an accordion.
 //
 //    Appearance          Dark Mode (application), Dark Mode (map), Units
-//    Wallets             Currency, the ecash wallet (+ cash out location), the recovery phrase
+//    Money               Currency, the ecash wallet (+ cash out location), the recovery phrase
 //    People & Privacy    Contact methods and Trusted contacts (right here), then Your vouches and Blocked users (screens)
 //    Nostr relays
 //    Your keys
@@ -43,7 +43,7 @@ export default function AccountScreen({ onRide = false }) {
   if (page !== "home") {
     const pages = {
       appearance: { title: "Appearance", body: <ScreenBody><AppearanceSection /></ScreenBody> },
-      wallets: { title: "Wallets", body: <WalletsSection locked={onRide} /> },
+      wallets: { title: "Money", body: <WalletsSection locked={onRide} /> },
       people: { title: "People & Privacy", body: <PeoplePage onOpen={go} /> },
       vouches: { title: "Your vouches", body: <ScreenBody><VouchesSection /></ScreenBody> },
       blocked: { title: "Blocked users", body: <ScreenBody><BlockedSection /></ScreenBody> },
@@ -64,7 +64,7 @@ export default function AccountScreen({ onRide = false }) {
         <RecoveryNotice onOpen={() => { go("wallets"); startRecoverySetup(); }} />
         <div className="border-t border-neutral-200 divide-y divide-neutral-100">
           <Row icon="sun" title="Appearance" subtitle="Dark mode, units" onClick={() => go("appearance")} />
-          <Row icon="wallet" title="Wallets" subtitle="Currency, ecash, recovery phrase" onClick={() => go("wallets")} />
+          <Row icon="wallet" title="Money" subtitle="Currency, ecash, recovery phrase" onClick={() => go("wallets")} />
           <Row icon="shield" title="People & Privacy" subtitle="Contacts, vouches, blocked users" onClick={() => go("people")} />
           <Row icon="zap" title="Nostr relays" subtitle={`${relays.length} relay${relays.length === 1 ? "" : "s"}`} onClick={() => go("relays")} />
           <Row icon="eye" title="Your keys" subtitle="Your npub and nsec" onClick={() => go("keys")} />

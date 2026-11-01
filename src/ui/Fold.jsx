@@ -6,7 +6,7 @@
 //    <Fold id="x" title="…">…</Fold>     a section that opens and closes on this device
 //    <ScreenBody>…</ScreenBody>          a section on a screen of its own (its label is left out)
 //    <FoldTitle right={<Chip/>}>Title</FoldTitle>    a heading that a section draws only when it is NOT inside one of those
-//    <SubTitle>Title</SubTitle>           a heading for a part that holds several parts (Wallets); always drawn
+//    <SubTitle>Title</SubTitle>           a heading for a part that holds several parts (Money); always drawn
 //
 //  Inside a Fold or a ScreenBody the section's own title (SectionLabel, FoldTitle) is left out, because the header shows it.
 // ════════════════════════════════════════════════════════════
@@ -18,7 +18,7 @@ import Icon from "./Icon.jsx";
 const InFold = createContext(false);
 export const useInFold = () => useContext(InFold);
 
-// A section on a screen of its own (Account → Wallets, → Keys, …): the screen's title replaces the section's label.
+// A section on a screen of its own (Account → Money, → Keys, …): the screen's title replaces the section's label.
 export function ScreenBody({ children }) {
   return <InFold.Provider value={true}>{children}</InFold.Provider>;
 }
@@ -75,7 +75,7 @@ export function FoldTitle({ children, right = null, className = "" }) {
   );
 }
 
-// A heading for one part of a Fold that holds several parts (the Wallets fold). Unlike FoldTitle it is always drawn.
+// A heading for one part of a Fold that holds several parts (the Money fold). Unlike FoldTitle it is always drawn.
 export function SubTitle({ children }) {
   return <h3 className="text-[13px] font-semibold uppercase tracking-wider text-neutral-500 mb-2">{children}</h3>;
 }

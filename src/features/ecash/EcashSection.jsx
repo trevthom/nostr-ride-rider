@@ -1,6 +1,6 @@
 // ════════════════════════════════════════════════════════════
-//  ECASH SECTION — The ecash part of Account → Wallets (WalletsSection.jsx), in both faces. `children` (the cash out location)
-//  is drawn after the balance, so the Wallets section reads top to bottom as one.
+//  ECASH SECTION — The ecash part of Account → Money (WalletsSection.jsx), in both faces. `children` (the cash out location)
+//  is drawn after the balance, so the Money section reads top to bottom as one.
 //  A ride is paid tick by tick in ecash (lib/ticks.js): the rider pays
 //  from this wallet, the driver is paid into it.
 //    • balance, per mint;  Add funds (Lightning or on-chain → ecash) and Send, side by side
@@ -83,10 +83,10 @@ export default function EcashSection({ locked = false, children = null }) {
   };
 
   // Cash out (a tap): everything held at each mint goes to the address pinned on this device. A device with no pin takes the profile's address; nobody is asked.
-  // With no address at all the person is told where to set one.
+  // With no address at all the inline hint under the balance says where to set one.
   const tapCashOut = async () => {
     const to = adoptProfileAddress(user.publicKey, user.lud16);
-    if (!to) return setMsg("Set your cash out location (a Lightning address) below, then tap Cash out.");
+    if (!to) { setMsg(""); return; }
     setBusy("out");
     setMsg("");
     let sent = 0, fee = 0;

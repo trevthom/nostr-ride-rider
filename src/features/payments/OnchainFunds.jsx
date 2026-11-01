@@ -52,7 +52,7 @@ export default function OnchainFunds({ mint, onDone }) {
   if (state === "unsupported") {
     return (
       <p className="text-sm text-amber-800 bg-amber-50 rounded-xl px-3 py-3" role="status">
-        {mintLabel(mint)} does not take on-chain deposits. Use Lightning, or choose another mint in Wallets. Nothing was asked of you.
+        {mintLabel(mint)} does not take on-chain deposits. Use Lightning, or choose another mint in Money. Nothing was asked of you.
       </p>
     );
   }

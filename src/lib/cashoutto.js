@@ -2,7 +2,7 @@
 //  CASH OUT TO — Where this device sends money when the person cashes out. The cash out location (a Lightning address) is also
 //  the `lud16` of the public profile (kind 0): riders tip it. A profile can be changed by anything that holds the person's nsec. If a
 //  leaked nsec could change where THIS device sends the wallet's money, the 12-word wallet would be no safer than the nsec. So
-//  money goes only to the address pinned ON THIS DEVICE (the person typed it and pressed Save in Account → Wallets, or this device had none and
+//  money goes only to the address pinned ON THIS DEVICE (the person typed it and pressed Save in Account → Money, or this device had none and
 //  took the profile's): the pinned address. It stays on this device. It is not in the settings backup and not in any event.
 //
 //    getCashOutTo(pk) / setCashOutTo(pk, address)   the pinned address ("" when none)
