@@ -99,7 +99,7 @@ The password starts hidden each time the page is drawn.
 The profile (kind 0) is shared by every device the person signs in on (and by other Nostr apps), so an address saved on one phone is the same on another: the app reads it at login, every 5 minutes and when it comes back to the front. A profile save writes only the fields it changes
 (`src/lib/profilecontent.js`), so a save here cannot overwrite the vehicle, rates or gender that the driver app saved for the same person. (It was called *Lightning address*.)
 
-**Money.** *Account → Money* holds everything about money, top to bottom: **Currency** (first), the **ecash wallet** ("Add ecash here before you ride.", the balance, **Add funds** and **Send** side by side, the mint), the **Cash out location** (inside the wallet, with *Automatically cash out at* in the same box directly under the Lightning address), and the **Recovery phrase**. The balance turns red below $5.00, and its value in the local currency is an estimate based on the bitcoin price because the money is held as bitcoin ecash. (These were separate sections: Ecash wallet, Currency, Cash out location, Lightning wallet; the Lightning wallet (NWC) is gone.)
+**Money.** *Account → Money* holds everything about money, top to bottom: **Currency** (first), the **ecash wallet** (the balance, **Add funds** and **Send** side by side, the mint), the **Cash out location** (inside the wallet, with *Automatically cash out at* in the same box directly under the Lightning address), and the **Recovery phrase**. The balance turns red below $5.00, and its value in the local currency is an estimate based on the bitcoin price because the money is held as bitcoin ecash. (These were separate sections: Ecash wallet, Currency, Cash out location, Lightning wallet; the Lightning wallet (NWC) is gone.)
 **A device with no wallet** shows two buttons in place of the balance: **Create New Wallet** (a warning that the 12 words are the only way to get the money back, then the words at once) and **Restore my wallet** (type the 12 words from another phone). **Restoring the same words in the other app on this phone is a takeover, not a sync:** the app that restores swaps the coins and holds the balance, and the other app shows $0.00. It is more practical to keep two separate ecash wallets, one for riding and one for driving, and send ecash between them. The section keeps the id `ecash`, so an open or closed state saved earlier still applies.
 The rider needs ecash in the wallet before a ride starts; the driver app requires the driver's face photo, vehicle and vehicle photo, and plate.
 
@@ -110,7 +110,7 @@ The rider screens (`src/rider`) share one code base with the rest of this app fo
 1. The driver taps **GO** (needs a good or an *approximate* GPS fix, see [Location and GPS](#location-and-gps)). The app shares an approximate location.
 2. The rider sets the pickup and the destination. **The app never fills in the pickup by itself.** The rider types an address or the name of a business or landmark (the search page says so), or **pins the spot on the map** (*Set pickup on the map*: drag the map under the pin), or taps *Your location* on the pickup field. **The drop-off can be pinned the same way** (*Set drop-off on the map*); with both places set the quote opens.
    The search page shows **nothing but the two boxes until one is active** (has the cursor). Then, for that box only: its map button comes first, and the **3 most recent pickups** (or **3 most recent drop-offs**) are listed below it; once the rider types, the search results take their place.
-   The rider sees each driver's own rates (a **standard fare**) and taps **Request**.
+   The rider sees each driver's own rates (a **standard fare**) and taps **Request**. On the quote, **Avoid tolls** asks for a toll-free route for this ride.
 3. Nearby drivers get a **request card** with a countdown. A driver **accepts** (or declines). The reply carries the driver's rates and ecash mint.
 4. The rider **chooses a driver**. The rider needs enough ecash at the driver's mint for the start: the base rate, two minutes and a mile (with the default rates $1.50 + $0.40 + $1.10 = **$3.00**).
    The confirm screen shows the sum. The second minute is a small cushion, so the first payments are never late (a minute is due after 60 seconds and the app checks every 3 seconds). It is **not locked away**:
@@ -124,7 +124,7 @@ The rider screens (`src/rider`) share one code base with the rest of this app fo
 The back arrow on the quote goes to the search page. **Cancel** on the search page, **Cancel** under the *Request ride* button, the **X** on the quote and pin pages, and a tap on the *Ride* tab all cancel the planning and show the home screen.
 Nothing is published until the rider taps *Request ride* (or asks a driver from the list). The tab bar is visible on every screen, including the quote and *Finding your driver*.
 
-**The quote screen** shows the route, *When*, *Driver preference*, **Total additional passengers** (a stepper, 0–4, sent with the request so the driver knows how many people get in), **Notes for driver** and a plain **Request ride** button (no price on it).
+**The quote screen** shows the route, *When*, *Driver preference*, **Avoid tolls** (a checkbox with no description; the request carries `avoidTolls: true` only when it is checked), **Total additional passengers** (a stepper, 0–4, sent with the request so the driver knows how many people get in), **Notes for driver** and a plain **Request ride** button (no price on it). With **Avoid tolls** checked, the route and the fare use a toll-free Valhalla route; if no toll-free route is found, *Request ride* is disabled and the screen says to uncheck it. The driver app must read `avoidTolls` and use a toll-free route for the ride.
 **Browsing drivers.** With more than one driver nearby, **Request ride** opens the list *Choose a driver* (cheapest first; it scrolls) instead of sending the request to everyone. Each row has the driver's name, the price of this trip at their rates and **Request**. **See map** shows the drivers around the pickup with the price next to each one; tapping a price opens a card with **Request <name>**. Asking a driver sends the request to that driver ALONE (the request carries `directed: true` and is sealed only to that driver; `AudienceSync` never spreads it). The driver sees *This rider chose you* and can **Accept** (the rider then sees the reply and chooses as before) or **Decline**: a decline is a signed event (kind 30112, `driverDeclineEvent`) that the rider's app shows ("<name> declined your ride request", and *Declined* on the list). The rider can then ask another driver, also while a first one is still thinking, or close the request. With one driver or none, the request is sent to the drivers who are online, as before.
 
 **Choosing a driver.** Each reply shows the driver's photo, name, the vouch badge (when someone you vouch for knows and trusts them), car, plate, **gender (when the driver gave one)**, price, rates and mint. The rider taps **Choose**, or
@@ -168,7 +168,7 @@ only what the ride has earned so far, and most of it is already paid.
 - **Add stop / update fare (a stop, or a new destination, during the ride).** The rider asks (kind 30099) and sees first the **estimated change in the fare**: a dashed box with
   "≈", for example *≈ +$2.40* and *+1.8 mi · +4 min* (or *≈ −$11.52* for a shorter way). The driver sees the same estimate on the request, and can **accept** the stop (kind 30100) or **finish the ride**
   instead. If the driver accepts, the ride keeps being charged by distance and time at the driver's rates, and the **estimated total** in the fare card is priced again for the new route
-  (see *During a trip*). How it is estimated: the route from the car through the places still ahead is compared with the same route with the new place in it (OSRM, like the map);
+  (see *During a trip*). How it is estimated: the route from the car through the places still ahead is compared with the same route with the new place in it (OSRM, or Valhalla when the ride avoids tolls, like the map);
   the fare change is per mile × the change in miles + per minute × the change in minutes at the driver's frozen rates. The base rate does not change. No route or no price: no number is shown.
 - **The driver's rates cannot change after the ride has started.** The rates and the ecash mint are copied into the driver's offer. When the rider
   chooses that offer, they are frozen for the ride. The driver app locks its rates while a ride runs, and a new offer sent later changes nothing
@@ -568,7 +568,7 @@ There is no escrow, so the apps keep a signed trail:
 | The default mint for a new wallet | `VITE_DEFAULT_MINT` in `.env` (default in `src/config/services.js`) |
 | Supported currencies | `src/lib/currency.js` |
 | Relays | `src/config/relays.js` (also editable in the app) |
-| Map tiles, address search, routing | `.env` (see `env.example`); defaults in `src/config/services.js` |
+| Map tiles, address search, routing (OSRM and Valhalla) | `.env` (see `env.example`); defaults in `src/config/services.js` |
 | Emergency number, arrival radius | `src/config/settings.js` |
 | Colors | `src/theme.js`, Tailwind classes (built into the app's CSS: `tailwind.config.js`, `src/tailwind.css`) |
 
@@ -578,7 +578,7 @@ earnings, privacy, history, Lightning invoices, geocoding, publishing and the ou
 pickup changes, the odometer (and the GPS-gap rule) and the 5% distance rule, stage times, relay subscription calls, old flat offers read as standard, driver rates and currencies, exact amounts, gender
 ordering, driver requirements, expiry of unmatched requests, blocking both ways, declined offers (`requests`), **the recovery phrase and getting the ecash back from it (`recovery`, `restore`)**, **vouches (reading an npub, the list event, the one-hop badge, its words, the sync)**, **the tick schedule, missed payments, the final tick, the start code, the 150 m arrival rule, silence and sign-of-life
 rules, waivers, extra stops and frozen rates, the ecash wallet (funding, paying, redeeming, crash recovery, cash out, paying an invoice, taking a token back, encrypted saving), the automatic cash out rules (`autocashout`), a whole ride's money between a rider and a
-driver, and the real `@cashu/cashu-ts` client against a local test mint that does the real blind-signature maths**.
+driver, and the real `@cashu/cashu-ts` client against a local test mint that does the real blind-signature maths**. It also checks the toll-free route (`tolls`).
 
 Also `payqueue` (every ride that still owes is paid, and a tick is offered again until the driver answers), `walletsafety` (a token on screen is not taken back,
 spent coins are set aside rather than deleted, a deposit address is kept, a save is retried) and `csp` (the frame-blocking headers the build writes).
@@ -598,13 +598,14 @@ NostrRide is split into two standalone apps: `trevthom/nostr-ride-rider` (this a
 Each has its own app shell, package, build and tests, and no Ride / Drive switch. They find each other through Nostr relays and use the same event formats.
 
 ## Self-hosting map services
-The app uses three free public services. They are fine for development but not for real traffic.
+The app uses four free public services. They are fine for development but not for real traffic.
 
 | Need | Today | Self-hosted option |
 |---|---|---|
 | Map tiles | `tile.openstreetmap.org` | See below |
 | Address search | Photon (`photon.komoot.io`) | Run your own [Photon](https://github.com/komoot/photon) (needs an OpenSearch index; a country extract is a few GB) |
 | Driving routes | OSRM demo server | Run [OSRM](https://github.com/Project-OSRM/osrm-backend) in Docker on a regional `.osm.pbf` (RAM scales with the region) |
+| Toll-free routes | Valhalla (`valhalla1.openstreetmap.de`) | Run [Valhalla](https://github.com/valhalla/valhalla) with an OSM extract; the app asks its `/route` endpoint with `use_tolls: 0` |
 
 **Map tiles — three ways to host them**
 1. **Raster tile server** (closest to what the app uses now). Run the Docker image
@@ -619,7 +620,7 @@ The app uses three free public services. They are fine for development but not f
 3. **Paid or hosted provider** (MapTiler, Stadia, Mapbox). No servers to run; you pay by usage.
 
 Whichever you choose, keep the "© OpenStreetMap contributors" credit (the data licence requires it).
-To switch, copy `env.example` to `.env`, set `VITE_TILE_URL` (and `VITE_PHOTON_URL`, `VITE_OSRM_URL`), and run `npm run build` again. No code changes are needed for a raster server or a hosted provider; PMTiles needs a small code change in `MapView.jsx`.
+To switch, copy `env.example` to `.env`, set `VITE_TILE_URL` (and `VITE_PHOTON_URL`, `VITE_OSRM_URL`, `VITE_VALHALLA_URL`), and run `npm run build` again. No code changes are needed for a raster server or a hosted provider; PMTiles needs a small code change in `MapView.jsx`.
 
 ## Trying it on an iPhone without the Apple Developer Program
 - **Easiest: install it as a web app (PWA).** Put `dist/` on any free HTTPS host (Netlify Drop, Cloudflare Pages, Vercel, GitHub Pages) or run `npm run dev` and expose it with a tunnel (`cloudflared tunnel --url http://localhost:5173`, or ngrok). Open the https link in **Safari**, tap Share → **Add to Home Screen**. GPS, the map, payments, the service worker, offline start and the screen wake lock (iOS 16.4+) all work. Plain `http://` LAN addresses do NOT work: Safari only allows location on https.
@@ -643,6 +644,8 @@ To switch, copy `env.example` to `.env`, set `VITE_TILE_URL` (and `VITE_PHOTON_U
   and a cancel rate on profiles.
 
 ## Changelog
+
+- **Avoid tolls, and quieter money copy** — (1) The quote screen has **Avoid tolls**, a checkbox with no description. With it checked, the route and the fare use a toll-free Valhalla route, and the request carries `avoidTolls: true` for the driver app. If no toll-free route is found, *Request ride* is disabled and says to uncheck it; the app never falls back to a toll route. (2) The three helper lines “Add ecash here before you ride.”, “Your money is paid in sats, at the bitcoin price of the moment the charge happens.” and “Your ecash is saved on this device, encrypted with your key. … Logging out keeps it here.” are gone. New: `VALHALLA_URL` / `VITE_VALHALLA_URL`, `decodePolyline`, `rideAvoidTolls`; test `tolls`. The driver app still needs to read `avoidTolls` and route the ride around tolls.
 
 > Older entries describe earlier releases, including the period when Ride and Drive shared one app. They are kept as history and may name screens, paths or commands that no longer exist. The current sections above describe this repository.
 

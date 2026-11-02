@@ -51,6 +51,10 @@ export function isRideExpired(content, createdAtSec) {
 // A stable id for a ride across all its versions: "<rider>:<d-tag>".
 export const rideKey = (request) => `${request.pubkey}:${dtagOf(request)}`;
 
+// The rider asked for a route without tolls. The flag is optional, so an
+// older request (or a false value) is treated as the normal route.
+export const rideAvoidTolls = (request) => parse(request)?.avoidTolls === true;
+
 // Every version of one ride (same author + d-tag), newest first.
 export function rideVersions(request) {
   return cached("v:" + request.id, () => findVersions(request)).slice();

@@ -11,6 +11,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRider } from "../state/RiderContext.jsx";
 import { searchAddress } from "../../lib/geocode.js";
 import { STOP_NOTE_METERED } from "../../lib/stops.js";
+import { rideAvoidTolls } from "../../lib/rides.js";
 import { Modal, Spinner } from "../../ui/Parts.jsx";
 import Button from "../../ui/Button.jsx";
 import Icon from "../../ui/Icon.jsx";
@@ -96,7 +97,7 @@ export default function AddStop({ request, from, ahead, terms, onClose }) {
         ))}
       </ul>
 
-      {picked && <ChangeEstimate className="mt-3" from={from} ahead={ahead} mode={mode} place={picked} terms={terms} />}
+      {picked && <ChangeEstimate className="mt-3" from={from} ahead={ahead} mode={mode} place={picked} terms={terms} avoidTolls={rideAvoidTolls(request)} />}
       <p className="text-xs rounded-xl px-3 py-2 mt-3 text-neutral-600 bg-neutral-100" role="note">
         {STOP_NOTE_METERED} Your driver is told this too.
       </p>

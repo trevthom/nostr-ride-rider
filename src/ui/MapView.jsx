@@ -5,8 +5,9 @@
 //
 //  Props (all optional):
 //    pickup, dropoff   {lat,lng}  black dot / black square pins
-//    route             [{lat,lng}…] draw the OSRM driving route through these
+//    route             [{lat,lng}…] draw the driving route through these
 //    routeDashed       dashed line (e.g. driver → pickup)
+//    avoidTolls        ask for a toll-free route (Valhalla); no toll route fallback
 //    cars              [{pubkey,lat,lng,name}]  car icons (heading follows movement)
 //    me                {lat,lng}  blue "you are here" dot
 //    pills, onPill     [{id,lat,lng,text}] price tags (open requests); tap → onPill(id)
@@ -14,7 +15,7 @@
 //    fitKey            string — the view re-fits to everything shown whenever
 //                      this changes (NOT on every car move, so the user can pan)
 //    padBottom/padTop  pixels covered by the bottom sheet / top bar
-//    onRoute           ({miles, minutes, straight}) when the route resolves
+//    onRoute           ({miles, minutes, straight, noTollFreeRoute?}) when the route resolves
 //    height            fixed pixel height; omit to fill the parent
 //    navigation        trip mode (turns on the props below)
 //    follow            {lat,lng,id} the vehicle to follow; id = that car's `pubkey`
@@ -111,7 +112,7 @@ const ptKey = (p) => `${p.lat.toFixed(5)},${p.lng.toFixed(5)}`;
 const valid = (p) => p && Number.isFinite(p.lat) && Number.isFinite(p.lng);
 
 const MapView = forwardRef(function MapView(
-  { pickup, dropoff, route, routeDashed = false, cars, me, pills, onPill, pulse = false, fitKey = "", padBottom = 60, padTop = 70, onRoute, height, navigation = false, follow = null },
+  { pickup, dropoff, route, routeDashed = false, avoidTolls = false, cars, me, pills, onPill, pulse = false, fitKey = "", padBottom = 60, padTop = 70, onRoute, height, navigation = false, follow = null },
   ref
 ) {
   const boxRef = useRef(null);
@@ -299,7 +300,7 @@ const MapView = forwardRef(function MapView(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [carsKey]);
 
-  // Route (fetched only when its points change).
+  // Route (fetched when its points or the toll preference change).
   const routeKey = route && route.length >= 2 && route.every(valid) ? route.map(ptKey).join(";") : "";
   useEffect(() => {
     const g = layers.current.route;
@@ -312,9 +313,9 @@ const MapView = forwardRef(function MapView(
       let latlngs = route.map((p) => [p.lat, p.lng]);
       let info = null;
       try {
-        const r = await getDrivingRoute(route);
+        const r = await getDrivingRoute(route, { avoidTolls });
         if (r?.coordinates?.length) {
-          latlngs = r.coordinates.map((c) => [c[1], c[0]]); // OSRM is [lng,lat]
+          latlngs = r.coordinates.map((c) => [c[1], c[0]]); // OSRM/Valhalla is [lng,lat]
           info = { miles: metersToMiles(r.distanceMeters), minutes: Math.max(1, Math.round(r.durationSeconds / 60)), straight: false };
         }
       } catch { /* fall back to a straight line */ }
@@ -322,7 +323,7 @@ const MapView = forwardRef(function MapView(
       if (!info) {
         let miles = 0;
         for (let i = 1; i < route.length; i++) miles += haversineDistance(route[i - 1].lat, route[i - 1].lng, route[i].lat, route[i].lng);
-        info = { miles: miles * 1.3, minutes: Math.max(1, Math.round((miles * 1.3 / 24) * 60)), straight: true };
+        info = { miles: miles * 1.3, minutes: Math.max(1, Math.round((miles * 1.3 / 24) * 60)), straight: true, ...(avoidTolls ? { noTollFreeRoute: true } : {}) };
       }
       try {
         L.polyline(latlngs, { color: "#fff", weight: routeDashed ? 8 : 9, opacity: 0.9, lineCap: "round" }).addTo(g);
@@ -333,7 +334,7 @@ const MapView = forwardRef(function MapView(
       setRouteTick((t) => t + 1);
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [routeKey, routeDashed]);
+  }, [routeKey, routeDashed, avoidTolls]);
 
   // Re-fit when asked to (fitKey), once a new route has been drawn, and when
   // the sheet over the map changes size by a real amount.

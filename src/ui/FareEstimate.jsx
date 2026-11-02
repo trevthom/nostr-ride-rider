@@ -21,9 +21,9 @@ const minutesText = (m) => `${sign(m)}${Math.round(Math.abs(m))} min`;
 const Approx = () => <span className="text-neutral-400 mr-1" aria-hidden="true">≈</span>;
 
 // The ride's estimated total. `trip` = { pickup, stops, dropoff } as the accepted changes leave it; `changed` = a stop or a new destination was accepted.
-export function EstimatedTotal({ baseSats, trip, changed, changeKinds = [], terms, className = "" }) {
+export function EstimatedTotal({ baseSats, trip, changed, changeKinds = [], terms, avoidTolls = false, className = "" }) {
   const { btcPrice, priceFor } = useApp();
-  const { sats, deltaSats } = useTotalEstimate({ baseSats, trip, changed, terms, price: terms ? priceFor(terms.currency) : null });
+  const { sats, deltaSats } = useTotalEstimate({ baseSats, trip, changed, terms, price: terms ? priceFor(terms.currency) : null, avoidTolls });
   if (!(sats > 0)) return null;
   const what = changeKinds.length > 1 ? "your changes" : changeKinds[0] === "destination" ? "the new destination" : "the added stop";
   return (
@@ -43,9 +43,9 @@ export function EstimatedTotal({ baseSats, trip, changed, changeKinds = [], term
 }
 
 // What one proposed change does to the fare. Shows nothing when there is no route or no price (never a made-up number).
-export function ChangeEstimate({ from, ahead, mode, place, terms, className = "" }) {
+export function ChangeEstimate({ from, ahead, mode, place, terms, avoidTolls = false, className = "" }) {
   const { btcPrice, priceFor } = useApp();
-  const est = useChangeEstimate({ from, ahead, mode, place, terms, price: terms ? priceFor(terms.currency) : null });
+  const est = useChangeEstimate({ from, ahead, mode, place, terms, price: terms ? priceFor(terms.currency) : null, avoidTolls });
   if (est.status === "idle" || est.status === "error") return null;
   const loading = est.status === "loading";
   return (

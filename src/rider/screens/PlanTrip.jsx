@@ -6,7 +6,8 @@
 //    pin     the pickup OR the drop-off set by dragging the map under a pin (components/PinPicker; plan.pinField says which)
 //    quote   route on the map and the drivers nearby, each with the cost of THIS trip at their own rates (name · price). The fare is
 //            always the chosen driver's own rates (base, per mile, per minute), paid tick by tick. Now/Later, driver preference,
-//            "Total additional passengers" (a stepper; the driver is told), "Notes for driver" → Request ride.
+//            "Avoid tolls" (the driver is told), "Total additional passengers" (a stepper; the driver is told),
+//            "Notes for driver" → Request ride.
 //            With more than one driver nearby Request ride opens
 //    drivers the list of drivers (and "See map") to ask one of them (components/DriverBrowser.jsx)
 //  Going back: the back arrow on the search page returns to where it was opened from (plan.from: the
@@ -152,16 +153,17 @@ function Quote() {
   const minSats = lowBalanceSats(usdPrice);
   const walletSats = ecash ? ecash.total() : ecashOff ? 0 : null;
   const fundsOk = walletSats == null || hasRideFunds(walletSats, usdPrice);
-  const [route, setRoute] = useState(null); // { miles, minutes, straight }
+  const [route, setRoute] = useState(null); // { miles, minutes, straight, noTollFreeRoute? }
   const [error, setError] = useState("");
   const mapRef = useRef(null);
+  const avoidTolls = plan.avoidTolls === true;
 
-  const key = `${pickup.lat},${pickup.lng}|${dropoff.lat},${dropoff.lng}`;
+  const key = `${pickup.lat},${pickup.lng}|${dropoff.lat},${dropoff.lng}|${avoidTolls}`;
   useEffect(() => setRoute(null), [key]);
 
   // Use the trip as the request will publish it (miles to a tenth), so a driver's typical fare
   // works out to the same cents on both screens.
-  const trip = route && { miles: Math.round(route.miles * 10) / 10, minutes: route.minutes };
+  const trip = route && !route.noTollFreeRoute ? { miles: Math.round(route.miles * 10) / 10, minutes: route.minutes } : null;
   const quote = trip ? quoteFare(trip, usdPrice) : null; // the app's own rates (the fallback)
   const appSats = quote ? typicalSats(null, trip.miles, trip.minutes, { USD: usdPrice }) ?? quote.sats : 0; // the app's own rates (only when no driver is nearby)
   const eta = nearestDriverEta(pickup);
@@ -179,7 +181,7 @@ function Quote() {
       if (t > Date.now() + 7 * 86400000) return setError("Scheduled rides can be at most 1 week ahead.");
       if (t < Date.now() - 60000) return setError("Pick a time in the future.");
     }
-    const common = { pickup, dropoff, when: plan.when, notes: plan.notes.trim(), passengers: plan.passengers || 0, miles: route.miles, minutes: route.minutes };
+    const common = { pickup, dropoff, when: plan.when, notes: plan.notes.trim(), passengers: plan.passengers || 0, avoidTolls, miles: route.miles, minutes: route.minutes };
     const ask = (pk) => {
       const d = drivers.find((x) => x.pubkey === pk);
       const sats = d ? driverFare(d, trip, prices) : null;
@@ -203,6 +205,7 @@ function Quote() {
           pickup={pickup}
           dropoff={dropoff}
           route={[pickup, dropoff]}
+          avoidTolls={avoidTolls}
           cars={drivers}
           fitKey={key}
           padBottom={430}
@@ -236,7 +239,7 @@ function Quote() {
           <div className="flex-1 min-w-0">
             <p className="font-bold text-[17px] leading-tight">NostrRide</p>
             <p className="text-sm text-neutral-600">
-              {route ? `${route.minutes} min · ${formatDistance(route.miles)}${route.straight ? " (est.)" : ""}` : "Finding the best route…"}
+              {route?.noTollFreeRoute ? "No toll-free route found" : route ? `${route.minutes} min · ${formatDistance(route.miles)}${route.straight ? " (est.)" : ""}` : "Finding the best route…"}
             </p>
             <p className="text-xs text-neutral-500">
               {timed ? "Scheduled" : eta ? `Driver about ${eta} min away` : "No drivers online yet"}
@@ -285,6 +288,16 @@ function Quote() {
 
         <GenderPref className="mt-4" />
 
+        <label className="flex items-center gap-3 mt-4 text-sm font-semibold">
+          <input
+            type="checkbox"
+            checked={avoidTolls}
+            onChange={(e) => setPlan({ avoidTolls: e.target.checked })}
+            className="w-4 h-4 accent-black"
+          />
+          Avoid tolls
+        </label>
+
         {/* How many people get in besides the rider. The driver sees it on the request card before accepting. */}
         <div className="flex items-center gap-4 mt-4">
           <p className="text-sm font-semibold flex-1">Total additional passengers:</p>
@@ -326,10 +339,11 @@ function Quote() {
 
         <RideFundsPrompt className="mt-3" />
         <WalletPrompt className="mt-3" />
+        {route?.noTollFreeRoute && <p className="text-red-600 text-sm mt-2" role="alert">No toll-free route found. Uncheck Avoid tolls to request a different route.</p>}
         {error && <p className="text-red-600 text-sm mt-2">{error}</p>}
         <StickyActions className="mt-4">
           <Button onClick={request} disabled={!quote || !fundsOk}>
-            {!quote ? "Finding route…" : "Request ride"}
+            {route?.noTollFreeRoute ? "No toll-free route" : !quote ? "Finding route…" : "Request ride"}
           </Button>
         </StickyActions>
         <Button variant="secondary" className="mt-2" onClick={resetPlan}>Cancel</Button>
@@ -349,7 +363,7 @@ function Browse() {
     const d = drivers.find((x) => x.pubkey === pk);
     if (!d) return;
     const sats = driverFare(d, trip, prices);
-    requestRide({ pickup, dropoff, when: plan.when, notes: plan.notes.trim(), passengers: plan.passengers || 0, miles: route.miles, minutes: route.minutes, fareSats: sats ?? 0, suggestedSats: sats ?? 0, to: [pk], ratesSeen: { [pk]: ratesOrApp(d.rates) } });
+    requestRide({ pickup, dropoff, when: plan.when, notes: plan.notes.trim(), passengers: plan.passengers || 0, avoidTolls: plan.avoidTolls === true, miles: route.miles, minutes: route.minutes, fareSats: sats ?? 0, suggestedSats: sats ?? 0, to: [pk], ratesSeen: { [pk]: ratesOrApp(d.rates) } });
   };
   return (
     <DriverBrowser

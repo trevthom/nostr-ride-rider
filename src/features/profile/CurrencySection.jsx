@@ -15,9 +15,6 @@ export default function CurrencySection({ locked = false }) {
   return (
     <section>
       <SectionLabel>Currency</SectionLabel>
-      <p className="text-sm text-neutral-500 mb-2">
-        Your money is paid in sats, at the bitcoin price of the moment the charge happens.
-      </p>
       <select aria-label="Local currency" value={currency} onChange={(e) => setCurrency(e.target.value)} disabled={locked} className={inputCls}>
         {Object.entries(CURRENCIES).map(([code, c]) => <option key={code} value={code}>{code} · {c.name} ({c.symbol})</option>)}
       </select>

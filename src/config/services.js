@@ -1,5 +1,5 @@
 // ════════════════════════════════════════════════════════════
-//  SERVICES — The three outside map services the apps use. Each has a free
+//  SERVICES — The four outside map services the apps use. Each has a free
 //  public default (fine for development, not for real traffic). To switch
 //  to your own servers, set these in a `.env` file at the repo root, then
 //  rebuild (see .env.example and docs/index.md, "Self-hosting map services"):
@@ -7,6 +7,7 @@
 //    VITE_TILE_ATTRIBUTION  credit line shown on the map
 //    VITE_PHOTON_URL        base URL of a Photon geocoder
 //    VITE_OSRM_URL          base URL of an OSRM routing server
+//    VITE_VALHALLA_URL      base URL of a Valhalla server (toll-free routes)
 //    VITE_DEFAULT_MINT      the ecash (Cashu) mint a new driver starts with (see lib/mints.js)
 // ════════════════════════════════════════════════════════════
 
@@ -17,6 +18,7 @@ export const TILE_URL = env.VITE_TILE_URL || "https://tile.openstreetmap.org/{z}
 export const TILE_ATTRIBUTION = env.VITE_TILE_ATTRIBUTION || "© OpenStreetMap contributors";
 export const PHOTON_URL = clean(env.VITE_PHOTON_URL || "https://photon.komoot.io");
 export const OSRM_URL = clean(env.VITE_OSRM_URL || "https://router.project-osrm.org");
+export const VALHALLA_URL = clean(env.VITE_VALHALLA_URL || "https://valhalla1.openstreetmap.de");
 
 // The ecash mint a driver is paid at until they choose another in Account. A mint holds the money behind
 // ecash, so it must be one you trust: set VITE_DEFAULT_MINT before you launch. This public mint (Minibits) is only a

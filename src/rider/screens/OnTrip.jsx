@@ -32,7 +32,7 @@ import { useRider } from "../state/RiderContext.jsx";
 import { subscribeRideLocation } from "../../nostr/live.js";
 import { haversineDistance } from "../../lib/geo.js";
 import { pickupEta, isLowBalance, offerEstimate } from "../../lib/fare.js";
-import { rideConfirm, rideDriver, rideStage, rideTimes } from "../../lib/rides.js";
+import { rideConfirm, rideDriver, rideStage, rideTimes, rideAvoidTolls } from "../../lib/rides.js";
 import { offerPlate } from "../../lib/privacy.js";
 import { offerFrom } from "../../lib/trips.js";
 import MapView from "../../ui/MapView.jsx";
@@ -103,6 +103,7 @@ export default function OnTrip({ request, trip }) {
   const { pickup } = trip;
   const dropoff = full?.dropoff || trip.dropoff;
   const key = rideKey(request);
+  const avoidTolls = rideAvoidTolls(request);
   const [passed, setPassed] = useState(() => getSetting("stopsPassed", {})[key] || 0);
   useEffect(() => {
     if (stage !== "riding" || !loc || !stops[passed]) return;
@@ -206,6 +207,7 @@ export default function OnTrip({ request, trip }) {
           dropoff={dropoff}
           route={route}
           routeDashed={stage !== "riding"}
+          avoidTolls={avoidTolls}
           onRoute={setRouteInfo}
           cars={loc ? [{ pubkey: driverPubkey || "driver", lat: loc.lat, lng: loc.lng }] : []}
           me={stage === "riding" ? null : myPosition}
@@ -285,7 +287,7 @@ export default function OnTrip({ request, trip }) {
               <Money sats={money?.paid || 0} />
             </div>
             {riding && contentOffer && (
-              <EstimatedTotal className="mt-2" baseSats={quotedSats ?? contentOffer.priceSats} trip={full} changed={accepted.length > 0} changeKinds={changeKinds} terms={terms} />
+              <EstimatedTotal className="mt-2" baseSats={quotedSats ?? contentOffer.priceSats} trip={full} changed={accepted.length > 0} changeKinds={changeKinds} terms={terms} avoidTolls={avoidTolls} />
             )}
             <FareBreakdown ledger={money?.ledger} paidSats={money?.paid || 0} className="mt-3 pt-3 border-t border-neutral-200" />
             <p className="text-xs text-neutral-500 mt-2">
@@ -326,7 +328,7 @@ export default function OnTrip({ request, trip }) {
             <p className="text-sm text-amber-800 bg-amber-50 rounded-xl px-3 py-2">
               Waiting for your driver to accept {pendingStop.mode === "destination" ? "the new destination" : "the extra stop"}: {pendingPlace?.name || ""}.
             </p>
-            <ChangeEstimate className="mt-2" from={loc || myPosition} ahead={waypoints} mode={pendingStop.mode} place={pendingPlace} terms={terms} />
+            <ChangeEstimate className="mt-2" from={loc || myPosition} ahead={waypoints} mode={pendingStop.mode} place={pendingPlace} terms={terms} avoidTolls={avoidTolls} />
           </div>
         )}
 

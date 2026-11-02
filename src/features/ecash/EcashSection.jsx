@@ -135,7 +135,6 @@ export default function EcashSection({ locked = false, children = null }) {
   return (
     <section>
       <SectionLabel>Ecash wallet</SectionLabel>
-      <p className="text-sm text-neutral-500 mb-3">Add ecash here before you ride.</p>
       {!ecash && <p className="text-sm text-neutral-500" role="status">{ecashWaiting ? "Your wallet is open in another window of this browser. Close that window, or use it. This one opens the wallet as soon as the other lets go." : "Loading your wallet…"}</p>}
       {ecash && (
         <>
@@ -205,9 +204,6 @@ export default function EcashSection({ locked = false, children = null }) {
             <p className="text-xs text-neutral-500 mt-1">{locked ? "Not while a ride is running." : "Use this on a phone you are about to lose, sell or stop trusting. The money stays at the mint. Restore my wallet brings it back with your 12 words."}</p>
           </div>
           {msg && <p className="text-sm text-neutral-700 mt-3" role="status">{msg}</p>}
-          <p className="text-xs text-neutral-500 mt-3">
-            Your ecash is saved on this device, encrypted with your key. If you lose the phone, your 12 recovery words bring it back (Restore my wallet). Logging out keeps it here.
-          </p>
         </>
       )}
       {adding && <AddFunds mint={mint} onClose={() => setAdding(false)} />}
