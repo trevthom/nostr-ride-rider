@@ -397,7 +397,10 @@ still calls unspent (NUT-09), and the money is back. No server, no account, no r
 - **Counting miles** (`lib/odometer.js`): a fix worse than 50 m is skipped; a move smaller than 6 m (or half the accuracy) is GPS wobble; a jump faster than
   120 mph is a glitch. Straight lines between fixes cut corners, so a track with few fixes reads a little low.
 - **Time** comes from the signed stage markers. A marker is replaceable on a relay (only the newest stays), so each carries the earlier times
-  (`at`, and `arrivedAt` on the "riding" marker). A time claimed in a marker is believed only if it is within 10 minutes of the event's timestamp.
+  (`at`, and `arrivedAt` on the "riding" marker). A time claimed in a marker is believed only if it is within 10 minutes of the event's timestamp,
+  and the **start** is believed only if it is not *earlier* than the marker: a phone clock may run slow (a start a few minutes
+  late is accepted), but an earlier start would charge the rider for time that did not run, so it is pulled forward to the marker's
+  own time. The meter also never starts before the rider's own signed confirmation that the start code was right.
 - The rider's odometer is saved on the device (the driver app keeps its own), so a reload keeps the count.
 - The meter **feeds the payments**: the ticks for each mile and the final tick use the distance both apps show (see [Pay as you ride](#pay-as-you-ride-ecash-and-finishing-a-ride)).
   A GPS gap of up to 10 minutes is filled with a straight line between the two fixes around it; after a longer gap the new fix only restarts the count.
@@ -477,6 +480,12 @@ Every event carries the app tag `["t","nostrride"]` because kind numbers like 30
   because a driver reads a note before accepting — and anyone may advertise as a driver. Keep the exact address, a gate code or a phone number out of it.
   A relay can still see who received a wrap, and a driver can repeat what they read.
 - Your **vouch list** is public: anyone can see which npubs you know and trust.
+- A **profile photo** (and a vehicle photo) is shown only when it is embedded in the profile (`data:image/…`); a picture that points at
+  another address is not loaded, because fetching it would tell that address who is looking. The extra vehicle photos already followed this
+  rule, and the `<img>` tags send no referrer.
+- A **shared-trip link** may name only public `wss://` relays: loopback, private and link-local addresses are refused (a crafted `#r=`
+  could otherwise make the page probe the viewer's own network), and plaintext `ws://` is allowed only for a local relay while the app itself
+  is served from localhost.
 - Looking up an address from GPS sends the position (rounded to about 10 m) to the Photon geocoder.
 
 ## Payments
@@ -645,6 +654,16 @@ To switch, copy `env.example` to `.env`, set `VITE_TILE_URL` (and `VITE_PHOTON_U
 
 ## Changelog
 
+- **Security fixes after an audit of the rider app** — (1) **The meter cannot be backdated.** A driver's "riding" marker may claim a
+  start a little *late* (a slow phone clock) but never *earlier* than the marker itself, and never earlier than the rider's signed confirmation
+  that the start code was right; before, a marker could claim a start up to 10 minutes early (10 minutes at 400 sats/min = 4000 sats) with no
+  clock being wrong. (2) **The relay cache is bounded** at 20,000 events (`MAX_EVENTS`): the oldest quarter is dropped and the indexes rebuilt,
+  so a flood of app-tagged events from a public relay cannot grow memory without limit; the re-subscribe and recent-fetch filters now carry a
+  `limit`. (3) **A share link cannot probe the viewer's network:** `parseShareHash` keeps only public `wss://` relays and refuses loopback,
+  private and link-local hosts; plaintext `ws://` is allowed only for a local relay while the page is served from localhost, and `track.html`
+  refuses to run inside a frame, like the main page. (4) **Photos must be embedded:** `getProfile` returns a profile or vehicle picture only
+  when it is a `data:image/` value (as the extra vehicle photos already were), so a remote URL cannot report who viewed a profile; the `<img>`
+  tags also send no referrer. New: `test/audit-fixes.test.mjs`.
 - **Avoid tolls, and quieter money copy** — (1) The quote screen has **Avoid tolls**, a checkbox with no description. With it checked, the route and the fare use a toll-free Valhalla route, and the request carries `avoidTolls: true` for the driver app. If no toll-free route is found, *Request ride* is disabled and says to uncheck it; the app never falls back to a toll route. (2) The three helper lines “Add ecash here before you ride.”, “Your money is paid in sats, at the bitcoin price of the moment the charge happens.” and “Your ecash is saved on this device, encrypted with your key. … Logging out keeps it here.” are gone. New: `VALHALLA_URL` / `VITE_VALHALLA_URL`, `decodePolyline`, `rideAvoidTolls`; test `tolls`. The driver app still needs to read `avoidTolls` and route the ride around tolls.
 
 > Older entries describe earlier releases, including the period when Ride and Drive shared one app. They are kept as history and may name screens, paths or commands that no longer exist. The current sections above describe this repository.

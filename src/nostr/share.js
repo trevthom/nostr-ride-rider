@@ -32,7 +32,25 @@ export function shareLink(baseUrl, token, relays = getRelays()) {
   return `${baseUrl}#k=${token}&r=${r}`;
 }
 
-// Read the link's #fragment: { token, relays } or null. Relays must be ws(s)://.
+// A relay named by a link must be an ordinary public wss:// relay. Plaintext ws:// is allowed only for a local
+// relay while the page itself is served from localhost (development). Loopback, private and link-local hosts are
+// never contacted because of a link: a crafted #r= could otherwise probe the viewer's own network.
+const WSS_PUBLIC = /^wss:\/\/[a-z0-9.-]+(:\d+)?(\/[\x21-\x7e]*)?$/i;
+const hostOf = (u) => { try { return new URL(u).hostname.replace(/^\[|\]$/g, ""); } catch { return ""; } };
+const isLoopback = (h) => h === "localhost" || h === "127.0.0.1" || h === "::1";
+const isPrivate = (h) => h === "0.0.0.0" || isLoopback(h) || /^127\./.test(h) || /^10\./.test(h) || /^192\.168\./.test(h)
+  || /^169\.254\./.test(h) || /^172\.(1[6-9]|2\d|3[01])\./.test(h) || /\.(local|internal|localhost)$/i.test(h);
+const localPage = () => { try { return typeof window !== "undefined" && isLoopback(window.location.hostname || ""); } catch { return false; } };
+
+function relayAllowed(r) {
+  const host = hostOf(r);
+  if (!host) return false;
+  if (/^ws:\/\//i.test(r)) return localPage() && isLoopback(host); // a local relay, in local development only
+  if (!WSS_PUBLIC.test(r)) return false;
+  return !isPrivate(host);
+}
+
+// Read the link's #fragment: { token, relays } or null.
 export function parseShareHash(hash) {
   const params = new URLSearchParams(String(hash || "").replace(/^#/, ""));
   const token = (params.get("k") || "").toLowerCase();
@@ -40,7 +58,7 @@ export function parseShareHash(hash) {
   const relays = (params.get("r") || "")
     .split(",")
     .map((r) => { try { return decodeURIComponent(r); } catch { return ""; } })
-    .filter((r) => /^wss?:\/\/[^\s]+$/i.test(r))
+    .filter(relayAllowed)
     .slice(0, 5);
   return { token, relays };
 }

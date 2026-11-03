@@ -199,18 +199,28 @@ function computeTimes(request) {
   out.confirmedAt = accept ? accept.created_at * 1000 : null;
   const started = riderStarted(request);
   const near = (claim, e) => (Number.isFinite(claim) && Math.abs(claim - e.created_at * 1000) <= 600000 ? claim : null);
+  // The START is money: a marker may claim it a little LATE (a slow phone clock), never EARLY. An earlier start
+  // only ever bills the rider for time that did not run, so clock skew may not move it backwards.
+  const nearStart = (claim, e) => {
+    const t = e.created_at * 1000;
+    return Number.isFinite(claim) && claim >= t && claim - t <= 600000 ? claim : null;
+  };
   const earliest = (a, b) => (a == null ? b : b == null ? a : Math.min(a, b));
   relay.query({ kinds: [EVENT_KINDS.RIDE_STAGE], "#e": [...ids], authors: [driver] }).forEach((e) => {
     if (!ids.has(etagOf(e))) return;
     const c = parse(e) || {};
     const own = near(c.at, e) ?? e.created_at * 1000;
+    const startAt = nearStart(c.at, e) ?? e.created_at * 1000;
     if (c.stage === "arrived") out.arrivedAt = earliest(out.arrivedAt, own);
     if (c.stage === "riding" && started) {
-      out.startedAt = earliest(out.startedAt, own);
+      out.startedAt = earliest(out.startedAt, startAt);
       // The time of arrival may be recalled inside the riding marker (it can be older than the event).
       if (Number.isFinite(c.arrivedAt) && c.arrivedAt <= own && own - c.arrivedAt <= 6 * HOUR) out.arrivedAt = earliest(out.arrivedAt, c.arrivedAt);
     }
   });
+  // The rider's own signed "the code was right" is a floor: the meter never starts before it.
+  const codeAt = rideConfirm(request).code?.at;
+  if (out.startedAt != null && Number.isFinite(codeAt)) out.startedAt = Math.max(out.startedAt, codeAt * 1000);
   return out;
 }
 

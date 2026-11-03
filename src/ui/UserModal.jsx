@@ -91,7 +91,7 @@ export default function UserModal() {
             {photos.length > 0 && (
               <div className={`grid gap-2 mb-2 ${photos.length > 1 ? "grid-cols-3" : "grid-cols-1"}`}>
                 {photos.map((src, i) => (
-                  <img key={i} src={src} alt={photos.length > 1 ? `Vehicle photo ${i + 1}` : "Vehicle"} onClick={() => setZoom("veh" + i)}
+                  <img key={i} src={src} alt={photos.length > 1 ? `Vehicle photo ${i + 1}` : "Vehicle"} referrerPolicy="no-referrer" onClick={() => setZoom("veh" + i)}
                     className={`w-full object-cover rounded-xl cursor-zoom-in ${photos.length > 1 ? "h-20" : "h-32"}`} />
                 ))}
               </div>
@@ -116,7 +116,7 @@ export default function UserModal() {
           style={{ zIndex: 10060 }}
           onClick={(e) => { e.stopPropagation(); setZoom(false); }}
         >
-          <img src={String(zoom).startsWith("veh") ? photos[Number(String(zoom).slice(3))] : p?.picture} alt={name} className="max-w-[92vw] max-h-[85vh] object-contain rounded-lg" />
+          <img src={String(zoom).startsWith("veh") ? photos[Number(String(zoom).slice(3))] : p?.picture} alt={name} referrerPolicy="no-referrer" className="max-w-[92vw] max-h-[85vh] object-contain rounded-lg" />
         </div>
       )}
     </div>

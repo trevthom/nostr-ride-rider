@@ -61,6 +61,10 @@ function isOurs(event) {
 }
 
 const PUBLISH_WAIT_MS = 15000; // how long a relay may take to answer a publish
+// The cache is a working set, not an archive: anyone can publish app-tagged events to a public relay, so it is
+// bounded (the oldest quarter is dropped and the indexes are rebuilt). Money-carrying events are never at risk:
+// they live in the outbox until a relay takes them.
+export const MAX_EVENTS = 20000;
 
 class NostrRelay {
   constructor() {
@@ -118,7 +122,7 @@ class NostrRelay {
     try {
       this.sub = this.pool.subscribeMany(
         getRelays(),
-        { kinds: APP_KINDS, "#t": [APP_TAG], since: nowSec() - 86400 }, // only our events, last 24h (ONE filter object, not an array)
+        { kinds: APP_KINDS, "#t": [APP_TAG], since: nowSec() - 86400, limit: 5000 }, // only our events, last 24h (ONE filter object, not an array)
         { onevent: (ev) => this._ingest(ev) }
       );
     } catch (e) {
@@ -130,7 +134,7 @@ class NostrRelay {
     try {
       this.wrapSub = this.pool.subscribeMany(
         getRelays(),
-        { kinds: [GIFT_WRAP], "#p": [this.me.pk], since: nowSec() - 86400 },
+        { kinds: [GIFT_WRAP], "#p": [this.me.pk], since: nowSec() - 86400, limit: 5000 },
         { onevent: (ev) => this._ingest(ev) }
       );
     } catch (e) {
@@ -238,11 +242,12 @@ class NostrRelay {
         kinds: APP_KINDS,
         "#t": [APP_TAG],
         since,
+        limit: 2000,
       });
       this.recentSince = started;
       let added = 0;
       if (this.me) {
-        const wraps = await this.pool.querySync(getRelays(), { kinds: [GIFT_WRAP], "#p": [this.me.pk], since }).catch(() => []);
+        const wraps = await this.pool.querySync(getRelays(), { kinds: [GIFT_WRAP], "#p": [this.me.pk], since, limit: 2000 }).catch(() => []);
         wraps.forEach((w) => { if (this._ingest(w)) added++; });
       }
       events.forEach((e) => { if (this._ingest(e)) added++; });
@@ -499,9 +504,30 @@ class NostrRelay {
         this._index(this.byTag, t[0] + ":" + t[1], event);
       }
     }
+    if (this.events.length > MAX_EVENTS) this._trim();
     this.version++;
     this.listeners.forEach((fn) => { try { fn("__all__", event); } catch { /* ignore */ } });
     return true;
+  }
+
+  // Drop the oldest quarter of the cache and rebuild the indexes (bounded work, bounded memory).
+  _trim() {
+    const drop = this.events.splice(0, Math.ceil(MAX_EVENTS / 4));
+    for (const e of drop) this.seen.delete(e.id);
+    this.order = new Map();
+    this.byKind = new Map();
+    this.byTag = new Map();
+    this.events.forEach((e, i) => {
+      this.order.set(e.id, i);
+      this._index(this.byKind, e.kind, e);
+      const tagged = new Set();
+      for (const t of e.tags || []) {
+        if ((t[0] === "e" || t[0] === "d" || t[0] === "p") && typeof t[1] === "string" && !tagged.has(t[0] + ":" + t[1])) {
+          tagged.add(t[0] + ":" + t[1]);
+          this._index(this.byTag, t[0] + ":" + t[1], e);
+        }
+      }
+    });
   }
 
   // UNTRUSTED add (relay-sourced). Validated before storing so other

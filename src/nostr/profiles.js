@@ -32,6 +32,10 @@ const str = (v) => (typeof v === "string" || typeof v === "number" ? String(v) :
 // The extra vehicle photos: at most 2 more, only small embedded images (a remote address would tell its host who looked).
 const MORE_PHOTO_MAX = 40000;
 const morePhotos = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === "string" && x.startsWith("data:image/") && x.length <= MORE_PHOTO_MAX).slice(0, 2) : []);
+// A profile picture must be embedded too, never fetched from a third-party address: a remote URL would tell its host
+// who looked (the same rule the extra vehicle photos already follow).
+const PHOTO_MAX = 40000;
+const embeddedPhoto = (v) => (typeof v === "string" && v.startsWith("data:image/") && v.length <= PHOTO_MAX ? v : "");
 
 export function getProfile(pubkey) {
   const meta = getMetadata(pubkey);
@@ -42,13 +46,13 @@ export function getProfile(pubkey) {
     comm: (Array.isArray(meta.communication) ? meta.communication : [])
       .filter((c) => c && typeof c === "object")
       .map((c) => ({ platform: str(c.platform), handle: str(c.handle) })),
-    picture: str(meta.picture),
+    picture: embeddedPhoto(meta.picture),
     lud16: str(meta.lud16).trim(), // Lightning address: where riders pay this user
     rates: normalizeRates(meta.rates), // the driver's own "typical fare" rates, or null
     stats: statsOf(meta), // self-reported totals (miles driven), or null
     gender: meta.gender === "male" || meta.gender === "female" ? meta.gender : "", // optional, self-declared
     vehicle: v && {
-      picture: str(v.picture),
+      picture: embeddedPhoto(v.picture),
       morePictures: morePhotos(v.morePictures),
       plateState: str(v.plateState),
       plateNumber: str(v.plateNumber),
